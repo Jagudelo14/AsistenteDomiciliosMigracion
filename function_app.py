@@ -5,7 +5,7 @@ import azure.functions as func
 import logging
 import os
 import json
-from utils import send_text_response, validate_duplicated_message, log_message
+from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client
 from utils_chatgpt import get_classifier
 from typing import Any, Dict, Optional, List
 
@@ -57,6 +57,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse("Sin mensajes para procesar", status_code=200)
         message: Dict[str, Any] = messages[0]
         message_id = message["id"]
+        # Validación mensaje duplicado
         if validate_duplicated_message(message_id):
             logging.info(f"Mensaje duplicado: {message_id}")
             return func.HttpResponse("Mensaje duplicado", status_code=200)
@@ -73,6 +74,14 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(
             f"Clasificación: {classification}, Tipo: {type_text}, Entidades: {entities_text}"
         )
+        # Verificar si el usuario ya existe en la base de datos
+        if not get_client_database(sender):
+            if classification == "info_personal":
+                handle_create_client(sender, entities_text)
+                # Falta envio de menú
+            else:
+                send_text_response(sender,"¡Hola! Parece que eres un nuevo cliente. Por favor, envíame tu *nombre completo* para poder atenderte mejor.\nEjemplo: *Juan Pérez*")
+            return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
         # Responder al usuario
         send_text_response(sender, classification or "Sin clasificación")
         log_message('Finalizando función <ProcessMessage>.', 'INFO')

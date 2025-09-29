@@ -136,3 +136,39 @@ def validate_duplicated_message(message_id: str) -> bool:
     except Exception as e:
         log_message(f'Error al hacer uso de función <ValidarMensajeDuplicado>: {e}.', 'ERROR')
         logging.error(f'Error al hacer uso de función <ValidarMensajeDuplicado>: {e}.')
+
+def get_client_database(numero_celular: str) -> bool:
+    try:
+        """Verifica si un cliente existe en la base de datos por su número de celular."""
+        log_message('Iniciando función <get_client_database>.', 'INFO')
+        logging.info('Iniciando función <get_client_database>.')
+        resultado = execute_query(
+            "SELECT 1 FROM clientes_whatsapp WHERE telefono = %s LIMIT 1;",
+            (numero_celular,)
+        )
+        logging.info(f"Resultado de la consulta: {resultado}")
+        log_message('Finalizando función <get_client_database>.', 'INFO')
+        return len(resultado) > 0
+    except Exception as e:
+        log_message(f'Error al hacer uso de función <get_client_database>: {e}.', 'ERROR')
+        logging.error(f'Error al hacer uso de función <get_client_database>: {e}.')
+        return False
+
+def handle_create_client(sender, datos) -> None:
+    try:
+        """Crea un nuevo cliente en la base de datos."""
+        log_message('Iniciando función <handleCreateClient>.', 'INFO')
+        logging.info('Iniciando función <handleCreateClient>.')
+        nombre = datos.get("nombre", "Desconocido")
+        logging.info(f'Nombre del cliente: {nombre}')
+        logging.info(f'Teléfono (sender): {sender}')
+        execute_query("""
+            INSERT INTO clientes_whatsapp (nombre, telefono)
+            VALUES (%s, %s);
+        """, (nombre, sender))
+        logging.info('Cliente creado exitosamente.')
+        log_message('Finalizando función <handleCreateClient>.', 'INFO')
+    except Exception as e:
+        log_message(f'Error al hacer uso de función <handleCreateClient>: {e}.', 'ERROR')
+        logging.error(f'Error al hacer uso de función <handleCreateClient>: {e}.')
+        raise e
