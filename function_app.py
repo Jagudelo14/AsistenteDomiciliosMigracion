@@ -5,7 +5,7 @@ import azure.functions as func
 import logging
 import os
 import json
-from utils import send_text_response, validate_duplicated_message
+from utils import send_text_response, validate_duplicated_message, log_message
 from utils_chatgpt import get_classifier
 from typing import Any, Dict, Optional, List
 
@@ -43,8 +43,9 @@ def _verify_webhook(req: func.HttpRequest) -> func.HttpResponse:
     return func.HttpResponse("Error de verificación", status_code=403)
 
 def _process_message(req: func.HttpRequest) -> func.HttpResponse:
-    """Procesa los mensajes recibidos desde WhatsApp Business API."""
     try:
+        """Procesa los mensajes recibidos desde WhatsApp Business API."""
+        log_message('Iniciando función <ProcessMessage>.', 'INFO')
         req_body: Dict[str, Any] = json.loads(req.get_body().decode("utf-8"))
         logging.info(f"Cuerpo recibido: {json.dumps(req_body, indent=2)}")
         entry: Dict[str, Any] = req_body.get("entry", [{}])[0]
@@ -74,7 +75,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         )
         # Responder al usuario
         send_text_response(sender, classification or "Sin clasificación")
+        log_message('Finalizando función <ProcessMessage>.', 'INFO')
         return func.HttpResponse("EVENT_RECEIVED", status_code=200)
     except Exception as e:
+        log_message(f'Error al hacer uso de función <ProcessMessage>: {e}.', 'ERROR')
         logging.error(f"⚠️ Error procesando POST: {e}")
         return func.HttpResponse("Error", status_code=400)

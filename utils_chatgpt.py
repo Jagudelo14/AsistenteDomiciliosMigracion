@@ -1,29 +1,33 @@
 # utils_chatgpt.py
-# Last modified: 2025-09-25 by Andrés Bermúdez
+# Last modified: 2025-09-26 by Andrés Bermúdez
 
 from openai import OpenAI
 import logging
 from typing import Any, Optional, Tuple, Dict
 import os
 import json
-from utils import send_text_response, limpiar_respuesta_json
+from utils import send_text_response, limpiar_respuesta_json, log_message
 
 def get_openai_key() -> str:
     try:
         """Obtiene la clave API de OpenAI desde variables de entorno."""
+        log_message('Iniciando función <GetOpenAIKey>.', 'INFO')
         logging.info('Obteniendo clave de OpenAI')
         api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("No se encontró la clave OPENAI_API_KEY en las variables de entorno.")
         logging.info('Clave de OpenAI obtenida')
+        log_message('Finalizando función <GetOpenAIKey>.', 'INFO')
         return api_key
     except Exception as e:
+        log_message(f"Error al obtener la clave de OpenAI: {e}", 'ERROR')
         logging.error(f"Error al obtener la clave de OpenAI: {e}")
         raise
     
 def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str], Dict[str, Any]]:
     try:
         """Clasifica un mensaje de WhatsApp usando un modelo fine-tuned de OpenAI."""
+        log_message('Iniciando función <GetClassifier>.', 'INFO')
         logging.info('Clasificando mensaje')
         classificationPrompt: str = """
         Eres un clasificador de mensajes para un asistente de WhatsApp de un restaurante.
@@ -57,8 +61,10 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             raise ValueError(f"Respuesta inválida, faltan claves: {result}")
         logging.info(f"Respuesta del clasificador: {result}")
         logging.info(f"Intent: {intent}, Type: {type_}, Entities: {entities}")
+        log_message('Finalizando función <GetClassifier>.', 'INFO')
         return intent, type_, entities
     except Exception as e:
+        log_message(f'Error al hacer uso de función <GetClassifier>: {e}.', 'ERROR')
         logging.error(f"Error al clasificar el mensaje: {e}")
         send_text_response(sender, "Lo siento, hubo un error al procesar tu mensaje. ¿Podrías repetirlo?")
         return None, None, {}
