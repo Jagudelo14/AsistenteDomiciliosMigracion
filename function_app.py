@@ -1,12 +1,13 @@
 # function_app.py
-# Last modified: 2025-09-26 by Andrés Bermúdez
+# Last modified: 2025-09-30 by Andrés Bermúdez
 
 import azure.functions as func
 import logging
 import os
 import json
-from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db
+from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database
 from utils_chatgpt import get_classifier
+from utils_subflujos import orquestador_subflujos
 from typing import Any, Dict, Optional, List
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -79,6 +80,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             # Guardar mensaje en base de datos
             save_message_to_db(sender, text, classification, type_text, str(entities_text), tipo_general)
             # Verificar si el usuario ya existe en la base de datos
+            nombre_cliente: str
             if not get_client_database(sender):
                 if classification == "info_personal":
                     nombre_temp: str = handle_create_client(sender, entities_text)
@@ -87,7 +89,10 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 else:
                     send_text_response(sender,"¡Hola! Parece que eres un nuevo cliente. Por favor, envíame tu *nombre completo* para poder atenderte mejor.\nEjemplo: *Juan Pérez*")
                 return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
+            else:
+                nombre_cliente = get_client_name_database(sender)
             # Responder al usuario
+            orquestador_subflujos(sender, classification, nombre_cliente, entities_text)
             send_text_response(sender, classification or "Sin clasificación")
             log_message('Finalizando función <ProcessMessage>.', 'INFO')
             return func.HttpResponse("EVENT_RECEIVED", status_code=200)
