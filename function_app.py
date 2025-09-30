@@ -5,7 +5,7 @@ import azure.functions as func
 import logging
 import os
 import json
-from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client
+from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db
 from utils_chatgpt import get_classifier
 from typing import Any, Dict, Optional, List
 
@@ -56,36 +56,45 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             logging.info("No hay mensajes en el evento. Puede ser una notificación de estado.")
             return func.HttpResponse("Sin mensajes para procesar", status_code=200)
         message: Dict[str, Any] = messages[0]
+        tipo_general = message["type"]
         message_id = message["id"]
         # Validación mensaje duplicado
         if validate_duplicated_message(message_id):
             logging.info(f"Mensaje duplicado: {message_id}")
             return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
-        text: str = message.get("text", {}).get("body", "")
-        if not text:
-            logging.warning("⚠️ Mensaje recibido sin texto.")
-            return func.HttpResponse("Mensaje vacío", status_code=200)
-        # Clasificación con modelo OpenAI
-        classification: str
-        type_text: str
-        entities_text: Dict[str, Any]
-        classification, type_text, entities_text = get_classifier(text, sender)
-        logging.info(
-            f"Clasificación: {classification}, Tipo: {type_text}, Entidades: {entities_text}"
-        )
-        # Verificar si el usuario ya existe en la base de datos
-        if not get_client_database(sender):
-            if classification == "info_personal":
-                handle_create_client(sender, entities_text)
-                # Falta envio de menú
-            else:
-                send_text_response(sender,"¡Hola! Parece que eres un nuevo cliente. Por favor, envíame tu *nombre completo* para poder atenderte mejor.\nEjemplo: *Juan Pérez*")
-            return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
-        # Responder al usuario
-        send_text_response(sender, classification or "Sin clasificación")
-        log_message('Finalizando función <ProcessMessage>.', 'INFO')
-        return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+        if tipo_general == "text":
+            text: str = message.get("text", {}).get("body", "")
+            if not text:
+                logging.warning("⚠️ Mensaje recibido sin texto.")
+                return func.HttpResponse("Mensaje vacío", status_code=200)
+            # Clasificación con modelo OpenAI
+            classification: str
+            type_text: str
+            entities_text: Dict[str, Any]
+            classification, type_text, entities_text = get_classifier(text, sender)
+            logging.info(
+                f"Clasificación: {classification}, Tipo: {type_text}, Entidades: {entities_text}"
+            )
+            # Guardar mensaje en base de datos
+            save_message_to_db(sender, text, classification, type_text, str(entities_text), tipo_general)
+            # Verificar si el usuario ya existe en la base de datos
+            if not get_client_database(sender):
+                if classification == "info_personal":
+                    nombre_temp: str = handle_create_client(sender, entities_text)
+                    send_text_response(sender, f"¡Gracias por registrarte {nombre_temp}! Ahora puedes enviarme tus consultas o pedidos.")
+                    # Falta envio de menú
+                else:
+                    send_text_response(sender,"¡Hola! Parece que eres un nuevo cliente. Por favor, envíame tu *nombre completo* para poder atenderte mejor.\nEjemplo: *Juan Pérez*")
+                return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
+            # Responder al usuario
+            send_text_response(sender, classification or "Sin clasificación")
+            log_message('Finalizando función <ProcessMessage>.', 'INFO')
+            return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+        else:
+            logging.warning(f"⚠️ Tipo de mensaje no soportado: {tipo_general}")
+            send_text_response(sender, "Por el momento solo puedo procesar mensajes de texto.")
+            return func.HttpResponse("Tipo de mensaje no soportado", status_code=200)
     except Exception as e:
         log_message(f'Error al hacer uso de función <ProcessMessage>: {e}.', 'ERROR')
         logging.error(f"⚠️ Error procesando POST: {e}")
