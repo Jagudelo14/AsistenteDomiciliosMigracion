@@ -154,7 +154,7 @@ def get_client_database(numero_celular: str) -> bool:
         logging.error(f'Error al hacer uso de función <get_client_database>: {e}.')
         return False
 
-def handle_create_client(sender, datos) -> None:
+def handle_create_client(sender, datos) -> str:
     try:
         """Crea un nuevo cliente en la base de datos."""
         log_message('Iniciando función <handleCreateClient>.', 'INFO')
@@ -168,7 +168,23 @@ def handle_create_client(sender, datos) -> None:
         """, (nombre, sender))
         logging.info('Cliente creado exitosamente.')
         log_message('Finalizando función <handleCreateClient>.', 'INFO')
+        return nombre.split()[0]  # Retorna el primer nombre
     except Exception as e:
         log_message(f'Error al hacer uso de función <handleCreateClient>: {e}.', 'ERROR')
         logging.error(f'Error al hacer uso de función <handleCreateClient>: {e}.')
         raise e
+
+def save_message_to_db(sender: str, message: str, classification: str, tipo_clasificacion: str, entidades: str, tipo_mensaje: str) -> None:
+    try:
+        """Guarda el mensaje recibido y su clasificación en la base de datos."""
+        log_message('Iniciando función <SaveMessageToDB>.', 'INFO')
+        logging.info('Iniciando función <SaveMessageToDB>.')
+        execute_query("""
+            INSERT INTO conversaciones_whatsapp (telefono, mensaje_usuario, clasificacion, tipo_clasificacion, entidades, fecha, tipo_mensaje)
+            VALUES (%s, %s, %s, %s, %s, (NOW() AT TIME ZONE 'America/Bogota'), %s);
+        """, (sender, message, classification, tipo_clasificacion, entidades, tipo_mensaje))
+        logging.info('Mensaje guardado exitosamente.')
+        log_message('Finalizando función <SaveMessageToDB>.', 'INFO')
+    except Exception as e:
+        log_message(f'Error al hacer uso de función <SaveMessageToDB>: {e}.', 'ERROR')
+        logging.error(f'Error al hacer uso de función <SaveMessageToDB>: {e}.')
