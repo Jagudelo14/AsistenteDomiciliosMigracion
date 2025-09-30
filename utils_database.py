@@ -1,5 +1,5 @@
 # utils_database.py
-# Last modified: 2025-09-26 by Andrés Bermúdez
+# Last modified: 2025-09-30 by Andrés Bermúdez
 
 import os
 import psycopg2
@@ -35,16 +35,15 @@ def connect_database() -> connection:
         logging.error(f"Error al conectar a la base de datos: {e}")
         raise
 
-def execute_query(query: str, params: tuple = ()) -> list:
+def execute_query(query: str, params: tuple = (), fetchone: bool = False):
     try:
-        results: list = []
-        """Ejecuta una consulta SQL y devuelve los resultados."""
         conn: connection = connect_database()
         cur: cursor = conn.cursor()
         logging.info(f"Ejecutando consulta: {query} con parámetros {params}")
         cur.execute(query, params)
+        results = None
         if query.strip().lower().startswith("select"):
-            results = cur.fetchall()
+            results = cur.fetchone() if fetchone else cur.fetchall()
         conn.commit()
         cur.close()
         conn.close()

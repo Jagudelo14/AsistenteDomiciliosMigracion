@@ -1,5 +1,5 @@
 # utils.py
-# Last modified: 2025-09-26 by Andrés Bermúdez
+# Last modified: 2025-09-30 by Andrés Bermúdez
 
 import logging
 import os
@@ -18,7 +18,7 @@ def register_log(mensaje: str, tipo: str, ambiente: str = "Whatsapp", idusuario:
         logging.info('Iniciando función <RegisterLog>.')
         query: str = """
         INSERT INTO logs (ambiente, tipo, mensaje, fecha, idusuario, "archivoPy", function, "lineNumber")
-        VALUES (%s, %s, %s, NOW(), %s, %s, %s, %s)
+        VALUES (%s, %s, %s, (NOW() AT TIME ZONE 'America/Bogota'), %s, %s, %s, %s)
         """
         params: tuple = (ambiente, tipo, mensaje, idusuario, archivoPy, function_name, line_number)
         execute_query(query, params)
@@ -188,3 +188,27 @@ def save_message_to_db(sender: str, message: str, classification: str, tipo_clas
     except Exception as e:
         log_message(f'Error al hacer uso de función <SaveMessageToDB>: {e}.', 'ERROR')
         logging.error(f'Error al hacer uso de función <SaveMessageToDB>: {e}.')
+
+def get_client_name_database(sender: str) -> str:
+    try:
+        """Obtiene el nombre del cliente en la base de datos"""
+        logging.info(f'Buscando cliente con teléfono: {sender}')
+        log_message(f"Busca nombre de cliente con {sender}", "INFO")
+        resultado = execute_query(
+            "SELECT nombre FROM clientes_whatsapp WHERE telefono = %s LIMIT 1;",
+            (sender,),
+            fetchone=True
+        )
+        if resultado:
+            nombre = resultado[0].split()[0]
+        else:
+            logging.info('No se encontró ningún cliente con ese número.', "INFO")
+            log_message(f"No se encontró cliente con {sender}", "INFO")
+            return None
+        logging.info(f"Nombre del cliente encontrado: {nombre}")
+        log_message(f"Nombre de cliente encontrado: {nombre}", "INFO")
+        return nombre
+    except Exception as e:
+        logging.error(f'Error en get_client_name_database: {e}')
+        log_message(f"Error al obtener nombre de cliente en la bbdd {e}", "ERROR")
+        return None
