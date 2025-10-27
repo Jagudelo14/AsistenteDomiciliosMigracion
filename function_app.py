@@ -8,6 +8,7 @@ import json
 from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database
 from utils_chatgpt import get_classifier
 from utils_subflujos import orquestador_subflujos
+from utils_google import orquestador_ubicacion_exacta
 from typing import Any, Dict, Optional, List
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -58,6 +59,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse("Sin mensajes para procesar", status_code=200)
         message: Dict[str, Any] = messages[0]
         tipo_general = message["type"]
+        logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         # Validación mensaje duplicado
         if validate_duplicated_message(message_id):
@@ -96,6 +98,29 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             send_text_response(sender, classification or "Sin clasificación")
             log_message('Finalizando función <ProcessMessage>.', 'INFO')
             return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+        elif tipo_general == "location":
+            latitude_temp = message["location"]["latitude"]
+            longitude_temp = message["location"]["longitude"]
+            log_message(f"Ubicación recibida: lat {latitude_temp}, lon {longitude_temp}", "INFO")
+            sedes_cercanas = orquestador_ubicacion_exacta(latitude_temp, longitude_temp)
+            if sedes_cercanas:
+                # Sede principal (la más cercana)
+                sede_principal = sedes_cercanas[0]
+                mensaje = (
+                    f"🏢 La sede más cercana a tu ubicación es:\n"
+                    f"➡️ {sede_principal['nombre']} en {sede_principal['ciudad']}, "
+                    f"a {sede_principal['distancia_km']} km "
+                    f"(~{sede_principal['tiempo_min']} min en carro).\n\n"
+                    f"📍 También cerca:\n"
+                )
+
+                # Agregar las otras sedes (si existen)
+                for sede in sedes_cercanas[1:]:
+                    mensaje += f"• {sede['nombre']} - {sede['ciudad']} ({sede['distancia_km']} km, {sede['tiempo_min']} min)\n"
+
+                send_text_response(sender, mensaje)
+            else:
+                send_text_response(sender, "❌ No se encontraron sedes cercanas con coordenadas válidas.")
         else:
             logging.warning(f"⚠️ Tipo de mensaje no soportado: {tipo_general}")
             send_text_response(sender, "Por el momento solo puedo procesar mensajes de texto.")
