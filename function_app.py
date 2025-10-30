@@ -14,8 +14,9 @@ from typing import Any, Dict, Optional, List
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 # Constantes desde variables de entorno
-VERIFY_TOKEN:str = os.environ["META_VERIFY_TOKEN"] 
-ACCESS_TOKEN:str = os.environ["WABA_TOKEN"]
+VERIFY_TOKEN: str = os.environ["META_VERIFY_TOKEN"] 
+ACCESS_TOKEN: str = os.environ["WABA_TOKEN"]
+ID_RESTAURANTE: str = os.environ.get("ID_RESTAURANTE", "1")
 #PHONE_ID:str = os.environ["PHONE_NUMBER_ID"] 
 
 @app.function_name(name="wpp_webhook")
@@ -66,65 +67,75 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             logging.info(f"Mensaje duplicado: {message_id}")
             return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
-        if tipo_general == "text":
-            text: str = message.get("text", {}).get("body", "")
-            if not text:
-                logging.warning("⚠️ Mensaje recibido sin texto.")
-                return func.HttpResponse("Mensaje vacío", status_code=200)
-            # Clasificación con modelo OpenAI
-            classification: str
-            type_text: str
-            entities_text: Dict[str, Any]
-            classification, type_text, entities_text = get_classifier(text, sender)
-            logging.info(
-                f"Clasificación: {classification}, Tipo: {type_text}, Entidades: {entities_text}"
-            )
-            # Guardar mensaje en base de datos
-            save_message_to_db(sender, text, classification, type_text, str(entities_text), tipo_general)
-            # Verificar si el usuario ya existe en la base de datos
-            nombre_cliente: str
-            if not get_client_database(sender):
+        nombre_cliente: str
+        if not get_client_database(sender, ID_RESTAURANTE):
+            if tipo_general == "text":
+                text: str = message.get("text", {}).get("body", "")
+                if not text:
+                    logging.warning("⚠️ Mensaje recibido sin texto.")
+                    return func.HttpResponse("Mensaje vacío", status_code=200)
+                # Clasificación con modelo OpenAI
+                classification: str
+                type_text: str
+                entities_text: Dict[str, Any]
+                classification, type_text, entities_text = get_classifier(text, sender)
                 if classification == "info_personal":
-                    nombre_temp: str = handle_create_client(sender, entities_text)
+                    nombre_temp: str = handle_create_client(sender, entities_text, ID_RESTAURANTE)
                     send_text_response(sender, f"¡Gracias por registrarte {nombre_temp}! Ahora puedes enviarme tus consultas o pedidos.")
                     # Falta envio de menú
                 else:
                     send_text_response(sender,"¡Hola! Parece que eres un nuevo cliente. Por favor, envíame tu *nombre completo* para poder atenderte mejor.\nEjemplo: *Juan Pérez*")
-                return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
             else:
-                nombre_cliente = get_client_name_database(sender)
-            # Responder al usuario
-            orquestador_subflujos(sender, classification, nombre_cliente, entities_text)
-            send_text_response(sender, classification or "Sin clasificación")
-            log_message('Finalizando función <ProcessMessage>.', 'INFO')
-            return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-        elif tipo_general == "location":
-            latitude_temp = message["location"]["latitude"]
-            longitude_temp = message["location"]["longitude"]
-            log_message(f"Ubicación recibida: lat {latitude_temp}, lon {longitude_temp}", "INFO")
-            sedes_cercanas = orquestador_ubicacion_exacta(latitude_temp, longitude_temp)
-            if sedes_cercanas:
-                # Sede principal (la más cercana)
-                sede_principal = sedes_cercanas[0]
-                mensaje = (
-                    f"🏢 La sede más cercana a tu ubicación es:\n"
-                    f"➡️ {sede_principal['nombre']} en {sede_principal['ciudad']}, "
-                    f"a {sede_principal['distancia_km']} km "
-                    f"(~{sede_principal['tiempo_min']} min en carro).\n\n"
-                    f"📍 También cerca:\n"
-                )
-
-                # Agregar las otras sedes (si existen)
-                for sede in sedes_cercanas[1:]:
-                    mensaje += f"• {sede['nombre']} - {sede['ciudad']} ({sede['distancia_km']} km, {sede['tiempo_min']} min)\n"
-
-                send_text_response(sender, mensaje)
-            else:
-                send_text_response(sender, "❌ No se encontraron sedes cercanas con coordenadas válidas.")
+                    send_text_response(sender,"¡Hola! Parece que eres un nuevo cliente. Por favor, envíame tu *nombre completo* para poder atenderte mejor.\nEjemplo: *Juan Pérez*")
+            return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
         else:
-            logging.warning(f"⚠️ Tipo de mensaje no soportado: {tipo_general}")
-            send_text_response(sender, "Por el momento solo puedo procesar mensajes de texto.")
-            return func.HttpResponse("Tipo de mensaje no soportado", status_code=200)
+            nombre_cliente = get_client_name_database(sender, ID_RESTAURANTE)
+            if tipo_general == "text":
+                text: str = message.get("text", {}).get("body", "")
+                if not text:
+                    logging.warning("⚠️ Mensaje recibido sin texto.")
+                    return func.HttpResponse("Mensaje vacío", status_code=200)
+                # Clasificación con modelo OpenAI
+                classification: str
+                type_text: str
+                entities_text: Dict[str, Any]
+                classification, type_text, entities_text = get_classifier(text, sender)
+                logging.info(
+                    f"Clasificación: {classification}, Tipo: {type_text}, Entidades: {entities_text}"
+                )
+                # Guardar mensaje en base de datos
+                save_message_to_db(sender, text, classification, type_text, str(entities_text), tipo_general, ID_RESTAURANTE)
+                # Verificar si el usuario ya existe en la base de datos
+                # Responder al usuario
+                orquestador_subflujos(sender, classification, nombre_cliente, entities_text)
+                send_text_response(sender, classification or "Sin clasificación")
+                log_message('Finalizando función <ProcessMessage>.', 'INFO')
+                return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+            elif tipo_general == "location":
+                latitude_temp = message["location"]["latitude"]
+                longitude_temp = message["location"]["longitude"]
+                log_message(f"Ubicación recibida: lat {latitude_temp}, lon {longitude_temp}", "INFO")
+                sedes_cercanas = orquestador_ubicacion_exacta(sender, latitude_temp, longitude_temp, ID_RESTAURANTE)
+                if sedes_cercanas:
+                    # Sede principal (la más cercana)
+                    sede_principal = sedes_cercanas
+                    mensaje = (
+                        f"🏢 La sede más cercana a tu ubicación es:\n"
+                        f"➡️ {sede_principal['nombre']} en {sede_principal['ciudad']}, "
+                        f"a {sede_principal['distancia_km']} km "
+                        f"(~{sede_principal['tiempo_min']} min en carro).\n\n"
+                    )
+                
+                    send_text_response(sender, mensaje)
+                else:
+                    send_text_response(
+                        sender,
+                        "📍 Gracias por tu ubicación.\n\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\n\nEsperamos próximamente en tu barrio. 😊 - Sierra Nevada"
+                    )
+            else:
+                logging.warning(f"⚠️ Tipo de mensaje no soportado: {tipo_general}")
+                send_text_response(sender, "Por el momento solo puedo procesar mensajes de texto.")
+                return func.HttpResponse("Tipo de mensaje no soportado", status_code=200)
     except Exception as e:
         log_message(f'Error al hacer uso de función <ProcessMessage>: {e}.', 'ERROR')
         logging.error(f"⚠️ Error procesando POST: {e}")
