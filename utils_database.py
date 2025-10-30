@@ -9,7 +9,6 @@ import logging
 def connect_database() -> connection:
     try:
         """Establece una conexión a la base de datos PostgreSQL usando variables de entorno."""
-        logging.info('Conectando a la base de datos PostgreSQL')
         dbname: str = os.getenv("DB_NAME", "")
         user: str = os.getenv("DB_USER", "")
         password: str = os.getenv("DB_PASSWORD", "")
@@ -17,7 +16,6 @@ def connect_database() -> connection:
         port: str = os.getenv("DB_PORT", "5432")
         if not all([dbname, user, password, host]):
             raise ValueError("Faltan variables de entorno para la conexión a la base de datos.")
-        logging.info(f"Conectando a base de datos: {user}@{host}:{port}/{dbname}")
         conn: connection = psycopg2.connect(
             dbname=dbname,
             user=user,
@@ -28,7 +26,6 @@ def connect_database() -> connection:
         cur: cursor = conn.cursor()
         cur.execute("SELECT current_database(), inet_server_addr(), inet_server_port();")
         info = cur.fetchone()
-        logging.info(f"Conectado a base: {info[0]} en {info[1]}:{info[2]}")
         cur.close()
         return conn
     except Exception as e:
@@ -39,7 +36,6 @@ def execute_query(query: str, params: tuple = (), fetchone: bool = False):
     try:
         conn: connection = connect_database()
         cur: cursor = conn.cursor()
-        logging.info(f"Ejecutando consulta: {query} con parámetros {params}")
         cur.execute(query, params)
         results = None
         if query.strip().lower().startswith("select"):
@@ -47,7 +43,6 @@ def execute_query(query: str, params: tuple = (), fetchone: bool = False):
         conn.commit()
         cur.close()
         conn.close()
-        logging.info("Consulta ejecutada correctamente.")
         return results
     except Exception as e:
         logging.error(f"Error al ejecutar la consulta: {e}")
