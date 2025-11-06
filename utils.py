@@ -135,13 +135,18 @@ def validate_duplicated_message(message_id: str) -> bool:
 
 def get_client_database(numero_celular: str, id_restaurante: str) -> bool:
     try:
-        """Verifica si un cliente existe en la base de datos por su número de celular."""
+        """Verifica si un cliente existe en la base de datos por su número de celular y no es temporal."""
         log_message('Iniciando función <get_client_database>.', 'INFO')
         logging.info('Iniciando función <get_client_database>.')
-        resultado = execute_query(
-            "SELECT 1 FROM clientes_whatsapp WHERE telefono = %s AND id_restaurante = %s LIMIT 1;",
-            (numero_celular, id_restaurante)
-        )
+        query = """
+            SELECT 1
+            FROM clientes_whatsapp
+            WHERE telefono = %s
+              AND id_restaurante = %s
+              AND (es_temporal = FALSE OR es_temporal IS NULL)
+            LIMIT 1;
+        """
+        resultado = execute_query(query, (numero_celular, id_restaurante))
         logging.info(f"Resultado de la consulta: {resultado}")
         log_message('Finalizando función <get_client_database>.', 'INFO')
         return len(resultado) > 0
@@ -150,19 +155,26 @@ def get_client_database(numero_celular: str, id_restaurante: str) -> bool:
         logging.error(f'Error al hacer uso de función <get_client_database>: {e}.')
         return False
 
-def handle_create_client(sender, datos, id_restaurante) -> str:
+def handle_create_client(sender: str, datos: dict, id_restaurante: str, es_temporal: bool) -> str:
     try:
-        """Crea un nuevo cliente en la base de datos."""
         log_message('Iniciando función <handleCreateClient>.', 'INFO')
         logging.info('Iniciando función <handleCreateClient>.')
-        nombre = datos.get("nombre", "Desconocido")
+        nombre = "Desconocido"
+        if isinstance(datos, dict):
+            nombre = datos.get("nombre", "Desconocido")
         logging.info(f'Nombre del cliente: {nombre}')
         logging.info(f'Teléfono (sender): {sender}')
         execute_query("""
-            INSERT INTO clientes_whatsapp (nombre, telefono, id_restaurante)
-            VALUES (%s, %s, %s);
-        """, (nombre, sender, id_restaurante))
-        logging.info('Cliente creado exitosamente.')
+            INSERT INTO clientes_whatsapp (nombre, telefono, id_restaurante, es_temporal)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (telefono)
+            DO UPDATE SET 
+                nombre = EXCLUDED.nombre,
+                es_temporal = EXCLUDED.es_temporal,
+                id_restaurante = EXCLUDED.id_restaurante;
+        """, (nombre, sender, id_restaurante, es_temporal))
+
+        logging.info('Cliente creado o actualizado exitosamente.')
         log_message('Finalizando función <handleCreateClient>.', 'INFO')
         return nombre.split()[0]  # Retorna el primer nombre
     except Exception as e:
@@ -176,7 +188,7 @@ def save_message_to_db(sender: str, message: str, classification: str, tipo_clas
         log_message('Iniciando función <SaveMessageToDB>.', 'INFO')
         logging.info('Iniciando función <SaveMessageToDB>.')
         execute_query("""
-            INSERT INTO conversaciones_whatsapp (telefono, mensaje_usuario, clasificacion, tipo_clasificacion, entidades, fecha, tipo_mensaje, id_restaurante)
+            INSERT INTO conversaciones_whatsapp (telefono, mensaje_usuario, clasificacion, tipo_clasificacion, entidades, fecha, tipo_mensaje, idcliente)
             VALUES (%s, %s, %s, %s, %s, (NOW() AT TIME ZONE 'America/Bogota'), %s, %s);
         """, (sender, message, classification, tipo_clasificacion, entidades, tipo_mensaje, id_restaurante))
         logging.info('Mensaje guardado exitosamente.')
@@ -292,3 +304,146 @@ def point_in_polygon(lat, lng, poly):
                 inside = not inside
 
     return inside
+
+def guardar_clasificacion_intencion(
+    telefono: str,
+    clasificacion: str,
+    estado: str,
+    emisor: str,
+    pregunta: str,
+    respuesta: str,
+    tipo_mensaje: str,
+    entitites: str
+) -> int | None:
+    """
+    Guarda la clasificación de intención en la base de datos y devuelve el ID insertado.
+    """
+    try:
+        if isinstance(entitites, dict):
+            entitites = json.dumps(entitites)
+        query = """
+            INSERT INTO public.clasificacion_intenciones
+                (telefono, clasificacion, estado, emisor, pregunta, respuesta, tipo_mensaje, entitites)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id;
+        """
+        values = (telefono, clasificacion, estado, emisor, pregunta, respuesta, tipo_mensaje, entitites)
+        result = execute_query(query, values, fetchone=True)
+        inserted_id = result[0] if result else None
+        if inserted_id:
+            logging.info(f"✅ Clasificación guardada con éxito. ID: {inserted_id}")
+            log_message(f"Clasificación de intención guardada exitosamente. ID: {inserted_id}", "INFO")
+            return inserted_id
+        else:
+            raise Exception("No se devolvió ningún ID después del INSERT.")
+    except Exception as e:
+        logging.error(f"Error al guardar la clasificación: {e}")
+        log_message(f"Error al guardar la clasificación de intención: {e}", "ERROR")
+        return None
+
+def obtener_ultima_intencion_no_resuelta(telefono: str) -> dict[str, Any] | None:
+    """
+    Retorna la última intención con estado 'no_resuelto' asociada al teléfono dado.
+    Devuelve un diccionario con los campos principales o None si no hay resultados.
+    """
+    try:
+        query = """
+            SELECT id, telefono, clasificacion, estado, emisor, pregunta, respuesta, tipo_mensaje, entitites
+            FROM public.clasificacion_intenciones
+            WHERE telefono = %s AND estado = 'sin_resolver'
+            ORDER BY id DESC
+            LIMIT 1;
+        """
+        result = execute_query(query, (telefono,), fetchone=True)
+        if result:
+            columnas = ["id", "telefono", "clasificacion", "estado", "emisor", "pregunta", "respuesta", "tipo_mensaje", "entitites"]
+            data = dict(zip(columnas, result))
+            logging.info(f"Última intención no resuelta encontrada para {telefono}: {data['id']}")
+            log_message(f"Última intención no resuelta encontrada para {telefono}: {data['id']}", "INFO")
+            return data
+        else:
+            logging.info(f"No hay intenciones no resueltas para {telefono}.")
+            log_message(f"No hay intenciones no resueltas para {telefono}.", "INFO")
+            return None
+    except Exception as e:
+        logging.error(f"Error al obtener la última intención no resuelta: {e}")
+        return None
+
+def marcar_intencion_como_resuelta(id_intencion: int) -> bool:
+    """
+    Actualiza el estado de una intención a 'resuelto' según su ID.
+    Retorna True si la actualización fue exitosa, False si falló.
+    """
+    try:
+        query = """
+            UPDATE public.clasificacion_intenciones
+            SET estado = 'resuelta'
+            WHERE id = %s;
+        """
+        execute_query(query, (id_intencion,))
+        log_message(f"Intención {id_intencion} marcada como resuelta.", "INFO")
+        return True
+    except Exception as e:
+        log_message(f"Error al actualizar la intención {id_intencion} a 'resuelta': {e}", "ERROR")
+        return False
+
+def guardar_intencion_futura(telefono: str, intencion_futura: str):
+    """
+    Inserta o actualiza la intención futura de un cliente según su número de teléfono.
+    Si no existe el registro, lo crea. Si ya existe, actualiza la intención.
+    """
+    try:
+        query = """
+            INSERT INTO clasificacion_intenciones_futuras (telefono, intencion_futura, fecha_actualizacion)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (telefono)
+            DO UPDATE SET
+                intencion_futura = EXCLUDED.intencion_futura,
+                fecha_actualizacion = CURRENT_TIMESTAMP;
+        """
+        execute_query(query, (telefono, intencion_futura))
+        log_message(f"Intención futura guardada/actualizada para {telefono}: {intencion_futura}")
+    except Exception as e:
+        log_message(f"Error al guardar la intención futura: {e}", "ERROR")
+
+def obtener_intencion_futura(telefono: str) -> str:
+    """
+    Retorna el valor de intencion_futura para un teléfono específico
+    desde la tabla public.clasificacion_intenciones_futuras.
+    """
+    try:
+        query = """
+            SELECT intencion_futura
+            FROM public.clasificacion_intenciones_futuras
+            WHERE telefono = %s
+            ORDER BY telefono ASC
+            LIMIT 1;
+        """
+        resultado = execute_query(query, (telefono,))
+        log_message(f"Intención futura obtenida para {telefono}: {resultado}", "INFO")
+        if resultado:
+            return resultado[0]
+        else:
+            return None
+    except Exception as e:
+        log_message(f"Error al consultar la base de datos: {e}")
+        return None
+    
+def borrar_intencion_futura(telefono: str) -> bool:
+    """
+    Elimina el registro asociado a un teléfono específico
+    en la tabla public.clasificacion_intenciones_futuras.
+
+    Retorna True si se eliminó algún registro, False si no existía o hubo error.
+    """
+    try:
+        query = """
+            DELETE FROM public.clasificacion_intenciones_futuras
+            WHERE telefono = %s;
+        """
+        filas_afectadas = execute_query(query, (telefono,))
+        log_message(f"Registro eliminado para {telefono}, filas afectadas: {filas_afectadas}", "INFO")
+        return bool(filas_afectadas)
+    except Exception as e:
+        log_message(f"Error al eliminar registro para {telefono}: {e}", "ERROR")
+        return False

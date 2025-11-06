@@ -5,9 +5,9 @@ import azure.functions as func
 import logging
 import os
 import json
-from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database
+from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta
 from utils_chatgpt import get_classifier
-from utils_subflujos import orquestador_subflujos
+from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta
 from typing import Any, Dict, Optional, List
 
@@ -68,7 +68,10 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         nombre_cliente: str
+        respuesta_bot : str
         if not get_client_database(sender, ID_RESTAURANTE):
+            dict_vacio: dict = {}
+            nombre_temp: str = handle_create_client(sender, dict_vacio, ID_RESTAURANTE, True)
             if tipo_general == "text":
                 text: str = message.get("text", {}).get("body", "")
                 if not text:
@@ -77,14 +80,34 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 # Clasificación con modelo OpenAI
                 classification: str
                 type_text: str
-                entities_text: Dict[str, Any]
+                entities_text: str
                 classification, type_text, entities_text = get_classifier(text, sender)
+                # implementar guardado de intention
                 if classification == "info_personal":
-                    nombre_temp: str = handle_create_client(sender, entities_text, ID_RESTAURANTE)
-                    send_text_response(sender, f"¡Gracias por registrarte {nombre_temp}! Ahora puedes enviarme tus consultas o pedidos.")
+                    nombre_temp: str = handle_create_client(sender, entities_text, ID_RESTAURANTE, False)
+                    respuesta_bot = f"¡Gracias por registrarte {nombre_temp}! Bienvenido a Sierra Nevada."
+                    send_text_response(sender, respuesta_bot)
+                    id_temp: str = guardar_clasificacion_intencion(sender, classification, "sin_resolver", "usuario", text, "", type_text, entities_text)
+                    marcar_intencion_como_resuelta(id_temp)
+                    data_temp = obtener_ultima_intencion_no_resuelta(sender)
+                    if data_temp:
+                        manejar_dialogo(
+                            sender=sender,
+                            clasificacion_mensaje=classification,
+                            nombre_cliente=nombre_cliente,
+                            entidades_text=entities_text,
+                            pregunta_usuario=text,
+                            bandera_externo=False,
+                            id_ultima_intencion="",
+                            nombre_local="Sierra Nevada"
+                        )
+                    #todo mirar intenciones faltantes
+                    
                     # Falta envio de menú
                 else:
-                    send_text_response(sender,"¡Hola! Parece que eres un nuevo cliente. Por favor, envíame tu *nombre completo* para poder atenderte mejor.\nEjemplo: *Juan Pérez*")
+                    respuesta_bot = "¡Hola! Parece que eres un nuevo cliente. Por favor, envíame tu *nombre completo* para poder atenderte mejor.\nEjemplo: *Juan Pérez*"
+                    guardar_clasificacion_intencion(sender, classification, "sin_resolver", "usuario", text, "", type_text, entities_text)
+                    send_text_response(sender, respuesta_bot)
             else:
                     send_text_response(sender,"¡Hola! Parece que eres un nuevo cliente. Por favor, envíame tu *nombre completo* para poder atenderte mejor.\nEjemplo: *Juan Pérez*")
             return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
@@ -107,7 +130,16 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 save_message_to_db(sender, text, classification, type_text, str(entities_text), tipo_general, ID_RESTAURANTE)
                 # Verificar si el usuario ya existe en la base de datos
                 # Responder al usuario
-                orquestador_subflujos(sender, classification, nombre_cliente, entities_text)
+                manejar_dialogo(
+                    sender=sender,
+                    clasificacion_mensaje=classification,
+                    nombre_cliente=nombre_cliente,
+                    entidades_text=entities_text,
+                    pregunta_usuario=text,
+                    bandera_externo=False,
+                    id_ultima_intencion="",
+                    nombre_local="Sierra Nevada"
+                )
                 send_text_response(sender, classification or "Sin clasificación")
                 log_message('Finalizando función <ProcessMessage>.', 'INFO')
                 return func.HttpResponse("EVENT_RECEIVED", status_code=200)

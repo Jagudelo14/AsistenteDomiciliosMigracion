@@ -38,7 +38,8 @@ def execute_query(query: str, params: tuple = (), fetchone: bool = False):
         cur: cursor = conn.cursor()
         cur.execute(query, params)
         results = None
-        if query.strip().lower().startswith("select"):
+        lowered = query.strip().lower()
+        if lowered.startswith("select") or "returning" in lowered:
             results = cur.fetchone() if fetchone else cur.fetchall()
         conn.commit()
         cur.close()
