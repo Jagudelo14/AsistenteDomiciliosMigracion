@@ -113,6 +113,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
         else:
             nombre_cliente = get_client_name_database(sender, ID_RESTAURANTE)
+            send_text_response(sender, f"tipo de mensaje recibido: {tipo_general}")
             if tipo_general == "text":
                 text: str = message.get("text", {}).get("body", "")
                 if not text:
@@ -126,6 +127,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 logging.info(
                     f"Clasificación: {classification}, Tipo: {type_text}, Entidades: {entities_text}"
                 )
+                send_text_response(sender, f"Clasificación: {classification}, Tipo: {type_text}, Entidades: {entities_text}")
                 # Guardar mensaje en base de datos
                 save_message_to_db(sender, text, classification, type_text, str(entities_text), tipo_general, ID_RESTAURANTE)
                 # Verificar si el usuario ya existe en la base de datos

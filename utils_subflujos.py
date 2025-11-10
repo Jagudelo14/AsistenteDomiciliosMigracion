@@ -15,9 +15,10 @@ from utils import (
     obtener_intencion_futura,
     borrar_intencion_futura
 )
-from utils_chatgpt import analizar_respuesta_usuario_sin_intencion
+from utils_chatgpt import analizar_respuesta_usuario_sin_intencion, clasificar_pregunta_menu_chatgpt, responder_pregunta_menu_chatgpt
+from utils_database import execute_query
 
-# --- MENSAJES DE BIENVENIDA --- #
+# --- BANCOS DE MENSAJES PREDETERMINADOS --- #
 mensajes_bienvenida = [
     {
         "mensaje": "¡Qué gusto tenerte por aquí, {nombre}! 😃 En {nombre_local} tenemos hamburguesas irresistibles, ¿quieres ver nuestro menú?",
@@ -57,6 +58,44 @@ mensajes_bienvenida = [
     }
 ]
 
+respuestas_no_relacionadas = [
+    {
+        "mensaje": "Lo siento {nombre} 😅, no tengo información sobre eso. Pero si quieres, puedo mostrarte nuestro menú para que veas todas las opciones disponibles.",
+        "intencion": "consulta_menu"
+    },
+    {
+        "mensaje": "Ups 😬, esa información no la tengo a la mano ahora mismo {nombre}. ¿Te gustaría que te muestre el menú para que elijas algo delicioso?",
+        "intencion": "consulta_menu"
+    },
+    {
+        "mensaje": "Disculpame {nombre} 🙈, no tengo respuesta para esa pregunta, pero puedo ayudarte a hacer tu pedido si ya sabes qué quieres.",
+        "intencion": "solicitud_pedido"
+    },
+    {
+        "mensaje": "Hmm 🤔, no tengo información sobre eso. Pero si quieres, {nombre}, te muestro el menú y así eliges lo que más te antoje.",
+        "intencion": "consulta_menu"
+    },
+    {
+        "mensaje": "Perdón {nombre}, no cuento con esa información. Aunque si lo prefieres, puedo ayudarte a hacer un pedido ahora mismo 🍔.",
+        "intencion": "solicitud_pedido"
+    },
+    {
+        "mensaje": "Lo siento {nombre}, no tengo datos sobre ese tema 😕. ¿Te gustaría que te envíe nuestro menú para que veas las opciones disponibles?",
+        "intencion": "consulta_menu"
+    },
+    {
+        "mensaje": "No tengo información sobre eso 😅, pero puedo ayudarte a pedir algo delicioso en un momento. ¿Quieres hacerlo ahora {nombre}?",
+        "intencion": "solicitud_pedido"
+    },
+    {
+        "mensaje": "Lamento no poder responder a eso {nombre} 😔. Pero si quieres, puedo enseñarte nuestro menú para que explores las hamburguesas disponibles.",
+        "intencion": "consulta_menu"
+    },
+    {
+        "mensaje": "Esa pregunta se sale un poco de mi menú 😅, pero puedo ayudarte a hacer tu pedido o mostrarte nuestras promociones. ¿Te parece {nombre}?",
+        "intencion": "solicitud_pedido"
+    },
+]
 
 # --- SUBFLUJOS INDIVIDUALES --- #
 def subflujo_saludo_bienvenida(nombre: str, nombre_local: str, sender: str) -> str:
@@ -69,21 +108,17 @@ def subflujo_saludo_bienvenida(nombre: str, nombre_local: str, sender: str) -> s
         mensaje = seleccion["mensaje"].format(nombre=nombre, nombre_local=nombre_local)
         intencion = seleccion["intencion"]
         guardar_intencion_futura(sender, intencion)
-
         return mensaje
-
     except Exception as e:
         logging.error(f"Error al generar mensaje de bienvenida: {e}")
         log_message(f'Error en <SubflujoSaludoBienvenida>: {e}.', 'ERROR')
         raise e
-    finally:
-        log_message(f'Finalizando función <SubflujoSaludoBienvenida> para {nombre}.', 'INFO')
-
 
 def subflujo_solicitud_pedido(sender: str, respuesta_bot: str, entidades_text: str, id_ultima_intencion: str) -> None:
     """Genera un mensaje para solicitar la ubicación del usuario."""
     try:
         send_text_response(sender, respuesta_bot)
+        send_text_response(sender, entidades_text)
         guardar_intencion_futura(sender, "direccion")
         marcar_intencion_como_resuelta(id_ultima_intencion)
     except Exception as e:
@@ -91,29 +126,71 @@ def subflujo_solicitud_pedido(sender: str, respuesta_bot: str, entidades_text: s
         log_message(f'Error en <SubflujoSolicitudPedido>: {e}.', 'ERROR')
         raise e
 
-
 def subflujo_sin_intencion(sender: str, respuesta_cliente: str) -> Dict[str, Any]:
     """Maneja el caso en que no se detecta una intención específica, con ayuda de IA."""
     try:
         log_message(f"Iniciando función <SubflujoSinIntencion> para {sender}.", "INFO")
         anterior_intencion = obtener_intencion_futura(sender)
-
         if anterior_intencion != "SinIntencion":
             analisis = analizar_respuesta_usuario_sin_intencion(respuesta_cliente, anterior_intencion)
             # analisis = { "intencion_respuesta": str, "continuidad": bool, "observaciones": str }
             #guardar_clasificacion_intencion(sender, analisis["intencion_respuesta"])
             log_message(f'Respuesta analizada: {analisis}', 'INFO')
-            
             return analisis
         else:
             send_text_response(sender, "No entendí muy bien, ¿podrías repetirlo?")
             return {"continuidad": False}
-
     except Exception as e:
         logging.error(f"Error en <SubflujoSinIntencion>: {e}")
         log_message(f'Error en <SubflujoSinIntencion>: {e}.', 'ERROR')
         raise e
 
+def subflujo_preguntas_generales(sender: str, pregunta_usuario: str, nombre_cliente: str) -> None:
+    """Maneja preguntas generales del usuario."""
+    try:
+        log_message(f'Iniciando función <SubflujoPreguntasGenerales> para {sender}.', 'INFO')
+        clasificacion: dict = clasificar_pregunta_menu_chatgpt(pregunta_usuario)
+        clasificacion_tipo = clasificacion.get("clasificacion", "no_relacionada")
+
+        if clasificacion_tipo == "relacionada":
+            query = """
+                SELECT 
+                    nombre, 
+                    tipo_comida, 
+                    descripcion, 
+                    observaciones, 
+                    precio
+                FROM public.items
+                WHERE estado = true
+                ORDER BY tipo_comida, nombre;
+                """
+            items_data = execute_query(query)
+            items = [
+                {
+                    "nombre": row[0],
+                    "tipo_comida": row[1],
+                    "descripcion": row[2],
+                    "observaciones": row[3],
+                    "precio": float(row[4]) if row[4] is not None else 0.0
+                }
+                for row in items_data
+            ]
+            respuesta_llm: dict = responder_pregunta_menu_chatgpt(pregunta_usuario, items)
+            send_text_response(sender, respuesta_llm.get("respuesta"))
+            send_text_response(sender, respuesta_llm.get("productos", ""))
+            if respuesta_llm.get("recomendacion"):
+                guardar_intencion_futura(sender, "solicitud_pedido")
+        else:
+            seleccion = random.choice(respuestas_no_relacionadas)
+            mensaje = seleccion["mensaje"].format(nombre=nombre_cliente)
+            intencion = seleccion["intencion"]
+            send_text_response(sender, mensaje)
+            guardar_intencion_futura(sender, intencion)
+        log_message(f'Pregunta general clasificada y respondida: {clasificacion}', 'INFO')
+    except Exception as e:
+        logging.error(f"Error en <SubflujoPreguntasGenerales>: {e}")
+        log_message(f'Error en <SubflujoPreguntasGenerales>: {e}.', 'ERROR')
+        raise e
 
 # --- ORQUESTADOR DE SUBFLUJOS --- #
 def orquestador_subflujos(
@@ -129,7 +206,7 @@ def orquestador_subflujos(
     """Activa el subflujo correspondiente según la intención detectada."""
     try:
         log_message(f"Empieza <OrquestadorSubflujos> con sender {sender} y tipo {clasificacion_mensaje}", "INFO")
-
+        clasificacion_mensaje = clasificacion_mensaje.strip().lower()
         if clasificacion_mensaje == "saludo":
             respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender)
             send_text_response(sender, respuesta_bot)
@@ -142,7 +219,7 @@ def orquestador_subflujos(
             )
             subflujo_solicitud_pedido(sender, respuesta_bot, entidades_text, id_ultima_intencion)
             borrar_intencion_futura(sender)
-        elif clasificacion_mensaje == "SinIntencion":
+        elif clasificacion_mensaje == "SinIntencion" or clasificacion_mensaje == "confirmacion":
             return subflujo_sin_intencion(sender, pregunta_usuario)
         elif clasificacion_mensaje == "consulta_promociones":
             send_text_response(sender, "Claro, aquí tienes nuestras promociones actuales...")
@@ -150,6 +227,8 @@ def orquestador_subflujos(
         elif clasificacion_mensaje == "consulta_menu":
             send_text_response(sender, "Por supuesto, este es nuestro menú digital...")
             borrar_intencion_futura(sender)
+        elif clasificacion_mensaje == "preguntas_generales":
+            subflujo_preguntas_generales(sender, pregunta_usuario, nombre_cliente)
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")
