@@ -166,3 +166,165 @@ def analizar_respuesta_usuario_sin_intencion(respuesta_cliente: str, intencion_a
     log_message('Finalizando función <AnalizarRespuestaUsuarioSinIntencion>.', 'INFO')
     log_message(f'Respuesta analizada: {result}', 'INFO')
     return result
+
+def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, model: str = "gpt-3.5-turbo") -> dict:
+    """
+    Clasifica si una pregunta del usuario está relacionada con el menú de una hamburguesería
+    usando un modelo de lenguaje (ChatGPT).
+    
+    Parámetros:
+        pregunta_usuario (str): Pregunta escrita por el usuario.
+        model (str): Modelo de OpenAI a utilizar.
+    
+    Retorna:
+        dict: JSON con la estructura solicitada.
+    """
+    log_message('Iniciando función <ClasificarPreguntaMenuChatGPT>.', 'INFO')
+    client: OpenAI = OpenAI()
+    prompt: str = f"""
+    Eres un asistente que clasifica preguntas de clientes de una hamburguesería.
+    Debes responder con un JSON EXACTO con la siguiente forma:
+    {{
+        "clasificacion": "relacionada" o "no_relacionada"
+    }}
+    Instrucciones:
+    - Si la pregunta se refiere a comidas, hamburguesas, bebidas, malteadas, ingredientes, precios, combos, 
+      opciones vegetarianas o cualquier cosa del menú de una hamburguesería → "relacionada".
+    - Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, Python, clima, cielo, etc.) → "no_relacionada".
+    Ejemplos:
+    1️⃣ "qué hamburguesas tienen?" → {{"clasificacion": "relacionada"}}
+    2️⃣ "hay hamburguesas de pollo?" → {{"clasificacion": "relacionada"}}
+    3️⃣ "qué malteadas tienen?" → {{"clasificacion": "relacionada"}}
+    4️⃣ "tienen opciones vegetarianas?" → {{"clasificacion": "relacionada"}}
+    5️⃣ "dónde queda Bogotá?" → {{"clasificacion": "no_relacionada"}}
+    6️⃣ "qué es Python?" → {{"clasificacion": "no_relacionada"}}
+    7️⃣ "por qué el cielo es azul?" → {{"clasificacion": "no_relacionada"}}
+    Ahora clasifica la siguiente pregunta del usuario:
+    "{pregunta_usuario}"
+    Devuelve SOLO el JSON, sin explicación adicional.
+    """
+    try:
+        response = client.responses.create(
+            model=model,
+            input=prompt,
+            temperature=0
+        )
+        text_output = response.output[0].content[0].text.strip()
+        result = json.loads(text_output)
+        log_message('Finalizando función <ClasificarPreguntaMenuChatGPT>.', 'INFO')
+        return result
+    except json.JSONDecodeError:
+        logging.error(f"Error al parsear JSON: {text_output}")
+        log_message(f'Error al parsear JSON en <ClasificarPreguntaMenuChatGPT>: {text_output}', 'ERROR')
+        return {"clasificacion": "no_relacionada"}
+    except Exception as e:
+        logging.error(f"Error en <ClasificarPreguntaMenuChatGPT>: {e}")
+        log_message(f'Error en <ClasificarPreguntaMenuChatGPT>: {e}.', 'ERROR')
+        return {"clasificacion": "no_relacionada"}
+
+def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "gpt-4o-mini") -> dict:
+    """
+    Responde preguntas del usuario sobre el menú de Sierra Nevada 🍔,
+    con base en los ítems reales disponibles.
+    
+    Retorna:
+        {
+            "respuesta": str,
+            "recomendacion": bool,
+            "productos": list[str]
+        }
+    """
+    log_message('Iniciando función <ResponderPreguntaMenuChatGPT>.', 'INFO')
+
+    # 🔍 1️⃣ Normalizamos texto
+    pregunta_lower = pregunta_usuario.lower()
+    coincidencias = []
+
+    for item in items:
+        texto_busqueda = f"{item.get('nombre', '')} {item.get('descripcion', '')}".lower()
+        if any(palabra in texto_busqueda for palabra in pregunta_lower.split()):
+            coincidencias.append(item)
+
+    # 🔍 2️⃣ Generamos el prompt
+    if coincidencias:
+        prompt = f"""
+        Eres un asistente amable de la hamburguesería "Sierra Nevada" en Bogotá 🍔.
+        El cliente preguntó: "{pregunta_usuario}"
+
+        Estos ítems del menú coinciden con la búsqueda:
+        {json.dumps(coincidencias, ensure_ascii=False)}
+
+        Instrucciones:
+        - Usa solo los productos listados.
+        - No inventes nombres ni ingredientes.
+        - Responde con un tono natural y cercano, tipo WhatsApp.
+        - Devuelve SOLO un JSON con este formato exacto:
+        {{
+            "respuesta": "texto amigable para el cliente",
+            "recomendacion": false,
+            "productos": ["nombre1", "nombre2"]
+        }}
+        """
+    else:
+        prompt = f"""
+        Eres un asistente amable de la hamburguesería "Sierra Nevada" en Bogotá 🍔.
+        El cliente preguntó: "{pregunta_usuario}"
+
+        Aquí tienes el menú completo:
+        {json.dumps(items, ensure_ascii=False)}
+
+        Instrucciones:
+        - No hay coincidencias exactas con lo que pregunta el cliente.
+        - No inventes productos.
+        - Di con amabilidad que no tenemos eso, pero recomienda hasta 2 ítems similares del menú.
+        - Usa los nombres reales en 'items'.
+        - Devuelve SOLO un JSON con este formato exacto:
+        {{
+            "respuesta": "texto amigable para el cliente",
+            "recomendacion": true,
+            "productos": ["nombre1", "nombre2"]
+        }}
+        Ejemplo:
+        Usuario: "¿Tienen hamburguesas de pollo?"
+        Si no hay pollo: -> {{"respuesta": "No tenemos hamburguesas de pollo 😔, pero te puedo recomendar la Sierra Costeña o la Clásica 🍔", "recomendacion": true, "productos": ["Sierra Costeña", "Clásica"]}}
+        """
+
+    # ⚙️ 3️⃣ Llamada al modelo
+    try:
+        client = OpenAI()
+        response = client.responses.create(
+            model=model,
+            input=prompt,
+            temperature=0.5
+        )
+
+        text_output = response.output[0].content[0].text.strip()
+
+        try:
+            result = json.loads(text_output)
+        except json.JSONDecodeError:
+            logging.error(f"Error al parsear JSON: {text_output}")
+            log_message(f'Error al parsear JSON en <ResponderPreguntaMenuChatGPT>: {text_output}', 'ERROR')
+            result = {
+                "respuesta": text_output,
+                "recomendacion": False,
+                "productos": []
+            }
+
+        # 🧹 Validación: asegurar campos siempre presentes
+        if "productos" not in result:
+            result["productos"] = []
+        if "recomendacion" not in result:
+            result["recomendacion"] = False
+
+        log_message('Finalizando función <ResponderPreguntaMenuChatGPT>.', 'INFO')
+        return result
+
+    except Exception as e:
+        logging.error(f"Error en <ResponderPreguntaMenuChatGPT>: {e}")
+        log_message(f'Error en <ResponderPreguntaMenuChatGPT>: {e}.', 'ERROR')
+        return {
+            "respuesta": "Lo siento, tuve un problema para responder 😔.",
+            "recomendacion": False,
+            "productos": []
+        }

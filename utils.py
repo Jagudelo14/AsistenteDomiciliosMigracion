@@ -402,7 +402,7 @@ def guardar_intencion_futura(telefono: str, intencion_futura: str):
                 fecha_actualizacion = CURRENT_TIMESTAMP;
         """
         execute_query(query, (telefono, intencion_futura))
-        log_message(f"Intención futura guardada/actualizada para {telefono}: {intencion_futura}")
+        log_message(f"Intención futura guardada/actualizada para {telefono}: {intencion_futura}", "INFO")
     except Exception as e:
         log_message(f"Error al guardar la intención futura: {e}", "ERROR")
 
