@@ -29,26 +29,49 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
         """Clasifica un mensaje de WhatsApp usando un modelo fine-tuned de OpenAI."""
         log_message('Iniciando función <GetClassifier>.', 'INFO')
         logging.info('Clasificando mensaje')
-        classificationPrompt: str = """
+        classification_prompt: str = """
         Eres un clasificador de mensajes para un asistente de WhatsApp de un restaurante.
-        Responde **únicamente** en formato JSON válido con la siguiente estructura:
+        Tu tarea es identificar la **intención (intent)**, el **tipo de mensaje (type)** y cualquier **entidad relevante (entities)**.
+        Debes responder **únicamente** en formato JSON válido con la siguiente estructura:
         {
-          "intent": "<la intención detectada>",
-          "type": "<el tipo de mensaje>",
+          "intent": "<una de las intenciones permitidas>",
+          "type": "<tipo de mensaje>",
           "entities": { }
         }
-        No incluyas explicaciones ni texto fuera del JSON.
+        Lista de intenciones posibles:
+        - confirmacion_general
+        - consulta_menu
+        - consulta_pedido
+        - consulta_promociones
+        - continuacion_pedido
+        - direccion
+        - info_personal
+        - mas_datos_direccion
+        - modificar_pedido
+        - negacion_general
+        - preguntas_generales
+        - quejas (quejas de menor nivel: retraso en la entrega, mal servicio del domiciliario, problemas con la app, cocción desfasada solamente)
+        - saludo
+        - sin_intencion
+        - solicitud_pedido
+        - transferencia (quejas de mayor nivel: no entrega de domicilio, pedido equivocado, mal estado del pedido solamente)
+        - validacion_pago
+
+        Instrucciones importantes:
+        - No incluyas texto fuera del JSON.
+        - No uses comentarios, explicaciones o saltos de línea innecesarios.
+        - Si no puedes determinar la intención, usa "sin_intencion".
         """
         messages = [
-            {"role": "system", "content": classificationPrompt},
+            {"role": "system", "content": classification_prompt},
             {"role": "user", "content": msj}
         ]
         client: OpenAI = OpenAI(api_key=get_openai_key())
         respuesta: Any = client.chat.completions.create(
-            model="ft:gpt-3.5-turbo-0125:net-applications:domicilios:CJRSZZ2S",
+            model="ft:gpt-3.5-turbo-0125:net-applications:domicilios:CaSlaPnG",
             messages=messages,
             max_tokens=500,
-            temperature=0.1
+            temperature=0
         )
         raw_response: str = respuesta.choices[0].message.content.strip()
         logging.info(f"[Clasificador RAW] {raw_response!r}")
@@ -169,40 +192,51 @@ def analizar_respuesta_usuario_sin_intencion(respuesta_cliente: str, intencion_a
 
 def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, model: str = "gpt-3.5-turbo") -> dict:
     """
-    Clasifica si una pregunta del usuario está relacionada con el menú de una hamburguesería
-    usando un modelo de lenguaje (ChatGPT).
-    
-    Parámetros:
-        pregunta_usuario (str): Pregunta escrita por el usuario.
-        model (str): Modelo de OpenAI a utilizar.
-    
-    Retorna:
-        dict: JSON con la estructura solicitada.
+    Clasifica si una pregunta del usuario está relacionada con el menú o con servicios
+    del negocio (hamburguesería) usando un modelo de lenguaje (ChatGPT).
     """
+
     log_message('Iniciando función <ClasificarPreguntaMenuChatGPT>.', 'INFO')
     client: OpenAI = OpenAI()
+
     prompt: str = f"""
     Eres un asistente que clasifica preguntas de clientes de una hamburguesería.
+
     Debes responder con un JSON EXACTO con la siguiente forma:
     {{
         "clasificacion": "relacionada" o "no_relacionada"
     }}
+
     Instrucciones:
-    - Si la pregunta se refiere a comidas, hamburguesas, bebidas, malteadas, ingredientes, precios, combos, 
-      opciones vegetarianas o cualquier cosa del menú de una hamburguesería → "relacionada".
-    - Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, Python, clima, cielo, etc.) → "no_relacionada".
+    - Si la pregunta se refiere a comidas, hamburguesas, bebidas, malteadas, ingredientes, precios, combos,
+      opciones vegetarianas o cualquier cosa del menú → "relacionada".
+    - También clasifica como "relacionada" si el cliente pregunta sobre:
+        • formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.)
+        • si hacen domicilios o envíos
+        • horarios de atención
+        • dirección o ubicación del local
+        • contacto, pedidos o reservas
+        • promociones o descuentos
+    - Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, clima, películas, tecnología, etc.) → "no_relacionada".
+
     Ejemplos:
     1️⃣ "qué hamburguesas tienen?" → {{"clasificacion": "relacionada"}}
     2️⃣ "hay hamburguesas de pollo?" → {{"clasificacion": "relacionada"}}
     3️⃣ "qué malteadas tienen?" → {{"clasificacion": "relacionada"}}
     4️⃣ "tienen opciones vegetarianas?" → {{"clasificacion": "relacionada"}}
-    5️⃣ "dónde queda Bogotá?" → {{"clasificacion": "no_relacionada"}}
-    6️⃣ "qué es Python?" → {{"clasificacion": "no_relacionada"}}
-    7️⃣ "por qué el cielo es azul?" → {{"clasificacion": "no_relacionada"}}
+    5️⃣ "aceptan pagos por nequi?" → {{"clasificacion": "relacionada"}}
+    6️⃣ "hacen envíos a suba?" → {{"clasificacion": "relacionada"}}
+    7️⃣ "cuál es su horario?" → {{"clasificacion": "relacionada"}}
+    8️⃣ "dónde están ubicados?" → {{"clasificacion": "relacionada"}}
+    9️⃣ "dónde queda Bogotá?" → {{"clasificacion": "no_relacionada"}}
+    🔟 "qué es Python?" → {{"clasificacion": "no_relacionada"}}
+
     Ahora clasifica la siguiente pregunta del usuario:
     "{pregunta_usuario}"
+
     Devuelve SOLO el JSON, sin explicación adicional.
     """
+
     try:
         response = client.responses.create(
             model=model,
@@ -213,6 +247,7 @@ def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, model: str = "gpt-3.
         result = json.loads(text_output)
         log_message('Finalizando función <ClasificarPreguntaMenuChatGPT>.', 'INFO')
         return result
+
     except json.JSONDecodeError:
         logging.error(f"Error al parsear JSON: {text_output}")
         log_message(f'Error al parsear JSON en <ClasificarPreguntaMenuChatGPT>: {text_output}', 'ERROR')
@@ -222,109 +257,165 @@ def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, model: str = "gpt-3.
         log_message(f'Error en <ClasificarPreguntaMenuChatGPT>: {e}.', 'ERROR')
         return {"clasificacion": "no_relacionada"}
 
-def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "gpt-4o-mini") -> dict:
+def _clean_model_output(raw: str) -> str:
     """
-    Responde preguntas del usuario sobre el menú de Sierra Nevada 🍔,
-    con base en los ítems reales disponibles.
-    
-    Retorna:
-        {
-            "respuesta": str,
-            "recomendacion": bool,
-            "productos": list[str]
-        }
+    Limpia output que pueda venir en triple-backticks o con '```json' al inicio.
+    Devuelve el string JSON limpio (o el raw si no había marcas).
+    """
+    if not raw:
+        return ""
+    s = raw.strip()
+
+    # Si el modelo devolvió bloque con ```json ... ```
+    if s.startswith("```"):
+        # eliminar backticks al inicio y final
+        s = s.strip("`").strip()
+        # si aún tiene prefijo 'json' eliminarlo
+        if s.lower().startswith("json"):
+            s = s[len("json"):].lstrip("\r\n ").strip()
+
+    return s
+
+def _extract_text_from_response(response) -> str:
+    """
+    Extrae texto del objeto devuelto por client.responses.create de forma robusta.
+    Prioriza response.output_text, luego response.output[*].content[*].text, 
+    luego intenta concatenar todo lo que encuentre.
+    """
+    # 1) output_text (forma simple)
+    try:
+        output_text = getattr(response, "output_text", None)
+        if output_text:
+            return str(output_text).strip()
+    except Exception:
+        pass
+
+    # 2) response.output -> content
+    try:
+        if hasattr(response, "output") and response.output:
+            parts = []
+            for out in response.output:
+                # cada out puede tener 'content' que es lista de dicts
+                content = getattr(out, "content", None) or out.get("content", None) if isinstance(out, dict) else None
+                if content:
+                    for c in content:
+                        # c puede ser dict con 'text' u 'type' y 'content'
+                        if isinstance(c, dict):
+                            if "text" in c and c["text"]:
+                                parts.append(c["text"])
+                            elif "type" in c and c["type"] == "output_text" and "text" in c:
+                                parts.append(c["text"])
+                            else:
+                                # intentar stringify
+                                parts.append(json.dumps(c, ensure_ascii=False))
+                        else:
+                            parts.append(str(c))
+            if parts:
+                return "\n".join(parts).strip()
+    except Exception:
+        pass
+
+    # 3) fallback: str(response)
+    try:
+        return str(response).strip()
+    except Exception:
+        return ""
+
+def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "gpt-4o") -> tuple:
+    """
+    Responde preguntas del usuario sobre el menú o servicios del restaurante Sierra Nevada 🍔.
+    Incluye información sobre horarios, sedes y medios de pago.
+    Devuelve: (result: dict, prompt: str)
     """
     log_message('Iniciando función <ResponderPreguntaMenuChatGPT>.', 'INFO')
 
-    # 🔍 1️⃣ Normalizamos texto
-    pregunta_lower = pregunta_usuario.lower()
-    coincidencias = []
+    # Prompt unificado
+    prompt = f"""
+    Eres un asistente amable y directo de la hamburguesería "Sierra Nevada" en Bogotá 🍔.
+    Tu tarea es responder preguntas de clientes sobre el menú o servicios del negocio.
 
-    for item in items:
-        texto_busqueda = f"{item.get('nombre', '')} {item.get('descripcion', '')}".lower()
-        if any(palabra in texto_busqueda for palabra in pregunta_lower.split()):
-            coincidencias.append(item)
+    Información del restaurante:
+    🕐 Horario: Todos los días de 12:00 p.m. a 7:00 p.m.
+    📍 Sedes:
+       - Galerías: Calle 53 # 27-16
+       - Centro Mayor: Centro Comercial Centro Mayor, local 3-019
+       - Centro Internacional: Calle 32 # 07-10
+       - Chicó 2.0: Calle 100 # 9A - 45 local 7A
+       - Virrey: Carrera 15 # 88-67
+    💳 Medios de pago: Nequi, Daviplata, tarjeta débito, crédito y efectivo.
+    🚚 Hacen envíos y domicilios desde su agente de inteligencia artificial en WhatsApp llamado PAKO.
 
-    # 🔍 2️⃣ Generamos el prompt
-    if coincidencias:
-        prompt = f"""
-        Eres un asistente amable de la hamburguesería "Sierra Nevada" en Bogotá 🍔.
-        El cliente preguntó: "{pregunta_usuario}"
+    El cliente preguntó: "{pregunta_usuario}"
 
-        Estos ítems del menú coinciden con la búsqueda:
-        {json.dumps(coincidencias, ensure_ascii=False)}
+    Este es el menú completo:
+    {json.dumps(items, ensure_ascii=False)}
 
-        Instrucciones:
-        - Usa solo los productos listados.
-        - No inventes nombres ni ingredientes.
-        - Responde con un tono natural y cercano, tipo WhatsApp.
-        - Devuelve SOLO un JSON con este formato exacto:
-        {{
-            "respuesta": "texto amigable para el cliente",
-            "recomendacion": false,
-            "productos": ["nombre1", "nombre2"]
-        }}
-        """
-    else:
-        prompt = f"""
-        Eres un asistente amable de la hamburguesería "Sierra Nevada" en Bogotá 🍔.
-        El cliente preguntó: "{pregunta_usuario}"
+    Instrucciones:
+    - Usa solo los productos listados en el menú.
+    - Si la pregunta es sobre horarios, sedes, medios de pago o envíos, responde usando la información de arriba.
+    - Si el cliente pide algo que sí está en el menú, descríbelo o confírmalo.
+    - Si pide algo que NO aparece en el menú, di amablemente que no lo tenemos y sugiere hasta 2 opciones similares.
+    - Si pregunta por categorías (picante, vegetariano, de pollo, bebidas, postres, etc.), responde según el menú.
+    - Sé breve, natural y amable, como si fuera WhatsApp.
+    - Devuelve SOLO un objeto JSON con el siguiente formato EXACTO:
+    {{
+        "respuesta": "texto amigable para el cliente",
+        "recomendacion": true o false,
+        "productos": ["nombre1", "nombre2"]
+    }}
+    Ejemplo:
+    Usuario: "¿Tienen opciones picantes?"
+    -> {{
+        "respuesta": "Sí 🔥, tenemos la Sierra Picante y la Sierra BBQ que tiene un toque fuerte.",
+        "recomendacion": false,
+        "productos": ["Sierra Picante", "Sierra BBQ"]
+    }}
+    """
 
-        Aquí tienes el menú completo:
-        {json.dumps(items, ensure_ascii=False)}
-
-        Instrucciones:
-        - No hay coincidencias exactas con lo que pregunta el cliente.
-        - No inventes productos.
-        - Di con amabilidad que no tenemos eso, pero recomienda hasta 2 ítems similares del menú.
-        - Usa los nombres reales en 'items'.
-        - Devuelve SOLO un JSON con este formato exacto:
-        {{
-            "respuesta": "texto amigable para el cliente",
-            "recomendacion": true,
-            "productos": ["nombre1", "nombre2"]
-        }}
-        Ejemplo:
-        Usuario: "¿Tienen hamburguesas de pollo?"
-        Si no hay pollo: -> {{"respuesta": "No tenemos hamburguesas de pollo 😔, pero te puedo recomendar la Sierra Costeña o la Clásica 🍔", "recomendacion": true, "productos": ["Sierra Costeña", "Clásica"]}}
-        """
-
-    # ⚙️ 3️⃣ Llamada al modelo
     try:
         client = OpenAI()
         response = client.responses.create(
             model=model,
-            input=prompt,
-            temperature=0.5
+            input=prompt
         )
 
-        text_output = response.output[0].content[0].text.strip()
+        raw_text = _extract_text_from_response(response)
+        raw_text = _clean_model_output(raw_text)
+        logging.info(f"[DEBUG] Texto crudo del modelo: {raw_text!r}")
+
+        if not raw_text:
+            raise ValueError("Respuesta vacía del modelo")
 
         try:
-            result = json.loads(text_output)
+            result = json.loads(raw_text)
         except json.JSONDecodeError:
-            logging.error(f"Error al parsear JSON: {text_output}")
-            log_message(f'Error al parsear JSON en <ResponderPreguntaMenuChatGPT>: {text_output}', 'ERROR')
-            result = {
-                "respuesta": text_output,
-                "recomendacion": False,
-                "productos": []
-            }
+            import re
+            m = re.search(r"(\{[\s\S]*\})", raw_text)
+            if m:
+                result = json.loads(m.group(1))
+            else:
+                result = {"respuesta": raw_text, "recomendacion": False, "productos": []}
 
-        # 🧹 Validación: asegurar campos siempre presentes
-        if "productos" not in result:
-            result["productos"] = []
-        if "recomendacion" not in result:
-            result["recomendacion"] = False
+        if "productos" in result and isinstance(result["productos"], list):
+            result["productos"] = [p.replace('\u00a0', ' ').strip() for p in result["productos"]]
+
+        pregunta_lower = pregunta_usuario.lower()
+        if any(token in pregunta_lower for token in ["?", "tienen", "hay", "venden", "cuáles", "qué opciones", "me recomiendas", "qué hay"]):
+            respuesta_txt = str(result.get("respuesta", "")).strip()
+            if respuesta_txt and not respuesta_txt.endswith(("?", ".", "!", "😋", "😉", "😎")):
+                result["respuesta"] = respuesta_txt + " ¿Quieres probarla? 😋"
+
+        result.setdefault("productos", [])
+        result.setdefault("recomendacion", False)
 
         log_message('Finalizando función <ResponderPreguntaMenuChatGPT>.', 'INFO')
-        return result
+        return result, prompt
 
     except Exception as e:
         logging.error(f"Error en <ResponderPreguntaMenuChatGPT>: {e}")
-        log_message(f'Error en <ResponderPreguntaMenuChatGPT>: {e}.', 'ERROR')
+        log_message(f'Error en <ResponderPreguntaMenuChatGPT>: {e}', 'ERROR')
         return {
-            "respuesta": "Lo siento, tuve un problema para responder 😔.",
+            "respuesta": "Lo siento 😔, tuve un problema para responder tu pregunta.",
             "recomendacion": False,
             "productos": []
-        }
+        }, prompt

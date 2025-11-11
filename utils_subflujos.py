@@ -175,7 +175,9 @@ def subflujo_preguntas_generales(sender: str, pregunta_usuario: str, nombre_clie
                 }
                 for row in items_data
             ]
-            respuesta_llm: dict = responder_pregunta_menu_chatgpt(pregunta_usuario, items)
+            respuesta_llm: dict
+            respuesta_llm, prompt = responder_pregunta_menu_chatgpt(pregunta_usuario, items)
+            send_text_response(sender, f"(DEBUG) Prompt usado:\n{prompt}")
             send_text_response(sender, respuesta_llm.get("respuesta"))
             send_text_response(sender, respuesta_llm.get("productos", ""))
             if respuesta_llm.get("recomendacion"):
@@ -201,7 +203,8 @@ def orquestador_subflujos(
     pregunta_usuario: str,
     bandera_externo: bool,
     id_ultima_intencion: str,
-    nombre_local: str = "Sierra Nevada"
+    nombre_local: str = "Sierra Nevada",
+    type_text: str = "text"
 ) -> Any:
     """Activa el subflujo correspondiente según la intención detectada."""
     try:
@@ -224,10 +227,10 @@ def orquestador_subflujos(
         elif clasificacion_mensaje == "consulta_promociones":
             send_text_response(sender, "Claro, aquí tienes nuestras promociones actuales...")
             borrar_intencion_futura(sender)
-        elif clasificacion_mensaje == "consulta_menu":
+        elif clasificacion_mensaje == "consulta_menu" and type_text != "pregunta" and type_text != "preguntas_generales":
             send_text_response(sender, "Por supuesto, este es nuestro menú digital...")
             borrar_intencion_futura(sender)
-        elif clasificacion_mensaje == "preguntas_generales":
+        elif clasificacion_mensaje == "preguntas_generales" or (clasificacion_mensaje == "consulta_menu" and (type_text == "pregunta" or type_text == "preguntas_generales")):
             subflujo_preguntas_generales(sender, pregunta_usuario, nombre_cliente)
         return None
     except Exception as e:
@@ -242,7 +245,8 @@ def manejar_dialogo(
     pregunta_usuario: str,
     bandera_externo: bool,
     id_ultima_intencion: str,
-    nombre_local: str = "Sierra Nevada"
+    nombre_local: str = "Sierra Nevada",
+    type_text: str = "text"
 ) -> None:
     """
     Controla el flujo completo de conversación de forma iterativa.
@@ -258,7 +262,8 @@ def manejar_dialogo(
             "pregunta_usuario": pregunta_usuario,
             "bandera_externo": bandera_externo,
             "id_ultima_intencion": id_ultima_intencion,
-            "nombre_local": nombre_local
+            "nombre_local": nombre_local,
+            "type_text": type_text
         }
 
         while continuar:

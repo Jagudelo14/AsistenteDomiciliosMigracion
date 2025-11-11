@@ -99,7 +99,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                             pregunta_usuario=text,
                             bandera_externo=False,
                             id_ultima_intencion="",
-                            nombre_local="Sierra Nevada"
+                            nombre_local="Sierra Nevada",
+                            type_text = type_text
                         )
                     #todo mirar intenciones faltantes
                     
@@ -140,7 +141,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     pregunta_usuario=text,
                     bandera_externo=False,
                     id_ultima_intencion="",
-                    nombre_local="Sierra Nevada"
+                    nombre_local="Sierra Nevada",
+                    type_text = type_text
                 )
                 send_text_response(sender, classification or "Sin clasificación")
                 log_message('Finalizando función <ProcessMessage>.', 'INFO')
