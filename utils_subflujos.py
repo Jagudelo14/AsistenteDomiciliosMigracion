@@ -15,45 +15,10 @@ from utils import (
     obtener_intencion_futura,
     borrar_intencion_futura
 )
-from utils_chatgpt import clasificar_pregunta_menu_chatgpt, responder_pregunta_menu_chatgpt, sin_intencion_respuesta_variable
+from utils_chatgpt import clasificar_pregunta_menu_chatgpt, responder_pregunta_menu_chatgpt, saludo_dynamic, sin_intencion_respuesta_variable
 from utils_database import execute_query
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
-mensajes_bienvenida = [
-    {
-        "mensaje": "¡Qué gusto tenerte por aquí, {nombre}! 😃 En {nombre_local} tenemos hamburguesas irresistibles, ¿quieres ver nuestro menú?",
-        "intencion": "consulta_menu"
-    },
-    {
-        "mensaje": "¡Hola {nombre}! 👋 Nada mejor que una burger jugosa para alegrar el día, ¿te muestro nuestras opciones en {nombre_local}?",
-        "intencion": "consulta_menu"
-    },
-    {
-        "mensaje": "¡Hey {nombre}! 🤗 Gracias por escribirnos. En {nombre_local} te esperan las hamburguesas más sabrosas, ¿quieres conocer nuestras promociones?",
-        "intencion": "consulta_promociones"
-    },
-    {
-        "mensaje": "¡Hola {nombre}! 👨‍🍳 Estamos listos en {nombre_local} para preparar tu hamburguesa favorita, ¿te comparto el menú?",
-        "intencion": "consulta_menu"
-    },
-    {
-        "mensaje": "¡Hola {nombre}! 😋 Te está esperando la hamburguesa más jugosa de la ciudad en {nombre_local}, ¿quieres que te muestre las recomendaciones del chef?",
-        "intencion": "consulta_menu"
-    },
-    {
-        "mensaje": "¡Qué bueno verte por aquí, {nombre}! 🤝 En {nombre_local} siempre tenemos algo para cada gusto, ¿quieres ver los combos de hoy?",
-        "intencion": "consulta_promociones"
-    },
-    {
-        "mensaje": "¡Bienvenido {nombre}! 🥓🍔 En {nombre_local} tenemos burgers con todo el sabor que buscas, ¿quieres que te mande el menú digital?",
-        "intencion": "consulta_menu"
-    },
-    {
-        "mensaje": "¡Hola {nombre}! 😍 Ya huele a hamburguesa recién hecha en {nombre_local}, ¿quieres ver nuestras especialidades del día?",
-        "intencion": "consulta_menu"
-    }
-]
-
 respuestas_no_relacionadas = [
     {
         "mensaje": "Lo siento {nombre} 😅, no tengo información sobre eso. Pero si quieres, puedo mostrarte nuestro menú para que veas todas las opciones disponibles.",
@@ -94,15 +59,14 @@ respuestas_no_relacionadas = [
 ]
 
 # --- SUBFLUJOS INDIVIDUALES --- #
-def subflujo_saludo_bienvenida(nombre: str, nombre_local: str, sender: str) -> str:
+def subflujo_saludo_bienvenida(nombre: str, nombre_local: str, sender: str, mensaje_usuario: str) -> str:
     """Genera un mensaje de bienvenida personalizado."""
     try:
         logging.info(f"Generando mensaje de bienvenida para {nombre} en {nombre_local}.")
         log_message(f'Iniciando función <SubflujoSaludoBienvenida> para {nombre}.', 'INFO')
-
-        seleccion = random.choice(mensajes_bienvenida)
-        mensaje = seleccion["mensaje"].format(nombre=nombre, nombre_local=nombre_local)
-        intencion = seleccion["intencion"]
+        respuesta_gpt: dict = saludo_dynamic(mensaje_usuario, nombre, nombre_local)
+        mensaje = respuesta_gpt.get("mensaje")
+        intencion = respuesta_gpt.get("intencion", "consulta_menu")
         guardar_intencion_futura(sender, intencion)
         return mensaje
     except Exception as e:
@@ -249,7 +213,7 @@ def orquestador_subflujos(
         log_message(f"Empieza <OrquestadorSubflujos> con sender {sender} y tipo {clasificacion_mensaje}", "INFO")
         clasificacion_mensaje = clasificacion_mensaje.strip().lower()
         if clasificacion_mensaje == "saludo":
-            respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender)
+            respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender, pregunta_usuario)
             send_text_response(sender, respuesta_bot)
         elif clasificacion_mensaje == "solicitud_pedido":
             respuesta_bot = (
