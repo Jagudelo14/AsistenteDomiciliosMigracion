@@ -39,16 +39,16 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
           "entities": { }
         }
         Lista de intenciones posibles:
-        - confirmacion_general
+        - confirmacion_general (puede ser en otros idiomas: yes, oui, ja, etc.)
         - consulta_menu
         - consulta_pedido
         - consulta_promociones
-        - continuacion_pedido
+        - continuacion_pedido (puede ser en otros idiomas: yes, oui, ja, etc.)
         - direccion
         - info_personal
         - mas_datos_direccion
         - modificar_pedido
-        - negacion_general
+        - negacion_general (puede ser en otros idiomas: no, non, nein, etc.)
         - preguntas_generales
         - quejas (quejas de menor nivel: retraso en la entrega, mal servicio del domiciliario, problemas con la app, cocción desfasada solamente)
         - saludo
@@ -453,3 +453,83 @@ def sin_intencion_respuesta_variable(contenido_usuario: str, nombre_cliente: str
         log_message(f'Error en función <sin_intencion>: {e}', 'ERROR')
         logging.error(f"Error en función <sin_intencion>: {e}")
         return "Lo siento, no entendí tu mensaje. ¿Podrías repetirlo de otra forma?"
+
+def saludo_dynamic(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
+    try:
+        log_message('Iniciando función <saludo_dynamic>.', 'INFO')
+        PROMPT_SALUDO_DYNAMIC = """
+            Eres un asistente de un restaurante especializado en hamburguesas. 
+            Tu tarea es generar un saludo personalizado basado en el tono del cliente.
+
+            Aquí está el mensaje que envió el cliente: "{mensaje_usuario}"
+
+            REGLAS PARA EL TONO:
+            1. Si el usuario usa expresiones informales como:
+            "q hubo", "quiubo", "k hubo", "que más", "que mas", "q mas", 
+            "hey", "holi", "epa", "epaaa", "hoola", "hola parce", 
+            entonces:
+                - Usa un tono informal, juvenil, relajado, cercano.
+                - Puedes usar 1 emoji casual si queda natural.
+
+            2. Si el usuario usa expresiones formales como:
+            "buenas tardes", "buenos días", "buen dia", 
+            "cordial saludo", "mucho gusto", "estimados",
+            entonces:
+                - Usa un tono formal, profesional y respetuoso.
+                - Sin exagerar, pero claro y educado.
+
+            3. En cualquier otro caso:
+                - Usa un tono cordial estándar: amable, cálido, moderno, sin exageraciones.
+
+            REGLAS GENERALES:
+            - Incluye siempre el nombre del cliente: {nombre_cliente}
+            - Incluye siempre el nombre del local: {nombre_local}
+            - Máximo 1 o 2 frases.
+            - Puedes usar un emoji si el tono lo permite (nunca en tono formal).
+            - NO inventes productos.
+            - Solo puedes mencionar: “menú”, “promociones”, “burgers”, “recomendaciones”.
+            - Debes elegir UNA intención entre:
+                - "consulta_menu"
+                - "consulta_promociones"
+
+            La respuesta DEBE ser un JSON válido con esta estructura exacta:
+
+            {{
+                "mensaje": "texto aquí",
+                "intencion": "consulta_menu" 
+            }}
+
+            Genera solo el JSON, sin nada más.
+        """
+        client = OpenAI()
+        prompt = PROMPT_SALUDO_DYNAMIC.format(
+            nombre_cliente=nombre,
+            nombre_local=nombre_local,
+            mensaje_usuario=mensaje_usuario.lower()
+        )
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres un generador de saludos que adapta su tono al del cliente."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=150,
+            temperature=0.85
+        )
+        raw = response.choices[0].message.content.strip()
+        try:
+            data = json.loads(raw)
+        except:
+            data = {
+                "mensaje": f"¡Hola {nombre}! Bienvenido a {nombre_local}. ¿Quieres que te muestre el menú?",
+                "intencion": "consulta_menu"
+            }
+        log_message('Finalizando función <saludo_dynamic>.', 'INFO')
+        return data
+    except Exception as e:
+        log_message(f'Error en función <saludo_dynamic>: {e}', 'ERROR')
+        logging.error(f"Error en función <saludo_dynamic>: {e}")
+        return {
+            "mensaje": f"¡Hola {nombre}! Bienvenido a {nombre_local}. ¿Quieres que te muestre el menú?",
+            "intencion": "consulta_menu"
+        }
