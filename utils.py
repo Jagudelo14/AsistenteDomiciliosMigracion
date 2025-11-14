@@ -419,7 +419,7 @@ def obtener_intencion_futura(telefono: str) -> str:
             ORDER BY telefono ASC
             LIMIT 1;
         """
-        resultado = execute_query(query, (telefono,))
+        resultado = execute_query(query, (telefono,), fetchone=True)
         log_message(f"Intención futura obtenida para {telefono}: {resultado}", "INFO")
         if resultado:
             return resultado[0]
