@@ -92,104 +92,6 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
         send_text_response(sender, "Lo siento, hubo un error al procesar tu mensaje. ¿Podrías repetirlo?")
         return None, None, {}
 
-def analizar_respuesta_usuario_sin_intencion(respuesta_cliente: str, intencion_anterior: str, model: str = "gpt-3.5-turbo") -> dict:
-    """
-    Analiza si la respuesta del usuario tiene continuidad con la intención anterior.
-    
-    Parámetros:
-        respuesta_cliente (str): Respuesta dada por el usuario (e.g., "sí", "no", "no entiendo").
-        intencion_anterior (str): Intención previa detectada en el flujo conversacional.
-        model (str): Modelo de OpenAI a utilizar.
-    
-    Retorna:
-        dict: JSON con la estructura solicitada.
-    """
-    client: OpenAI = OpenAI()
-    prompt = f"""
-        Eres un asistente que analiza si la respuesta de un usuario mantiene continuidad con la intención anterior.
-        Tu salida debe ser un JSON EXACTO con la forma:
-        {{
-        "intencion_respuesta": "nombre_intencion",
-        "continuidad": bool,
-        "observaciones": "texto opcional si hay duda o ruptura de flujo"
-        }}
-
-        Ejemplos:
-
-        1️⃣
-        intencion_anterior: "consulta_promociones"
-        respuesta_cliente: "sí"
-        →
-        {{
-        "intencion_respuesta": "consulta_promociones",
-        "continuidad": true,
-        "observaciones": ""
-        }}
-
-        2️⃣
-        intencion_anterior: "consulta_promociones"
-        respuesta_cliente: "no"
-        →
-        {{
-        "intencion_respuesta": "consulta_promociones",
-        "continuidad": false,
-        "observaciones": "El usuario rechazó la continuidad de la promoción"
-        }}
-
-        3️⃣
-        intencion_anterior: "consulta_productos"
-        respuesta_cliente: "no entiendo"
-        →
-        {{
-        "intencion_respuesta": "consulta_productos",
-        "continuidad": false,
-        "observaciones": "El usuario parece confundido o necesita aclaración"
-        }}
-
-        4️⃣
-        intencion_anterior: "reclamo_servicio"
-        respuesta_cliente: "ya lo solucionaron"
-        →
-        {{
-        "intencion_respuesta": "reclamo_servicio",
-        "continuidad": false,
-        "observaciones": "El usuario indica que el problema ya se resolvió"
-        }}
-
-        5️⃣
-        intencion_anterior: "consulta_horarios"
-        respuesta_cliente: "perfecto, gracias"
-        →
-        {{
-        "intencion_respuesta": "consulta_horarios",
-        "continuidad": true,
-        "observaciones": "El usuario confirma que recibió la información"
-        }}
-
-        Ahora analiza:
-        intencion_anterior: "{intencion_anterior}"
-        respuesta_cliente: "{respuesta_cliente}"
-
-        Devuelve SOLO el JSON, sin explicación.
-    """ 
-    response = client.responses.create(
-        model=model,
-        input=prompt,
-        temperature=0.3
-    )
-    text_output = response.output[0].content[0].text.strip()
-    try:
-        result = json.loads(text_output)
-    except json.JSONDecodeError:
-        result = {
-            "intencion_respuesta": intencion_anterior,
-            "continuidad": False,
-            "observaciones": "Error al interpretar la respuesta del modelo"
-        }
-    log_message('Finalizando función <AnalizarRespuestaUsuarioSinIntencion>.', 'INFO')
-    log_message(f'Respuesta analizada: {result}', 'INFO')
-    return result
-
 def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, model: str = "gpt-3.5-turbo") -> dict:
     """
     Clasifica si una pregunta del usuario está relacionada con el menú o con servicios
@@ -321,7 +223,7 @@ def _extract_text_from_response(response) -> str:
     except Exception:
         return ""
 
-def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "gpt-4o") -> tuple:
+def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "gpt-4o") -> dict:
     """
     Responde preguntas del usuario sobre el menú o servicios del restaurante Sierra Nevada 🍔.
     Incluye información sobre horarios, sedes y medios de pago.
@@ -409,7 +311,7 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
         result.setdefault("recomendacion", False)
 
         log_message('Finalizando función <ResponderPreguntaMenuChatGPT>.', 'INFO')
-        return result, prompt
+        return result
 
     except Exception as e:
         logging.error(f"Error en <ResponderPreguntaMenuChatGPT>: {e}")
@@ -418,4 +320,136 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
             "respuesta": "Lo siento 😔, tuve un problema para responder tu pregunta.",
             "recomendacion": False,
             "productos": []
-        }, prompt
+        }
+
+def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model: str = "gpt-4o") -> dict:
+    """
+    Mapear los items provenientes del clasificador al menú usando gpt-4o.
+    - contenido_clasificador: dict con la salida del clasificador (ver ejemplo en tu mensaje).
+    - menu_items: lista de dicts con cada producto del menú, por ejemplo:
+        [
+          {"id": "p_001", "name": "Sierra Picante", "price": 14000, "aliases": ["sierra picante","sierra"]},
+          {"id": "p_002", "name": "Gaseosa 400ml", "price": 4000, "aliases": ["gaseosa","refresco"]}
+        ]
+    Devuelve un JSON con la forma especificada en el prompt.
+    """
+
+    client = OpenAI()  # instancia del cliente
+    # Construimos el prompt que recibirá gpt-4o
+    prompt = f"""
+Eres un asistente encargado de mapear pedidos (extraídos por un clasificador) a un MENÚ estructurado.
+Debes RESPONDER ÚNICA Y EXCLUSIVAMENTE con un JSON válido (sin texto adicional) con esta estructura:
+
+{{
+  "order_complete": true|false,           // true si TODOS los items fueron encontrados
+  "items": [
+    {{
+      "requested": {{ "producto": "...", "modalidad": "...", "especificaciones": [ ... ] }},
+      "status": "found" | "not_found" | "multiple_matches",
+      "matched": {{ "name": "...", "id": "...", "price": number }}  // si status == found
+      "candidates": [ {{ "name":"...", "id":"...", "price": number }}, ... ], // si status == multiple_matches
+      "modifiers_applied": [ ... ],   // incluir especificaciones tal como aparecen en requested si se aplican
+      "note": "texto corto si es necesario"  // ej. "producto exacto no hallado, se devolvieron candidatos"
+    }}
+  ],
+  "total_price": number  // suma de los precios de matched (ignorar cambios de precio por modificadores a menos que el menu indique un modificador con precio)
+}}
+
+REGLAS CLAVE:
+1) Usa exactamente el NOMBRE del producto como aparece en el campo 'name' del MENÚ cuando haya coincidencia.
+2) Haz matching case-insensitive y considera 'aliases' si están disponibles en el MENÚ.
+3) Si hay coincidencia exacta (nombre o alias) → status = "found" y devuelve name/id/price desde el menú.
+4) Si hay más de una coincidencia plausible y no hay forma de decidir exactamente → status = "multiple_matches" y devuelve up to 3 candidates (name,id,price).
+5) Si no encuentras ninguna coincidencia → status = "not_found". En ese caso coloca matched = {{}}, agrega note = "producto no encontrado" y AL FINAL del JSON setea "order_complete": false.
+6) Si cualquier item tiene status "not_found" → order_complete = false; si todos están "found" → order_complete = true.
+7) Si el menú incluye objetos 'modifiers' o precios por especificación, aplícalos; si no, inclúyelos en 'modifiers_applied' pero NO cambies el price base (a menos que el menú indique explícitamente el costo del modificador).
+8) Devuelve siempre números (no strings) para los precios y para total_price.
+9) No incluyas explicaciones, solo el JSON.
+
+A continuación se incluyen el MENU y la entrada del CLASIFICADOR (ambos en JSON). Usa esa información para mapear.
+
+MENU:
+{json.dumps(menu_items, ensure_ascii=False)}
+
+CLASIFICADOR:
+{json.dumps(contenido_clasificador, ensure_ascii=False)}
+
+Ejemplo (para orientación — NO lo copies como salida, la salida debe seguir la estructura anterior):
+Si el clasificador pide "sierra picante" con especificación ["extra ají"] y el menú tiene "Sierra Picante" con id "p_001" y price 14000 → status found y matched.name = "Sierra Picante", matched.id = "p_001", matched.price = 14000, modifiers_applied = ["extra ají"].
+
+DEVUELVE SOLO EL JSON.
+"""
+
+    try:
+        response = client.responses.create(
+            model=model,
+            input=prompt,
+            temperature=0
+        )
+
+        # Extraer texto (ajusta según la forma en que tu SDK devuelve el output)
+        text_output = response.output[0].content[0].text.strip()
+        result = json.loads(text_output)
+        return result
+
+    except json.JSONDecodeError:
+        logging.error("Error al parsear JSON desde el modelo. Output crudo:")
+        logging.error(text_output if 'text_output' in locals() else 'no output')
+        return {
+            "order_complete": False,
+            "items": [],
+            "total_price": 0,
+            "error": "parse_error",
+            "raw_output": text_output if 'text_output' in locals() else None
+        }
+    except Exception as e:
+        logging.exception("Error llamando al API")
+        return {
+            "order_complete": False,
+            "items": [],
+            "total_price": 0,
+            "error": str(e)
+        }
+    
+def sin_intencion_respuesta_variable(contenido_usuario: str, nombre_cliente: str) -> str:
+    try:
+        log_message('Iniciando función <sin_intencion>.', 'INFO')
+        PROMPT_SIN_INTENCION = (
+            "Eres un asistente amable pero con un toque de sarcasmo ligero y divertido.\n"
+            "Tu objetivo es responder cuando el usuario envía algo que no tiene sentido, "
+            "como una palabra suelta, emojis sin contexto, números o símbolos.\n\n"
+            "Reglas:\n"
+            "- Siempre responde con AMABILIDAD + SARCASMO SUAVE.\n"
+            "- Si el usuario manda algo random como 'a', 'su', emojis o banderas, "
+            "haz un comentario irónico pero respetuoso.\n"
+            "- Si manda banderas, puedes decir algo como: "
+            "\"No sé muy bien qué tiene que ver {contenido} con nuestro menú, pero...\".\n"
+            "- Siempre termina con un call to action invitando a repetir la pregunta o pedido.\n"
+            "- Usa el nombre del cliente si te lo paso como {nombre_cliente}.\n"
+            "- Máximo 1 o 2 frases, no más.\n"
+            "- Nunca inventes información del menú.\n\n"
+            "Contenido del usuario: \"{contenido}\"\n"
+            "Nombre del cliente: \"{nombre_cliente}\"\n\n"
+            "Responde de forma concisa y divertida aquí:"
+        )
+        client = OpenAI()
+        prompt = PROMPT_SIN_INTENCION.format(
+            contenido=contenido_usuario,
+            nombre_cliente=nombre_cliente
+        )
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres un asistente de un restaurante que responde con humor amable y ligero sarcasmo."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=80,
+            temperature=0.9
+        )
+        mensaje = response.choices[0].message.content
+        log_message('Finalizando función <sin_intencion>.', 'INFO')
+        return mensaje.strip()
+    except Exception as e:
+        log_message(f'Error en función <sin_intencion>: {e}', 'ERROR')
+        logging.error(f"Error en función <sin_intencion>: {e}")
+        return "Lo siento, no entendí tu mensaje. ¿Podrías repetirlo de otra forma?"
