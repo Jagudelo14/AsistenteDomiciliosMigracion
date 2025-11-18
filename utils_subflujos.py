@@ -2,6 +2,7 @@
 # Last modified: 2025-11-05 by Andrés Bermúdez
 
 import json
+import os
 import random
 import logging
 from typing import Any, Dict
@@ -16,7 +17,7 @@ from utils import (
     obtener_intencion_futura,
     borrar_intencion_futura
 )
-from utils_chatgpt import clasificar_pregunta_menu_chatgpt, responder_pregunta_menu_chatgpt, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable
+from utils_chatgpt import clasificar_pregunta_menu_chatgpt, responder_pregunta_menu_chatgpt, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable
 from utils_database import execute_query
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
@@ -224,6 +225,41 @@ def subflujo_quejas(sender: str, nombre_cliente: str, contenido_usuario: str) ->
         log_message(f'Error en <SubflujoQuejas>: {e}.', 'ERROR')
         raise e
 
+def subflujo_transferencia(sender: str, nombre_cliente: str, contenido_usuario: str) -> None:
+    try:
+        """Maneja la transferencia a un agente humano."""
+        log_message(f'Iniciando función <SubflujoTransferencia> para {sender}.', 'INFO')
+        respuesta_grave: dict = respuesta_quejas_graves_ia(contenido_usuario, nombre_cliente, "Sierra Nevada")
+        query: str = """
+            INSERT INTO quejas_graves (
+                sender,
+                queja_original,
+                entidades,
+                respuesta_agente,
+                accion_recomendada,
+                resumen_ejecutivo
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s
+            );
+        """
+        params = (
+            sender,
+            contenido_usuario,
+            json.dumps({"resumen_queja": respuesta_grave.get("resumen_queja")}),
+            respuesta_grave.get("respuesta_cordial"),
+            respuesta_grave.get("accion_recomendada"),
+            respuesta_grave.get("resumen_ejecutivo")
+        )
+        execute_query(query, params)
+        send_text_response(sender, respuesta_grave.get("respuesta_cordial"))
+        numero_admin: str = os.getenv("NUMERO_ADMIN")
+        send_text_response(numero_admin, f"Nuevo caso de queja grave de {nombre_cliente} ({sender}): {contenido_usuario}")
+        send_text_response(numero_admin, f"Resumen ejecutivo: {respuesta_grave.get('resumen_ejecutivo')}")
+        log_message('Registro de queja grave guardado correctamente.', 'INFO')
+    except Exception as e:
+        log_message(f'Error en <SubflujoTransferencia>: {e}.', 'ERROR')
+        raise e
+
 # --- ORQUESTADOR DE SUBFLUJOS --- #
 def orquestador_subflujos(
     sender: str,
@@ -268,6 +304,8 @@ def orquestador_subflujos(
             subflujo_sin_intencion(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "quejas":
             subflujo_quejas(sender, nombre_cliente, pregunta_usuario)
+        elif clasificacion_mensaje == "transferencia":
+            subflujo_transferencia(sender, nombre_cliente, pregunta_usuario)
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")
