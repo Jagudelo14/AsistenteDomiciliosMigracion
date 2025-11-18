@@ -653,3 +653,87 @@ def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) ->
             "resumen_queja": "Queja leve del cliente.",
             "intencion": "quejas"
         }
+
+def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
+    try:
+        log_message('Iniciando función <respuesta_quejas_graves_ia>.', 'INFO')
+        PROMPT_QUEJA_GRAVE = """
+            Eres el asistente oficial de servicio al cliente de Sierra Nevada, La Cima del Sabor.
+
+            Esta vez atenderás *quejas graves*, donde puede que el pedido NO haya llegado,
+            haya habido un error fuerte, mala manipulación o tiempo excesivo.
+
+            ***OBJETIVO GENERAL***
+            - Calmar al cliente.
+            - Asumir responsabilidad sin culpas excesivas.
+            - Dar una ACCIÓN clara y concreta que el asistente realizará.
+            - Preparar un resumen ejecutivo para un administrador humano.
+            - NO escalar directamente en el mensaje al cliente (solo en el resumen interno).
+            - Máximo 2 frases, tono cálido, humano, cercano, estilo Sierra Nevada, colombiano neutro.
+
+            ***DEBES ENTREGAR ESTOS CAMPOS***
+            1. "respuesta_cordial": Mensaje calmado, empático y con acción concreta 
+            (ej: “reviso ya mismo con cocina y logística”, “activo seguimiento con el punto”).
+            2. "resumen_queja": Descripción breve de lo que reclama el cliente.
+            3. "accion_recomendada": Acción clara que el sistema/administrador debe hacer 
+            (ej: verificar estado del pedido, contactar punto, revisar domiciliario).
+            4. "resumen_ejecutivo": Resumen para administrador (breve, objetivo, sin adornos).
+            5. "intencion": Siempre "queja_grave".
+
+            ***TONO***
+            - Cálido y responsable.
+            - Sin tecnicismos ni sarcasmo.
+            - Evita respuestas robóticas.
+            - Máximo un emoji, si fluye natural.
+
+            Cliente llamado {nombre} escribió:
+            "{mensaje_usuario}"
+
+            ***FORMATO OBLIGATORIO***
+            Devuelve SOLO un JSON válido:
+            {{
+                "respuesta_cordial": "",
+                "resumen_queja": "",
+                "accion_recomendada": "",
+                "resumen_ejecutivo": "",
+                "intencion": "queja_grave"
+            }}
+        """
+        client = OpenAI()
+        prompt = PROMPT_QUEJA_GRAVE.format(
+            mensaje_usuario=mensaje_usuario,
+            nombre=nombre
+        )
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres un generador de respuestas para quejas graves de clientes."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=220,
+            temperature=0.6
+        )
+        raw = response.choices[0].message.content.strip()
+        # Intentar parsear JSON
+        try:
+            data = json.loads(raw)
+        except:
+            data = {
+                "respuesta_cordial": f"{nombre}, ya reviso lo ocurrido con tu experiencia en {nombre_local} y activo el seguimiento de inmediato.",
+                "resumen_queja": "Queja grave del cliente sobre servicio o pedido.",
+                "accion_recomendada": "Revisión urgente con el punto y estado del pedido.",
+                "resumen_ejecutivo": "Cliente reporta una queja grave; requiere revisión del punto y logística.",
+                "intencion": "queja_grave"
+            }
+        log_message('Finalizando función <respuesta_quejas_graves_ia>.', 'INFO')
+        return data
+    except Exception as e:
+        log_message(f'Error en función <respuesta_quejas_graves_ia>: {e}', 'ERROR')
+        logging.error(f"Error en función <respuesta_quejas_graves_ia>: {e}")
+        return {
+            "respuesta_cordial": f"{nombre}, reviso de inmediato lo que pasó con tu experiencia en {nombre_local}.",
+            "resumen_queja": "Queja grave del cliente.",
+            "accion_recomendada": "Verificar con el punto y logística.",
+            "resumen_ejecutivo": "Error en el proceso automático, requiere revisión manual.",
+            "intencion": "queja_grave"
+        }
