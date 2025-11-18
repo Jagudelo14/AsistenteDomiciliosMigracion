@@ -1,6 +1,7 @@
 # utils_subflujos.py
 # Last modified: 2025-11-05 by Andrés Bermúdez
 
+import json
 import random
 import logging
 from typing import Any, Dict
@@ -15,7 +16,7 @@ from utils import (
     obtener_intencion_futura,
     borrar_intencion_futura
 )
-from utils_chatgpt import clasificar_pregunta_menu_chatgpt, responder_pregunta_menu_chatgpt, saludo_dynamic, sin_intencion_respuesta_variable
+from utils_chatgpt import clasificar_pregunta_menu_chatgpt, responder_pregunta_menu_chatgpt, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable
 from utils_database import execute_query
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
@@ -195,6 +196,33 @@ def subflujo_sin_intencion(sender: str, nombre_cliente: str, contenido_usuario: 
         log_message(f'Error en <SubflujoSinIntencion>: {e}.', 'ERROR')
         raise e
 
+def subflujo_quejas(sender: str, nombre_cliente: str, contenido_usuario: str) -> None:
+    """Maneja quejas de menor nivel."""
+    try:
+        log_message(f'Iniciando función <SubflujoQuejas> para {sender}.', 'INFO')
+        respuesta_quejas: dict = respuesta_quejas_ia(contenido_usuario, nombre_cliente, "Sierra Nevada")
+        query = """
+            INSERT INTO quejas (
+                sender,
+                queja_original,
+                entidades,
+                respuesta_agente,
+                fecha_hora
+            ) VALUES (%s, %s, %s, %s, NOW());
+        """
+        params = (
+            sender,
+            contenido_usuario,
+            json.dumps({"resumen_queja": respuesta_quejas.get("resumen_queja")}),
+            respuesta_quejas.get("respuesta_cordial")
+        )
+        execute_query(query, params)
+        send_text_response(sender, respuesta_quejas.get("respuesta_cordial"))
+        log_message('Registro de queja leve guardado correctamente.', 'INFO')
+    except Exception as e:
+        logging.error(f"Error en <SubflujoQuejas>: {e}")
+        log_message(f'Error en <SubflujoQuejas>: {e}.', 'ERROR')
+        raise e
 
 # --- ORQUESTADOR DE SUBFLUJOS --- #
 def orquestador_subflujos(
@@ -238,6 +266,8 @@ def orquestador_subflujos(
             subflujo_preguntas_generales(sender, pregunta_usuario, nombre_cliente)
         elif clasificacion_mensaje == "sin_intencion":
             subflujo_sin_intencion(sender, nombre_cliente, pregunta_usuario)
+        elif clasificacion_mensaje == "quejas":
+            subflujo_quejas(sender, nombre_cliente, pregunta_usuario)
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")
