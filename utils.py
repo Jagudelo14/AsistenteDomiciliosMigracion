@@ -1007,3 +1007,57 @@ def to_json_safe(value):
     if isinstance(value, time):
         return value.strftime("%H:%M")
     return value
+
+def actualizar_total_productos(sender: str, codigo_unico: str, nuevo_total: float, id_promocion_str: str):
+    """
+    Actualiza total_productos e id_promocion del pedido según codigo_unico y sender.
+    Retorna el idpedido y los valores actualizados.
+    """
+
+    try:
+        log_message("Iniciando <actualizar_total_productos>", "INFO")
+
+        # Convertir id_promocion recibido como str
+        # Si viene vacío, nulo o no numérico -> lo guardamos como None
+        try:
+            id_promocion = int(id_promocion_str) if id_promocion_str and id_promocion_str.isdigit() else None
+        except:
+            id_promocion = None
+
+        query = """
+            UPDATE pedidos
+            SET total_productos = %s,
+                id_promocion = %s
+            WHERE codigo_unico = %s
+              AND id_whatsapp = (
+                    SELECT id_whatsapp
+                    FROM clientes_whatsapp
+                    WHERE telefono = %s
+                )
+            RETURNING idpedido, total_productos, id_promocion;
+        """
+
+        params = (nuevo_total, id_promocion, codigo_unico, sender)
+        res = execute_query(query, params, fetchone=True)
+
+        if not res:
+            return {
+                "success": False,
+                "mensaje": "No encontré un pedido con ese código para este usuario."
+            }
+
+        idpedido, total_actualizado, promo_actualizada = res
+        log_message(f"Total actualizado para pedido {idpedido}: {total_actualizado}, promoción: {promo_actualizada}", "INFO")
+        return {
+            "success": True,
+            "idpedido": idpedido,
+            "total_productos": float(total_actualizado),
+            "id_promocion": promo_actualizada
+        }
+
+    except Exception as e:
+        log_message(f"Error en <actualizar_total_productos>: {e}", "ERROR")
+        return {
+            "success": False,
+            "mensaje": f"Error: {e}"
+        }

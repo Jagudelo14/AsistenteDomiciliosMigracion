@@ -10,6 +10,7 @@ from typing import Any, Dict
 
 # --- IMPORTS INTERNOS --- #
 from utils import (
+    actualizar_total_productos,
     eliminar_pedido,
     guardar_intencion_futura,
     guardar_ordenes,
@@ -29,10 +30,11 @@ from utils import (
     send_text_response,
     guardar_clasificacion_intencion,
     obtener_intencion_futura,
-    borrar_intencion_futura
+    borrar_intencion_futura,
+    to_json_safe
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_pedido, mapear_pedido_al_menu, pedido_incompleto_dynamic, responder_pregunta_menu_chatgpt, responder_sobre_pedido, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago
-from utils_database import execute_query
+from utils_chatgpt import actualizar_pedido_con_mensaje, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_pedido, interpretar_eleccion_promocion, mapear_pedido_al_menu, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago
+from utils_database import execute_query, execute_query_columns
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
 respuestas_no_relacionadas = [
@@ -93,6 +95,7 @@ def subflujo_saludo_bienvenida(nombre: str, nombre_local: str, sender: str, mens
 def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text: str, id_ultima_intencion: str) -> None:
     """Genera un mensaje para solicitar la ubicación del usuario o pedir más detalles si el pedido no está completo."""
     try:
+        bandera_promocion: bool = False
         bandera_revision: bool = False
         log_message(f'Iniciando función <SubflujoSolicitudPedido> para {sender}.', 'INFO')
         items_menu: list = obtener_menu()
@@ -111,15 +114,31 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
             pedido_dict = mapear_pedido_al_menu(entidades_text, items_menu)
         send_text_response(sender, str(pedido_dict))
         if not pedido_dict.get("order_complete", False):
-            no_completo: dict = pedido_incompleto_dynamic(pregunta_usuario, items_menu, str(pedido_dict))
+            no_completo: dict = pedido_incompleto_dynamic_promocion(pregunta_usuario, items_menu, str(pedido_dict))
             send_text_response(sender, no_completo.get("mensaje"))
             guardar_intencion_futura(sender, "continuacion_pedido", str(pedido_dict), no_completo.get("mensaje"), pregunta_usuario)
             return
         pedido_info = guardar_pedido_completo(sender, pedido_dict, es_temporal=True)
         items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict)
-        confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict)
+        info_promociones = None
+        eleccion_promocion = None
+        if obtener_intencion_futura(sender) == "continuacion_promocion":
+            send_text_response(sender, "Procesando tu pedido basado en la promoción...")
+            info_promociones = obtener_intencion_futura_observaciones(sender)
+            respuesta_previa_promocion = obtener_intencion_futura_mensaje_chatbot(sender)
+            eleccion_promocion = interpretar_eleccion_promocion(pregunta_usuario, info_promociones, respuesta_previa_promocion, pedido_dict)
+            send_text_response(sender, f"Elección de promoción interpretada: {str(eleccion_promocion)}")
+            if eleccion_promocion.get("valida_promocion"):
+                actualizar_total_productos(sender, pedido_info['codigo_unico'], float(eleccion_promocion.get("total_final", pedido_info.get("total_productos", 0.0))), eleccion_promocion.get("idpromocion", ""))
+                bandera_promocion = True
+            else:
+                no_completo: dict = pedido_incompleto_dynamic_promocion(pregunta_usuario, items_menu, str(pedido_dict))
+                send_text_response(sender, no_completo.get("mensaje"))
+                borrar_intencion_futura(sender)
+                return
+        confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
         send_text_response(sender, confirmacion_pedido.get("mensaje"))
-        guardar_intencion_futura(sender, confirmacion_pedido.get("intencion_siguiente", "confirmacion_pedido"), pedido_info['codigo_unico'])
+        guardar_intencion_futura(sender, confirmacion_pedido.get("intencion_siguiente", "confirmar_pedido"), pedido_info['codigo_unico'])
         marcar_intencion_como_resuelta(id_ultima_intencion)
     except Exception as e:
         logging.error(f"Error en <SubflujoSolicitudPedido>: {e}")
@@ -168,7 +187,7 @@ def subflujo_negacion_general(sender: str, respuesta_cliente: str, nombre_client
             "observaciones": respuesta_cliente
         }
         log_message(f'Respuesta analizada: {analisis}', 'INFO')
-        if anterior_intencion == "confirmacion_pedido":
+        if anterior_intencion == "confirmar_pedido":
             codigo_unico_temp: str = obtener_intencion_futura_observaciones(sender)
             dict_temp_cancelacion: dict = generar_mensaje_cancelacion(sender, codigo_unico_temp, nombre_cliente)
             datos_eliminar: dict = eliminar_pedido(sender, codigo_unico_temp)
@@ -337,6 +356,39 @@ def subflujo_consulta_pedido(sender: str, nombre_cliente: str, entidades: str, p
         log_message(f'Error en <SubflujoConsultaPedido>: {e}.', 'ERROR')
         raise e
 
+def subflujo_promociones(sender: str, nombre_cliente: str, pregunta_usuario: str) -> None:
+    """Maneja la consulta de promociones por parte del usuario."""
+    try:
+        log_message(f'Iniciando función <SubflujoPromociones> para {sender}.', 'INFO')
+        promos_rows, promo_cols = execute_query_columns(
+            """
+            SELECT *
+            FROM promociones
+            WHERE fecha_inicio <= NOW()
+              AND fecha_fin >= NOW()
+              AND estado = 'true';
+            """,
+            fetchone=False,
+            return_columns=True
+        )
+        promociones_info = [
+            {col: to_json_safe(val) for col, val in zip(promo_cols, row)}
+            for row in promos_rows
+        ]
+        respuesta = responder_sobre_promociones(
+            nombre=nombre_cliente,
+            nombre_local="Sierra Nevada",
+            promociones_info=promociones_info,
+            pregunta_usuario=pregunta_usuario
+        )
+        send_text_response(sender, respuesta["mensaje"])
+        guardar_intencion_futura(sender, respuesta.get("futura_intencion", "continuacion_promocion"), str(promociones_info), respuesta["mensaje"], pregunta_usuario)
+        log_message(f'Promociones enviadas correctamente a {sender}.', 'INFO')
+    except Exception as e:
+        log_message(f'Error en <SubflujoPromociones>: {e}.', 'ERROR')
+        raise e
+
+
 # --- ORQUESTADOR DE SUBFLUJOS --- #
 def orquestador_subflujos(
     sender: str,
@@ -356,15 +408,16 @@ def orquestador_subflujos(
         if clasificacion_mensaje == "saludo":
             respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender, pregunta_usuario)
             send_text_response(sender, respuesta_bot)
-        elif clasificacion_mensaje == "solicitud_pedido":
+        elif clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "continuacion_promocion":
+
             subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, id_ultima_intencion)
         elif clasificacion_mensaje == "confirmacion_general":
             return subflujo_confirmacion_general(sender, pregunta_usuario)
         elif clasificacion_mensaje == "negacion_general":
             subflujo_negacion_general(sender, pregunta_usuario, nombre_cliente)
         elif clasificacion_mensaje == "consulta_promociones":
-            send_text_response(sender, "Claro, aquí tienes nuestras promociones actuales...")
-            borrar_intencion_futura(sender)
+            subflujo_promociones(sender, nombre_cliente, pregunta_usuario)
+           
         elif clasificacion_mensaje == "consulta_menu" and type_text != "pregunta" and type_text != "preguntas_generales":
             subflujo_consulta_menu(sender, nombre_cliente)
             borrar_intencion_futura(sender)
@@ -376,10 +429,13 @@ def orquestador_subflujos(
             subflujo_quejas(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "transferencia":
             subflujo_transferencia(sender, nombre_cliente, pregunta_usuario)
-        elif clasificacion_mensaje == "confirmacion_pedido":
+        elif clasificacion_mensaje == "confirmar_pedido":
             subflujo_confirmacion_pedido(sender, nombre_cliente)
         elif clasificacion_mensaje == "consulta_pedido":
             subflujo_consulta_pedido(sender, nombre_cliente, entidades_text, pregunta_usuario)
+        elif clasificacion_mensaje == "validacion_pago" and obtener_intencion_futura(sender) == "medio_pago":
+            pass
+            
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")
