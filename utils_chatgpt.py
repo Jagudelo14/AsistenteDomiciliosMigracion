@@ -1143,59 +1143,124 @@ def actualizar_pedido_con_mensaje(
 
 def generar_mensaje_confirmacion_pedido(
         pedido_json: dict,
+        promocion: bool = False,
+        promociones_info: list = None,
+        pedido_completo_promocion: dict = None,
         model: str = "gpt-4o",
     ) -> dict:
     """
-    Genera un JSON con el mensaje de confirmación de pedido.
-    Formato de salida:
-    {
-        "mensaje": "...",
-        "siguiente_intencion": "confirmar_pedido"
-    }
+    Genera un mensaje de confirmación de pedido.
+    - Si promocion=False → usa el prompt normal con pedido_json.
+    - Si promocion=True → usa un prompt especial basado en promociones_info y pedido_completo_promocion.
     """
+
+    raw = ""  # para debug si falla
+
     try:
         client = OpenAI()
-        prompt = f"""
-            Eres un asistente de WhatsApp de un restaurante llamado Sierra Nevada, La Cima del Sabor.
-            TU NOMBRE ES PAKO.
-            RECIBES un JSON de pedido ya completo y validado:
-            {json.dumps(pedido_json, ensure_ascii=False)}
-            TU MISIÓN:
-            1. Generar un MENSAJE amable y claro para el cliente preguntando por la confirmación de lo que pidió.
-            - Lista cada producto.
-            - Incluye sus modificadores (por ejemplo: "sin cebolla").
-            - Muestra su precio individual.
-            - Muestra el total.
-            - No inventes productos ni precios.
-            2. Devuelve un JSON **VÁLIDO** así:
-            {{
-            "mensaje": "mensaje natural preguntando por la confirmación del pedido",
-            "siguiente_intencion": "confirmar_pedido"
-            }}
-            REGLAS:
-            - No incluyas ningún texto fuera del JSON.
-            - No uses emojis.
-            - Mensaje corto, conversacional, profesional.
-            - Usa un tono cálido, cercano y respetuoso, al estilo Sierra Nevada.
-            - siempre confirma si el pedido está correcto y pregunta si desea confirmar: ¿Desea confirmar su pedido? | ¿Es correcto su pedido?.
-        """
+
+        # ------------------------------------------------------------------
+        # PROMPT NORMAL (sin promoción)
+        # ------------------------------------------------------------------
+        if not promocion:
+            prompt = f"""
+                Eres un asistente de WhatsApp de un restaurante llamado Sierra Nevada, La Cima del Sabor.
+                TU NOMBRE ES PAKO.
+                RECIBES un JSON de pedido ya completo y validado:
+                {json.dumps(pedido_json, ensure_ascii=False)}
+
+                TU MISIÓN:
+                1. Generar un MENSAJE amable y claro para el cliente preguntando por la confirmación de lo que pidió.
+                - Lista cada producto.
+                - Incluye sus modificadores ("sin cebolla", etc.).
+                - Muestra precios individuales.
+                - Muestra el total.
+                - No inventes productos ni precios.
+
+                2. Devuelve un JSON VÁLIDO:
+                {{
+                    "mensaje": "mensaje natural preguntando por la confirmación del pedido",
+                    "intencion_siguiente": "confirmar_pedido"
+                }}
+
+                REGLAS:
+                - No incluyas texto fuera del JSON.
+                - No uses emojis.
+                - Mensaje corto, conversacional, profesional.
+                - Tono cálido y cercano, estilo Sierra Nevada.
+                - Debes cerrar preguntando si desea confirmar: "¿Desea confirmar su pedido?" o "¿Es correcto su pedido?".
+            """
+
+        # ------------------------------------------------------------------
+        # PROMPT ESPECIAL (promoción=True) - CORREGIDO
+        # ------------------------------------------------------------------
+        else:
+            if promociones_info is None or pedido_completo_promocion is None:
+                raise ValueError("Cuando promocion es True, promociones_info y pedido_completo_promocion son obligatorios.")
+
+            # Incluimos tanto el pedido original (pedido_json) como el pedido con la promoción aplicada (pedido_completo_promocion)
+            # IMPORTANTE: escapamos las llaves del JSON de formato con {{ }} donde corresponde.
+            prompt = f"""
+                Eres PAKO, asistente oficial del restaurante Sierra Nevada.
+
+                RECIBES:
+                1) Pedido original detectado (fuente de todos los productos):
+                {json.dumps(pedido_json, ensure_ascii=False)}
+
+                2) Resultado del análisis de promoción (si existe), con precios finales aplicados:
+                {json.dumps(pedido_completo_promocion, ensure_ascii=False)}
+
+                3) Listado de promociones vigentes:
+                {json.dumps(promociones_info, ensure_ascii=False)}
+
+                TU MISIÓN (PROMOCIÓN):
+                - Explicar al cliente en lenguaje natural qué incluye la promoción identificada.
+                - Mostrar claramente QUÉ productos de su pedido entraron en la promoción y cuáles NO.
+                - Para cada producto del pedido (tanto promocionado como no):
+                  * indicar nombre,
+                  * precio original,
+                  * precio final que pagará (después de la promoción),
+                  * marcar si la promoción fue aplicada.
+                - Indicar el precio especial TOTAL de la promoción y el TOTAL FINAL del pedido (suma de todos los final_price).
+                - No inventes nada: usa SOLO la información en los JSON arriba (pedido_json, pedido_completo_promocion, promociones_info).
+
+                FORMATO OBLIGATORIO (JSON sin texto adicional). Usa exactamente estas claves:
+                {{
+                    "mensaje": "Mensaje en lenguaje natural, breve y cálido, explicando la promoción y listando los productos promocionados y no promocionados. Finalizar con pregunta de confirmación.",
+                    "intencion_siguiente": "confirmar_pedido"
+                }}
+
+                REGLAS ESTILÍSTICAS:
+                - Mensaje corto (1-3 frases principales + listado corto).
+                - Tono: cálido, profesional y cercano.
+                - No uses emojis.
+                - No incluyas la "fórmula interna" de cálculo (ej. no explicar cómo se dividió el precio); sí debes mostrar los precios finales por producto.
+                - Final obligatorio: pregunta si desea confirmar la promoción/pedido, por ejemplo: "¿Desea confirmar esta promoción y proceder con el pedido?".
+            """
+
+        # Enviar al modelo
         response = client.responses.create(
             model=model,
             input=prompt,
             temperature=0
         )
+
         raw = response.output[0].content[0].text.strip()
+
+        # Limpieza de bloques ```json
         clean = raw
         clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
         clean = re.sub(r'^```', '', clean).strip()
         clean = re.sub(r'```$', '', clean).strip()
+
         log_message('Finalizando función <generar_mensaje_confirmacion_pedido>.', 'INFO')
         return json.loads(clean)
+
     except Exception as e:
         log_message(f'Error en función <generar_mensaje_confirmacion_pedido>: {e}', 'ERROR')
         return {
             "mensaje": "Hubo un error generando el mensaje de confirmación.",
-            "siguiente_intencion": "confirmar_pedido",
+            "intencion_siguiente": "confirmar_pedido",
             "raw_output": raw
         }
 
@@ -1448,4 +1513,298 @@ def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: dict, pr
         return {
             "mensaje": f"{nombre}, tuve un problema procesando tu solicitud, pero si quieres puedo mostrarte el menú o las promociones.",
             "futura_intencion": "consulta_menu"
+        }
+    
+def responder_sobre_promociones(nombre: str, nombre_local: str, promociones_info: list, pregunta_usuario: str) -> dict:
+    """
+    Similar a responder_sobre_pedido, pero ahora responde únicamente
+    sobre promociones y nada más. Basado SOLO en promociones_info.
+    """
+    try:
+        log_message('Iniciando función <ResponderSobrePromociones>.', 'INFO')
+
+        # Convertir valores a JSON-safe (Decimal, datetime, etc.)
+        promociones_serializables = []
+        for promo in promociones_info:
+            limpio = {k: to_json_safe(v) for k, v in promo.items()}
+            promociones_serializables.append(limpio)
+
+        PROMPT = f"""
+        Eres PAKO, la voz oficial, alegre y amigable de {nombre_local}.
+        Estas son las promociones disponibles hoy:
+        {json.dumps(promociones_serializables, ensure_ascii=False)}
+
+        PREGUNTA DEL USUARIO:
+        "{pregunta_usuario}"
+
+        REGLAS IMPORTANTES:
+        - SOLO puedes responder basándote en las promociones dentro del JSON mostrado arriba.
+        - Si el usuario pregunta algo que NO está en las promociones (precio, disponibilidad, fechas, condiciones, etc.)
+          debes responder: "No tengo ese dato exacto", y ofrecer consultar menú o ver más promociones.
+        - Estilo: cálido, amable, alegre, un poquito divertido, sin sarcasmo y sin exagerar.
+        - Máximo 2 frases.
+        - Siempre incluir un llamado a la acción para "consultar menú" o "consultar promociones".
+        - No inventes datos adicionales.
+        - No menciones que eres una IA.
+        - NO inventar promociones nuevas, solo usar las listadas.
+        - Siempre haz un llamado a la acción al final para hacer pedido con base a las promociones listadas.
+
+        OPCIONES válidas para futura_intencion:
+        - "continuacion_promocion"
+
+        FORMATO DE RESPUESTA OBLIGATORIO:
+        {{
+          "mensaje": "texto aquí",
+          "futura_intencion": "continuacion_promocion"
+        }}
+
+        NINGÚN TEXTO por fuera del JSON.
+        """
+
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": f"Eres PAKO, representante alegre y amigable de {nombre_local}, experto en promociones."},
+                {"role": "user", "content": PROMPT}
+            ],
+            max_tokens=350,
+            temperature=0.85
+        )
+
+        raw = response.choices[0].message.content.strip()
+
+        try:
+            data = json.loads(raw)
+        except:
+            data = {
+                "mensaje": f"{nombre}, aquí en {nombre_local} tengo varias promociones buenísimas. "
+                           f"Si quieres, puedo mostrarte más o llevarte al menú.",
+                "futura_intencion": "continuacion_promocion"
+            }
+
+        log_message('Finalizando función <ResponderSobrePromociones>.', 'INFO')
+        return data
+
+    except Exception as e:
+        log_message(f'Error en función <ResponderSobrePromociones>: {e}', 'ERROR')
+        logging.error(f"Error en función <ResponderSobrePromociones>: {e}")
+        return {
+            "mensaje": f"{nombre}, tuve un problema procesando las promociones, pero si quieres puedo mostrarte el menú o las promos disponibles.",
+            "futura_intencion": "continuacion_promocion"
+        }
+
+
+def interpretar_eleccion_promocion(pregunta_usuario: str, info_promociones_str: str, respuesta_previa_promocion: str, pedido_dict: dict) -> dict:
+    """
+    info_promociones_str: viene como STR desde intencion_futura → lo convertimos a lista
+    pedido_dict: contiene items, total_price, etc.
+    """
+    try:
+        info_promociones = ast.literal_eval(info_promociones_str)
+    except:
+        info_promociones = []
+    prompt = f"""
+        Eres un sistema experto en análisis de promociones.
+        ### Productos del pedido:
+        {pedido_dict}
+        ### Promociones disponibles:
+        {info_promociones}
+        ### Mensaje previo del chatbot:
+        "{respuesta_previa_promocion}"
+        ### Mensaje actual del usuario:
+        "{pregunta_usuario}"
+        Tu tarea:
+        1. Detecta qué productos del pedido califican para cada promoción.
+        2. Evalúa TODAS las promociones y determina la(s) que realmente aplican.
+        3. Calcula el total_final correspondiente a la mejor promoción (mayor beneficio).
+        4. Devuelve SOLO la mejor promoción aplicable.
+        5. Si NO aplica ninguna promoción, responde con:
+        - valida_promocion = false
+        - total_final = total_original
+        - idpromocion = ""
+
+        ### Importante:
+        - No inventes promociones, usa SOLO las del input.
+        - Usa los precios reales en pedido_dict['items'][i]['matched']['price'].
+        - Solo una promoción final debe seleccionarse.
+
+        ### Salida OBLIGATORIA (JSON PURO):
+
+        {{
+        "valida_promocion": true/false,
+        "idpromocion": "",
+        "total_final": 0,
+        "nombre_promocion": "",
+        "motivo": "Explicación clara"
+        }}
+        """
+    client = OpenAI()
+    response = client.responses.create(
+        model="gpt-4o",
+        input=prompt,
+        max_output_tokens=500
+    )
+    try:
+        data = json.loads(response.output_text)
+    except:
+        data = {
+            "valida_promocion": False,
+            "idpromocion": "",
+            "total_final": pedido_dict.get("total_price", 0),
+            "nombre_promocion": "",
+            "motivo": "Error interpretando la IA"
+        }
+    return data
+
+def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: str, json_pedido: str) -> dict:
+    try:
+        log_message('Iniciando función <pedido_incompleto_dynamic_promocion>.', 'INFO')
+
+        PROMPT_PEDIDO_INCOMPLETO = """
+        Eres la voz oficial de Sierra Nevada, La Cima del Sabor. Te llamas PAKO.
+
+        El cliente escribió: "{mensaje_usuario}"
+        El gestor de pedidos detectó que el pedido está INCOMPLETO o POCO CLARO:
+        {json_pedido}
+
+        Tu tarea:
+        - Responder SOLO con un JSON válido.
+        - NO inventar productos. NO mencionar nada que NO esté en el menú.
+
+        REGLA NUEVA (indispensable):
+        - Si el pedido actual contiene productos que NO pertenecen a ninguna promoción activa,
+          debes decir amablemente:
+            * "Por favor elige solo los productos de la promoción disponible,
+               o inicia un pedido desde cero escribiendo 'menu' u 'hola'."
+        - NO debes continuar el flujo ni pedir aclaraciones del pedido.
+        - NO sugerir menú completo si el usuario está en un flujo de promoción.
+        - NO permitir mezclar productos de promo con productos normales.
+
+        Otras reglas:
+        - Si el cliente pide algo que NO existe en el menú, indícalo y sugiere 1 a 3 opciones reales.
+        - Si pide algo muy general (ej: “una hamburguesa”), sugiere opciones específicas del menú.
+        - SIEMPRE pedir que el cliente vuelva a escribir todo su pedido claramente,
+          excepto cuando esté mezclando cosas fuera de la promoción (ver regla nueva).
+
+        Responde SOLO este formato exacto:
+        {{
+            "mensaje": "texto aquí",
+            "recomendaciones": ["op1", "op2"],
+            "intencion": "consulta_menu"
+        }}
+
+        Reglas estrictas:
+        - No inventes productos.
+        - Usa ÚNICAMENTE nombres EXACTOS del menú.
+
+        Aquí está las promociones disponibles:
+        {promociones_str}
+
+        LAS HAMBURGESAS SE LLAMAN:
+            "Veggie Queso"
+            "La Insaciable"
+            "Sierra Bomba"
+            "Sierra Mulata"
+            "Sierra Pagüer"
+            "Sierra Picante"
+            "Sierra Costeña"
+            "Sierra Melao"
+            "Sierra Clasica"
+            "Camino a la cima"
+            "Sierra Queso"
+
+        HAY PERROS CALIENTES LLAMADOS:
+            "Super Perro"
+            "Super Chanchita"
+            "Perro Tocineta"
+
+        CUANDO PIDAN UN ADICIONAL EN CUALQUIER PRODUCTO, SOLO PUEDE SER:
+            "Carne de res 120g"
+            "Cebollas caramelizadas"
+            "Cebollas caramelizadas picantes"
+            "Pepinillos agridulces"
+            "Plátano maduro frito"
+            "Suero costeño"
+            "Chicharrón"
+            "Tocineta"
+            "Queso costeño frito"
+            "Queso cheddar"
+
+        CUANDO PIDAN SALSAS, SOLO PUEDE SER:
+            "Salsa de tomate"
+            "Salsa mostaza"
+            "Salsa bbq"
+            "Salsa mayonesa"
+
+        CUANDO PIDAN BEBIDAS, SOLO PUEDE SER:
+            "Malteada de Vainilla"
+            "Malteada de Mil0"
+            "Malteada de Frutos Rojos"
+            "Malteada de Chocolate y avellanas"
+            "Malteada de Arequipe"
+            "Malteada Oblea"
+            "Malteada Galleta"
+            "Fuze tea de manzana 400 ml"
+            "Fuze tea de limón 400 ml"
+            "Fuze tea de durazno 400 ml"
+            "Kola Roman 400 ml"
+            "Quatro 400 ml"
+            "Sprite 400ml"
+            "Coca Cola Sin Azúcar 400 ml"
+            "Coca Cola Original 400 ml"
+            "Agua normal 600 ml"
+            "Agua con gas 600ml"
+            "Limonada de panela orgánica 350Ml"
+
+        CUANDO PIDAN ACOMPAÑAMIENTOS, SOLO PUEDE SER:
+            "Platanitos maduros"
+            "Papas Costeñas (francesas medianas + 4 deditos de queso costeño)"
+            "Costeñitos fritos + Suero Costeño"
+            "Anillos de Cebolla"
+            "Papas francesas"
+        """
+
+        # Crear listado de menú para incluir en el prompt
+        promociones_str = str(promociones_lst)
+
+        prompt = PROMPT_PEDIDO_INCOMPLETO.format(
+            mensaje_usuario=mensaje_usuario.lower(),
+            promociones_str=promociones_str,
+            json_pedido=json_pedido
+        )
+
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "Eres PAKO, asistente oficial de Sierra Nevada."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=200,
+            temperature=0.2
+        )
+
+        raw = response.choices[0].message.content.strip()
+
+        try:
+            data = json.loads(raw)
+        except Exception:
+            
+            data = {
+                "mensaje": "Por favor elige solo los productos de la promoción o inicia un pedido desde cero escribiendo 'menu' u 'hola'.",
+                "recomendaciones": [],
+                "intencion": "consulta_menu"
+            }
+
+        log_message('Finalizando función <pedido_incompleto_dynamic_promocion>.', 'INFO')
+        return data
+
+    except Exception as e:
+        log_message(f'Error en función <pedido_incompleto_dynamic_promocion>: {e}', 'ERROR')
+        
+        return {
+            "mensaje": "Por favor elige solo los productos de la promoción o inicia un pedido desde cero escribiendo 'menu' u 'hola'.",
+            "recomendaciones": [],
+            "intencion": "consulta_menu"
         }
