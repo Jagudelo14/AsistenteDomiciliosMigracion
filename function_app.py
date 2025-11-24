@@ -114,7 +114,6 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
         else:
             nombre_cliente = get_client_name_database(sender, ID_RESTAURANTE)
-            send_text_response(sender, f"tipo de mensaje recibido: {tipo_general}")
             if tipo_general == "text":
                 text: str = message.get("text", {}).get("body", "")
                 if not text:
@@ -176,3 +175,43 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         log_message(f'Error al hacer uso de función <ProcessMessage>: {e}.', 'ERROR')
         logging.error(f"⚠️ Error procesando POST: {e}")
         return func.HttpResponse("Error", status_code=400)
+
+@app.function_name(name="health_check")
+@app.route(route="health", auth_level=func.AuthLevel.ANONYMOUS, methods=["GET", "POST"])
+def health_check(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Endpoint simple para probar disponibilidad desde Postman.
+    - GET → responde con OK + tiempo
+    - POST → devuelve el JSON recibido
+    """
+    try:
+        if req.method == "GET":
+            return func.HttpResponse(
+                json.dumps({"status": "OK", "message": "Servicio activo"}),
+                status_code=200,
+                mimetype="application/json"
+            )
+
+        if req.method == "POST":
+            body_raw = req.get_body().decode("utf-8")
+            try:
+                body = json.loads(body_raw)
+            except:
+                body = body_raw  # por si mandas texto plano
+
+            return func.HttpResponse(
+                json.dumps({
+                    "status": "OK",
+                    "received": body
+                }),
+                status_code=200,
+                mimetype="application/json"
+            )
+
+    except Exception as e:
+        logging.error(f"Error en /health: {e}")
+        return func.HttpResponse(
+            json.dumps({"status": "ERROR", "detail": str(e)}),
+            status_code=500,
+            mimetype="application/json"
+        )
