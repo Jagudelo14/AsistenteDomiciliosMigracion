@@ -9,15 +9,26 @@ from typing import Any, Dict
 
 # --- IMPORTS INTERNOS --- #
 from utils import (
+    eliminar_pedido,
     guardar_intencion_futura,
+    guardar_ordenes,
+    guardar_pedido_completo,
     log_message,
     marcar_intencion_como_resuelta,
+    marcar_pedido_como_definitivo,
+    normalizar_entities_items,
+    obtener_intencion_futura_mensaje_chatbot,
+    obtener_intencion_futura_mensaje_usuario,
+    obtener_intencion_futura_observaciones,
+    obtener_menu,
+    obtener_pedido_por_codigo,
+    obtener_ultima_intencion_no_resuelta,
     send_text_response,
     guardar_clasificacion_intencion,
     obtener_intencion_futura,
     borrar_intencion_futura
 )
-from utils_chatgpt import clasificar_pregunta_menu_chatgpt, responder_pregunta_menu_chatgpt, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable
+from utils_chatgpt import actualizar_pedido_con_mensaje, clasificar_pregunta_menu_chatgpt, generar_mensaje_cancelacion, generar_mensaje_confirmacion_pedido, mapear_pedido_al_menu, pedido_incompleto_dynamic, responder_pregunta_menu_chatgpt, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago
 from utils_database import execute_query
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
@@ -76,13 +87,37 @@ def subflujo_saludo_bienvenida(nombre: str, nombre_local: str, sender: str, mens
         log_message(f'Error en <SubflujoSaludoBienvenida>: {e}.', 'ERROR')
         raise e
 
-def subflujo_solicitud_pedido(sender: str, respuesta_bot: str, entidades_text: str, id_ultima_intencion: str) -> None:
-    """Genera un mensaje para solicitar la ubicación del usuario."""
+def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text: str, id_ultima_intencion: str) -> None:
+    """Genera un mensaje para solicitar la ubicación del usuario o pedir más detalles si el pedido no está completo."""
     try:
-        send_text_response(sender, "Perfecto, estoy listo para ayudarte con tu pedido.")
-        guardar_intencion_futura(sender, "direccion")
+        bandera_revision: bool = False
+        log_message(f'Iniciando función <SubflujoSolicitudPedido> para {sender}.', 'INFO')
+        items_menu: list = obtener_menu()
+        pedido_dict: dict = {}
+        if obtener_intencion_futura(sender) == "continuacion_pedido":
+            send_text_response(sender, "Procesando tu pedido anterior...")
+            observaciones_pedido = obtener_intencion_futura_observaciones(sender)
+            mensaje_chatbot_intencion_futura: str = obtener_intencion_futura_mensaje_chatbot(sender)
+            mensaje_usuario_intencion_futura: str = obtener_intencion_futura_mensaje_usuario(sender)
+            pedido_dict = actualizar_pedido_con_mensaje(observaciones_pedido, pregunta_usuario, items_menu, mensaje_chatbot_intencion_futura, mensaje_usuario_intencion_futura)
+            send_text_response(sender, f"Pedido actualizado: {str(pedido_dict)}")
+            bandera_revision = True
+            borrar_intencion_futura(sender)
+        if not bandera_revision:
+            entidades_text = normalizar_entities_items(entidades_text)
+            pedido_dict = mapear_pedido_al_menu(entidades_text, items_menu)
+        send_text_response(sender, str(pedido_dict))
+        if not pedido_dict.get("order_complete", False):
+            no_completo: dict = pedido_incompleto_dynamic(pregunta_usuario, items_menu, str(pedido_dict))
+            send_text_response(sender, no_completo.get("mensaje"))
+            guardar_intencion_futura(sender, "continuacion_pedido", str(pedido_dict), no_completo.get("mensaje"), pregunta_usuario)
+            return
+        pedido_info = guardar_pedido_completo(sender, pedido_dict, es_temporal=True)
+        items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict)
+        confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict)
+        send_text_response(sender, confirmacion_pedido.get("mensaje"))
+        guardar_intencion_futura(sender, confirmacion_pedido.get("intencion_siguiente", "confirmacion_pedido"), pedido_info['codigo_unico'])
         marcar_intencion_como_resuelta(id_ultima_intencion)
-        
     except Exception as e:
         logging.error(f"Error en <SubflujoSolicitudPedido>: {e}")
         log_message(f'Error en <SubflujoSolicitudPedido>: {e}.', 'ERROR')
@@ -112,7 +147,7 @@ def subflujo_confirmacion_general(sender: str, respuesta_cliente: str) -> Dict[s
         log_message(f'Error en <SubflujoConfirmacionGeneral>: {e}.', 'ERROR')
         raise e
 
-def subflujo_negacion_general(sender: str, respuesta_cliente: str) -> Dict[str, Any]:
+def subflujo_negacion_general(sender: str, respuesta_cliente: str, nombre_cliente: str) -> Dict[str, Any]:
     """Maneja el caso en que no se detecta una intención específica, con ayuda de IA."""
     try:
         log_message(f"Iniciando función <SubflujoNegacionGeneral> para {sender}.", "INFO")
@@ -130,8 +165,14 @@ def subflujo_negacion_general(sender: str, respuesta_cliente: str) -> Dict[str, 
             "observaciones": respuesta_cliente
         }
         log_message(f'Respuesta analizada: {analisis}', 'INFO')
+        if anterior_intencion == "confirmacion_pedido":
+            codigo_unico_temp: str = obtener_intencion_futura_observaciones(sender)
+            dict_temp_cancelacion: dict = generar_mensaje_cancelacion(sender, codigo_unico_temp, nombre_cliente)
+            datos_eliminar: dict = eliminar_pedido(sender, codigo_unico_temp)
+            send_text_response(sender, dict_temp_cancelacion.get("mensaje"))
+        else:
+            send_text_response(sender, "Entendido. Si necesitas algo más, no dudes en escribirme. ¡Estoy aquí para ayudarte!")
         borrar_intencion_futura(sender)
-        send_text_response(sender, "Entendido. Si necesitas algo más, no dudes en escribirme. ¡Estoy aquí para ayudarte!")
         return analisis
     except Exception as e:
         logging.error(f"Error en <SubflujoNegacionGeneral>: {e}")
@@ -146,28 +187,7 @@ def subflujo_preguntas_generales(sender: str, pregunta_usuario: str, nombre_clie
         clasificacion_tipo = clasificacion.get("clasificacion", "no_relacionada")
 
         if clasificacion_tipo == "relacionada":
-            query = """
-                SELECT 
-                    nombre, 
-                    tipo_comida, 
-                    descripcion, 
-                    observaciones, 
-                    precio
-                FROM public.items
-                WHERE estado = true
-                ORDER BY tipo_comida, nombre;
-                """
-            items_data = execute_query(query)
-            items = [
-                {
-                    "nombre": row[0],
-                    "tipo_comida": row[1],
-                    "descripcion": row[2],
-                    "observaciones": row[3],
-                    "precio": float(row[4]) if row[4] is not None else 0.0
-                }
-                for row in items_data
-            ]
+            items: list[dict[str, Any]] = obtener_menu()
             respuesta_llm: dict = responder_pregunta_menu_chatgpt(pregunta_usuario, items)
             send_text_response(sender, respuesta_llm.get("respuesta"))
             send_text_response(sender, respuesta_llm.get("productos", ""))
@@ -260,6 +280,26 @@ def subflujo_transferencia(sender: str, nombre_cliente: str, contenido_usuario: 
         log_message(f'Error en <SubflujoTransferencia>: {e}.', 'ERROR')
         raise e
 
+def subflujo_confirmacion_pedido(sender: str, nombre_cliente: str) -> Dict[str, Any]:
+    try:
+        """Maneja la confirmación del pedido por parte del usuario."""
+        log_message(f'Iniciando función <SubflujoConfirmacionPedido> para {sender}.', 'INFO')
+        codigo_unico: str = obtener_intencion_futura_observaciones(sender)
+        confirmar_dict: dict = marcar_pedido_como_definitivo(sender, codigo_unico)
+        pedido_temp: dict = obtener_pedido_por_codigo(sender, codigo_unico)
+        total_pedido: float = confirmar_dict.get("total_productos", 0.0)
+        if total_pedido > 200000:
+            numero_admin: str = os.getenv("NUMERO_ADMIN")
+            send_text_response(numero_admin, f"Atención: Pedido grande confirmado por {nombre_cliente} ({sender}) por un total de {total_pedido}. Código único: {codigo_unico}.")
+            send_text_response(sender, f"Un asesor se comunicará contigo muy pronto.")
+        mensaje_medio_pago: dict = solicitar_medio_pago(nombre_cliente, codigo_unico, "Sierra Nevada", pedido_temp.get("producto", ""))
+        send_text_response(sender, mensaje_medio_pago.get("mensaje"))
+        guardar_intencion_futura(sender, "medio_pago")
+        log_message(f'Pedido {confirmar_dict.get("codigo_unico")} confirmado correctamente para {sender}.', 'INFO')
+    except Exception as e:
+        log_message(f'Error en <SubflujoConfirmacionPedido>: {e}.', 'ERROR')
+        raise e
+
 # --- ORQUESTADOR DE SUBFLUJOS --- #
 def orquestador_subflujos(
     sender: str,
@@ -286,17 +326,17 @@ def orquestador_subflujos(
                 if bandera_externo else
                 f"¡Perfecto, {nombre_cliente}! Para continuar con tu pedido, por favor envíame tu ubicación exacta."
             )
-            subflujo_solicitud_pedido(sender, respuesta_bot, entidades_text, id_ultima_intencion)
+            subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, id_ultima_intencion)
             #borrar_intencion_futura(sender)
         elif clasificacion_mensaje == "confirmacion_general":
             return subflujo_confirmacion_general(sender, pregunta_usuario)
         elif clasificacion_mensaje == "negacion_general":
-            subflujo_negacion_general(sender, pregunta_usuario)
+            subflujo_negacion_general(sender, pregunta_usuario, nombre_cliente)
         elif clasificacion_mensaje == "consulta_promociones":
             send_text_response(sender, "Claro, aquí tienes nuestras promociones actuales...")
             borrar_intencion_futura(sender)
         elif clasificacion_mensaje == "consulta_menu" and type_text != "pregunta" and type_text != "preguntas_generales":
-            send_text_response(sender, "Por supuesto, este es nuestro menú digital...")
+            
             borrar_intencion_futura(sender)
         elif clasificacion_mensaje == "preguntas_generales" or (clasificacion_mensaje == "consulta_menu" and (type_text == "pregunta" or type_text == "preguntas_generales")):
             subflujo_preguntas_generales(sender, pregunta_usuario, nombre_cliente)
@@ -306,6 +346,9 @@ def orquestador_subflujos(
             subflujo_quejas(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "transferencia":
             subflujo_transferencia(sender, nombre_cliente, pregunta_usuario)
+        elif clasificacion_mensaje == "confirmacion_pedido":
+            subflujo_confirmacion_pedido(sender, nombre_cliente)
+        
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")

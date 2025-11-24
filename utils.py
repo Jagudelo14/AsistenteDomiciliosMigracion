@@ -4,13 +4,22 @@
 import logging
 import os
 from heyoo import WhatsApp
-import json
 import re
 import ast
-from typing import Any
 from utils_database import execute_query
 import inspect
 import traceback
+from typing import Tuple, Optional, Dict, Any, List
+from datetime import datetime
+from zoneinfo import ZoneInfo
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import json
+
+REPLACE_PHRASES = [
+    "cambia todo", "borra lo que había", "solo quiero esto", "quita lo anterior",
+    "nuevo pedido", "empezar de cero", "anula pedido", "cancelar pedido", "resetear pedido",
+    "empezar from cero", "empezar de 0"
+]
 
 def register_log(mensaje: str, tipo: str, ambiente: str = "Whatsapp", idusuario: int = 1, archivoPy: str = "", function_name: str = "",line_number: int = 0) -> None:
     try:
@@ -387,21 +396,24 @@ def marcar_intencion_como_resuelta(id_intencion: int) -> bool:
         log_message(f"Error al actualizar la intención {id_intencion} a 'resuelta': {e}", "ERROR")
         return False
 
-def guardar_intencion_futura(telefono: str, intencion_futura: str):
+def guardar_intencion_futura(telefono: str, intencion_futura: str, observaciones: str = "", mensaje_chatbot: str = "", mensaje_usuario: str = "") -> None:
     """
     Inserta o actualiza la intención futura de un cliente según su número de teléfono.
     Si no existe el registro, lo crea. Si ya existe, actualiza la intención.
     """
     try:
         query = """
-            INSERT INTO clasificacion_intenciones_futuras (telefono, intencion_futura, fecha_actualizacion)
-            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            INSERT INTO clasificacion_intenciones_futuras (telefono, intencion_futura, fecha_actualizacion, observaciones, mensaje_chatbot, mensaje_usuario)
+            VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
             ON CONFLICT (telefono)
             DO UPDATE SET
                 intencion_futura = EXCLUDED.intencion_futura,
-                fecha_actualizacion = CURRENT_TIMESTAMP;
+                fecha_actualizacion = CURRENT_TIMESTAMP,
+                observaciones = EXCLUDED.observaciones,
+                mensaje_chatbot = EXCLUDED.mensaje_chatbot,
+                mensaje_usuario = EXCLUDED.mensaje_usuario;
         """
-        execute_query(query, (telefono, intencion_futura))
+        execute_query(query, (telefono, intencion_futura, observaciones, mensaje_chatbot, mensaje_usuario))
         log_message(f"Intención futura guardada/actualizada para {telefono}: {intencion_futura}", "INFO")
     except Exception as e:
         log_message(f"Error al guardar la intención futura: {e}", "ERROR")
@@ -447,3 +459,469 @@ def borrar_intencion_futura(telefono: str) -> bool:
     except Exception as e:
         log_message(f"Error al eliminar registro para {telefono}: {e}", "ERROR")
         return False
+
+def obtener_menu() -> list[dict[str, Any]]:
+    try:
+        log_message("Iniciando función <ObtenerMenu>.", "INFO")
+        query = """
+                SELECT 
+                    nombre, 
+                    tipo_comida, 
+                    descripcion, 
+                    observaciones, 
+                    precio
+                FROM public.items
+                WHERE estado = true
+                ORDER BY tipo_comida, nombre;
+                """
+        items_data = execute_query(query)
+        items = [
+            {
+                "nombre": row[0],
+                "tipo_comida": row[1],
+                "descripcion": row[2],
+                "observaciones": row[3],
+                "precio": float(row[4]) if row[4] is not None else 0.0
+            }
+            for row in items_data
+            ]
+        log_message("Menú obtenido exitosamente.", "INFO")
+        return items
+    except Exception as e:
+        log_message(f"Error al obtener el menú: {e}", "ERROR")
+        return []
+
+def normalizar_entities_items(entities: dict) -> dict:
+    try:
+        log_message('Iniciando función <NormalizarEntitiesItems>.', 'INFO')
+        items = entities.get("items", [])
+        resultado = {}
+        for item in items:
+            producto = item.get("producto", "").strip().lower()
+            modalidad = item.get("modalidad", "")
+            especificaciones = tuple(sorted(item.get("especificaciones", [])))
+            cantidad = item.get("cantidad", 1)
+            # clave única por producto + mods + modalidad
+            key = (producto, especificaciones, modalidad)
+            if key in resultado: # si ya existía, sumamos cantidad
+                resultado[key]["cantidad"] += cantidad
+            else:
+                resultado[key] = {
+                    "producto": producto,
+                    "modalidad": modalidad,
+                    "especificaciones": list(especificaciones),
+                    "cantidad": cantidad }
+            # Reemplazar la lista vieja por la normalizada
+        entities["items"] = list(resultado.values())
+        log_message('Finalizando función <NormalizarEntitiesItems>.', 'INFO')
+        return entities
+    except Exception as e:
+        log_message(f"Error en función <NormalizarEntitiesItems>: {e}", "ERROR")
+        return entities
+
+def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = False) -> dict:
+    try:
+        """ Guarda un pedido completo en la BD y retorna: { "idpedido": X, "codigo_unico": "P-00015" } """
+        log_message('Iniciando función <GuardarPedidoCompleto>.', 'INFO')
+        # ------------------------------- # 1. Obtener id_whatsapp # -------------------------------
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
+        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        id_whatsapp = res_idw[0] if res_idw else None
+        # ------------------------------- # 2. Determinar si es persona nueva # -------------------------------
+        q_prev = "SELECT COUNT(*) FROM pedidos WHERE id_whatsapp = %s"
+        res_prev = execute_query(q_prev, (id_whatsapp,), fetchone=True)
+        persona_nuevo = (res_prev[0] == 0)
+        # ------------------------------- # 3. Obtener último código único # -------------------------------
+        q_last_code = "SELECT codigo_unico FROM pedidos ORDER BY idpedido DESC LIMIT 1"
+        res_last_code = execute_query(q_last_code, fetchone=True)
+        if res_last_code: 
+            last_code = res_last_code[0] # Ej: "P-00042"
+            num = int(last_code.split("-")[1])
+            new_num = num + 1
+        else:
+            new_num = 1
+        codigo_unico = f"P-{new_num:05d}" 
+        # ------------------------------- # 4. Preparar productos y total # ------------------------------- 
+        productos = []
+        for item in pedido_dict.get("items", []):
+            productos.append(item["matched"]["name"])
+        productos_str = " | ".join(productos)
+        total_price = float(pedido_dict.get("total_price", 0))
+        # ------------------------------- # 5. Hora y fecha Bogotá # -------------------------------
+        now = datetime.now(ZoneInfo("America/Bogota"))
+        fecha = now.date().isoformat()
+        hora = now.strftime("%H:%M")
+        # ------------------------------- # 6. Campos fijos # ------------------------------- 
+        idcliente = 1
+        idsede = 1
+        estado = "pendiente"
+        metodo_pago = "efectivo"
+        # ------------------------------- # 7. Query con RETURNING # -------------------------------
+        query = """ INSERT INTO pedidos ( producto, total_productos, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING idpedido, codigo_unico """
+        params = ( productos_str, total_price, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal )
+        # ------------------------------- # 8. Ejecutar y retornar el id # -------------------------------
+        res = execute_query(query, params, fetchone=True)
+        log_message(f'Pedido guardado con ID {res[0]} y código único {res[1]}', 'INFO')
+        return {
+            "idpedido": res[0],
+            "codigo_unico": res[1]
+            }
+    except Exception as e:
+        log_message(f'Error al hacer uso de función <GuardarPedidoCompleto>: {e}.', 'ERROR')
+        logging.error(f'Error al hacer uso de función <GuardarPedidoCompleto>: {e}.')
+        return {}
+
+def guardar_ordenes(idpedido: int, pedido_json: dict) -> dict:
+    """
+    Guarda cada item del pedido en la tabla 'ordenes'.
+    Estructura esperada de pedido_json:
+    {
+        "order_complete": true/false,
+        "items": [
+            {
+                "requested": {
+                    "producto": "string",
+                    "modalidad": "",
+                    "especificaciones": []
+                },
+                "matched": {
+                    "name": "string",
+                    "id": "",
+                    "price": float
+                },
+                ...
+            }
+        ],
+        "total_price": float
+    }
+    """
+    try:
+        log_message('Iniciando función <GuardarOrdenes>.', 'INFO')
+        items = pedido_json.get("items", [])
+        if not items:
+            raise ValueError("El JSON no contiene items para guardar en ordenes.")
+        inserted_ids = []
+        for item in items:
+            # Datos del item
+            matched = item.get("matched", {})
+            requested = item.get("requested", {})
+            nombre_producto = matched.get("name", requested.get("producto"))
+            precio_producto = matched.get("price", 0)
+            especificaciones_list = requested.get("especificaciones", [])
+            especificaciones_texto = ", ".join(especificaciones_list) if especificaciones_list else ""
+            # Query INSERT
+            query = """
+                INSERT INTO ordenes (
+                    desglose_productos,
+                    desglose_precio,
+                    id_whatsapp,
+                    idpedidos,
+                    especificaciones
+                )
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING idorden;
+            """
+            params = (
+                nombre_producto,
+                precio_producto,
+                1,                 # id_whatsapp fijo
+                idpedido,
+                especificaciones_texto
+                )
+            result = execute_query(query, params, fetchone=True)
+            inserted_ids.append(result[0])
+        log_message(f'Ordenes guardadas con IDs: {inserted_ids}', 'INFO')
+        return {
+            "status": "success",
+            "mensaje": f"{len(inserted_ids)} registros insertados en ordenes.",
+            "ordenes_ids": inserted_ids
+        }
+    except Exception as e:
+        log_message(f'Error al hacer uso de función <GuardarOrdenes>: {e}.', 'ERROR')
+        return {
+            "status": "error",
+            "mensaje": str(e)
+        }
+
+def obtener_intencion_futura_observaciones(telefono: str) -> str:
+    """
+    Retorna el valor de intencion_futura para un teléfono específico
+    desde la tabla public.clasificacion_intenciones_futuras.
+    """
+    try:
+        query = """
+            SELECT observaciones
+            FROM public.clasificacion_intenciones_futuras
+            WHERE telefono = %s
+            ORDER BY telefono ASC
+            LIMIT 1;
+        """
+        resultado = execute_query(query, (telefono,), fetchone=True)
+        log_message(f"Intención futura - observaciones obtenida para {telefono}: {resultado}", "INFO")
+        if resultado:
+            return resultado[0]
+        else:
+            return None
+    except Exception as e:
+        log_message(f"Error al consultar la base de datos: {e}")
+        return None
+
+def obtener_intencion_futura_mensaje_chatbot(telefono: str) -> str:
+    """
+    Retorna el valor de intencion_futura para un teléfono específico
+    desde la tabla public.clasificacion_intenciones_futuras.
+    """
+    try:
+        query = """
+            SELECT mensaje_chatbot
+            FROM public.clasificacion_intenciones_futuras
+            WHERE telefono = %s
+            ORDER BY telefono ASC
+            LIMIT 1;
+        """
+        resultado = execute_query(query, (telefono,), fetchone=True)
+        log_message(f"Intención futura - mensaje_chatbot obtenida para {telefono}: {resultado}", "INFO")
+        if resultado:
+            return resultado[0]
+        else:
+            return None
+    except Exception as e:
+        log_message(f"Error al consultar la base de datos: {e}")
+        return None
+
+def obtener_intencion_futura_mensaje_usuario(telefono: str) -> str:
+    """
+    Retorna el valor de intencion_futura para un teléfono específico
+    desde la tabla public.clasificacion_intenciones_futuras.
+    """
+    try:
+        query = """
+            SELECT mensaje_usuario
+            FROM public.clasificacion_intenciones_futuras
+            WHERE telefono = %s
+            ORDER BY telefono ASC
+            LIMIT 1;
+        """
+        resultado = execute_query(query, (telefono,), fetchone=True)
+        log_message(f"Intención futura - mensaje_usuario obtenida para {telefono}: {resultado}", "INFO")
+        if resultado:
+            return resultado[0]
+        else:
+            return None
+    except Exception as e:
+        log_message(f"Error al consultar la base de datos: {e}")
+        return None
+
+def _safe_parse_order(pedido_actual: Any) -> Dict:
+    """Convierte pedido_actual a dict incluso si viene como repr de python (comillas simples)."""
+    if isinstance(pedido_actual, dict):
+        return pedido_actual
+    if isinstance(pedido_actual, str):
+        # intentar json primero (por si viene bien formado)
+        try:
+            return json.loads(pedido_actual)
+        except Exception:
+            pass
+        # intentar ast.literal_eval (acepta comillas simples, True/False, None)
+        try:
+            parsed = ast.literal_eval(pedido_actual)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    # fallback: estructura vacía mínima
+    return {"order_complete": False, "items": [], "total_price": 0}
+
+def _normalize_name(item: Dict) -> str:
+    """Extrae un nombre normalizado para detectar duplicados."""
+    name = ""
+    if isinstance(item, dict):
+        matched = item.get("matched") or {}
+        name = matched.get("name") or item.get("requested", {}).get("producto") or item.get("name") or ""
+    return re.sub(r'\s+', ' ', str(name or "")).strip().lower()
+
+def _price_of_item(it: Dict) -> float:
+    """Extrae el precio multiplicado por cantidad de un item de forma segura."""
+    if not isinstance(it, dict):
+        return 0.0
+    matched = it.get("matched") or {}
+    price = matched.get("price") or it.get("price") or 0
+    # posibles claves para cantidad
+    qty = it.get("quantity") or it.get("qty") or it.get("cantidad") or 1
+    # normalizar qty
+    try:
+        qty_num = float(qty)
+    except Exception:
+        try:
+            qty_num = float(str(qty).strip()) if str(qty).strip() else 1.0
+        except Exception:
+            qty_num = 1.0
+    try:
+        price_num = float(price)
+    except Exception:
+        price_num = 0.0
+    return round(price_num * qty_num, 2)
+
+def _merge_items(base_items: List[Dict], new_items: List[Dict], replace_all: bool = False) -> List[Dict]:
+    """Fusiona base_items y new_items evitando duplicados. Si replace_all=True, devuelve solo new_items."""
+    if replace_all:
+        # mantener orden y normalizar
+        seen = set()
+        out = []
+        for it in new_items:
+            key = _normalize_name(it)
+            if key not in seen:
+                seen.add(key)
+                out.append(it)
+        return out
+
+    merged = {}
+    # primero los base (preferir los base si el modelo no incluye matched info)
+    for it in base_items or []:
+        key = _normalize_name(it)
+        if key:
+            merged[key] = it
+    # luego agregar/sobrescribir con lo nuevo (priorizar lo que vino del modelo)
+    for it in new_items or []:
+        key = _normalize_name(it)
+        if not key:
+            # si no hay nombre normalizable, agregar con sufijo único
+            key = f"_unknown_{len(merged)}"
+        merged[key] = it
+    return list(merged.values())
+
+def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
+    try:
+        log_message('Iniciando función <MarcarPedidoComoDefinitivo>.', 'INFO')
+
+        # 1. Obtener id_whatsapp igual que en guardar_pedido_completo
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
+        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        id_whatsapp = res_idw[0] if res_idw else None
+
+        if id_whatsapp is None:
+            return {
+                "actualizado": False,
+                "msg": "No existe id_whatsapp para este número."
+            }
+        # 2. UPDATE para cambiar es_temporal a FALSE
+        query = """
+            UPDATE pedidos
+            SET es_temporal = FALSE
+            WHERE codigo_unico = %s
+              AND id_whatsapp = %s
+            RETURNING idpedido;
+        """
+        params = (codigo_unico, id_whatsapp)
+        res = execute_query(query, params, fetchone=True)
+        if res:
+            return {
+                "actualizado": True,
+                "idpedido": res[0],
+                "codigo_unico": codigo_unico
+            }
+        else:
+            return {
+                "actualizado": False,
+                "msg": "No se encontró un pedido temporal con ese código y ese id_whatsapp."
+            }
+    except Exception as e:
+        log_message(f'Error en <MarcarPedidoComoDefinitivo>: {e}', 'ERROR')
+        logging.error(f'Error en marcar_pedido_como_definitivo: {e}')
+        return {"actualizado": False, "error": str(e)}
+
+def eliminar_pedido(sender: str, codigo_unico: str) -> dict:
+    try:
+        log_message('Iniciando función <EliminarPedido>.', 'INFO')
+
+        # 1. Obtener id_whatsapp
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
+        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        id_whatsapp = res_idw[0] if res_idw else None
+
+        if id_whatsapp is None:
+            return {
+                "eliminado": False,
+                "msg": "No existe id_whatsapp para este número."
+            }
+
+        # 2. Eliminar ordenes asociadas al pedido
+        query = """
+            DELETE FROM ordenes
+            WHERE idpedidos = (
+                SELECT idpedido
+                FROM pedidos
+                WHERE codigo_unico = %s
+                AND id_whatsapp = %s
+            );
+        """
+        params = (codigo_unico, id_whatsapp)
+        execute_query(query, params)
+
+        # 3. Eliminar el pedido
+        query_2 = """
+            DELETE FROM pedidos
+            WHERE codigo_unico = %s
+            AND id_whatsapp = %s
+            RETURNING idpedido;
+        """
+        res = execute_query(query_2, params, fetchone=True)
+        log_message(f'Pedido eliminado con código único {codigo_unico}', 'INFO')
+        if res:
+            return {
+                "eliminado": True,
+                "idpedido": res[0],
+                "codigo_unico": codigo_unico
+            }
+        else:
+            return {
+                "eliminado": False,
+                "msg": "No se encontró un pedido con ese código y ese id_whatsapp."
+            }
+    except Exception as e:
+        log_message(f'Error en <EliminarPedido>: {e}', 'ERROR')
+        logging.error(f'Error en eliminar_pedido: {e}')
+        return {"eliminado": False, "error": str(e)}
+    
+def obtener_pedido_por_codigo(sender: str, codigo_unico: str) -> dict:
+    try:
+        log_message('Iniciando función <ObtenerPedidoPorCodigo>.', 'INFO')
+
+        # 1. Obtener id_whatsapp
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
+        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        id_whatsapp = res_idw[0] if res_idw else None
+
+        if id_whatsapp is None:
+            return {
+                "exito": False,
+                "msg": "No existe id_whatsapp para este número."
+            }
+
+        # 2. Traer registro
+        query = """
+            SELECT producto, total_productos, codigo_unico
+            FROM pedidos
+            WHERE codigo_unico = %s
+              AND id_whatsapp = %s;
+        """
+        params = (codigo_unico, id_whatsapp)
+        res = execute_query(query, params, fetchone=True)
+        log_message(f'Pedido obtenido con código único {codigo_unico}', 'INFO')
+        if res:
+            return {
+                "exito": True,
+                "producto": res[0],
+                "total_productos": res[1],
+                "codigo_unico": res[2]
+            }
+        else:
+            return {
+                "exito": False,
+                "msg": "No se encontró un pedido con ese código y ese id_whatsapp."
+            }
+
+    except Exception as e:
+        log_message(f'Error en <ObtenerPedidoPorCodigo>: {e}', 'ERROR')
+        logging.error(f'Error en obtener_pedido_por_codigo: {e}')
+        return {"exito": False, "error": str(e)}
