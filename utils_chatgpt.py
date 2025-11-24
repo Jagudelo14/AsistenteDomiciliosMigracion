@@ -8,7 +8,7 @@ from typing import Any, List, Optional, Tuple, Dict
 import os
 import json
 import ast
-from utils import REPLACE_PHRASES, obtener_pedido_por_codigo, send_text_response, limpiar_respuesta_json, log_message, _safe_parse_order, _merge_items, _price_of_item
+from utils import REPLACE_PHRASES, obtener_pedido_por_codigo, send_text_response, limpiar_respuesta_json, log_message, _safe_parse_order, _merge_items, _price_of_item, convert_decimals, to_json_safe
 
 def get_openai_key() -> str:
     try:
@@ -645,15 +645,12 @@ def saludo_dynamic(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict
             - Escoge UNA intención entre:
                 - "consulta_menu"
                 - "consulta_promociones"
-
             FORMATO:
             Debes responder en un JSON válido:
-
             {{
                 "mensaje": "texto aquí",
                 "intencion": "consulta_menu"
             }}
-
             No incluyas texto adicional fuera del JSON.
             """
         client = OpenAI()
@@ -701,9 +698,7 @@ def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) ->
             - Con un toque de sabor y buena energía, sin sonar exagerado.
             - Orgullosamente colombiano, pero sin clichés.
             - Hablas como un buen anfitrión bogotano: amable, claro y sin jerga popular.
-
             El cliente llamado {nombre} escribió lo siguiente: "{mensaje_usuario}"
-
             OBJETIVO:
             - Tranquilizar al cliente.
             - Validar su experiencia sin culpas ni defensividad.
@@ -737,7 +732,6 @@ def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) ->
                 "resumen_queja": "texto aquí",
                 "intencion": "queja_leve"
             }
-
             Genera solo el JSON sin texto adicional.
             """
         client = OpenAI()
@@ -761,7 +755,6 @@ def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) ->
             temperature=0.6
         )
         raw = response.choices[0].message.content.strip()
-        # Intentar parsear JSON
         try:
             data = json.loads(raw)
         except:
@@ -786,10 +779,8 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
         log_message('Iniciando función <respuesta_quejas_graves_ia>.', 'INFO')
         PROMPT_QUEJA_GRAVE = """
             Eres el asistente oficial de servicio al cliente de Sierra Nevada, La Cima del Sabor.
-
             Esta vez atenderás *quejas graves*, donde puede que el pedido NO haya llegado,
             haya habido un error fuerte, mala manipulación o tiempo excesivo.
-
             ***OBJETIVO GENERAL***
             - Calmar al cliente.
             - Asumir responsabilidad sin culpas excesivas.
@@ -797,7 +788,6 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
             - Preparar un resumen ejecutivo para un administrador humano.
             - NO escalar directamente en el mensaje al cliente (solo en el resumen interno).
             - Máximo 2 frases, tono cálido, humano, cercano, estilo Sierra Nevada, colombiano neutro.
-
             ***DEBES ENTREGAR ESTOS CAMPOS***
             1. "respuesta_cordial": Mensaje calmado, empático y con acción concreta 
             (ej: “reviso ya mismo con cocina y logística”, “activo seguimiento con el punto”).
@@ -806,7 +796,6 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
             (ej: verificar estado del pedido, contactar punto, revisar domiciliario).
             4. "resumen_ejecutivo": Resumen para administrador (breve, objetivo, sin adornos).
             5. "intencion": Siempre "queja_grave".
-
             ***TONO***
             - Cálido y responsable.
             - Sin tecnicismos ni sarcasmo.
@@ -815,7 +804,6 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
 
             Cliente llamado {nombre} escribió:
             "{mensaje_usuario}"
-
             ***FORMATO OBLIGATORIO***
             Devuelve SOLO un JSON válido:
             {{
@@ -841,7 +829,6 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
             temperature=0.6
         )
         raw = response.choices[0].message.content.strip()
-        # Intentar parsear JSON
         try:
             data = json.loads(raw)
         except:
@@ -870,11 +857,9 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
         log_message('Iniciando función <pedido_incompleto_dynamic>.', 'INFO')
         PROMPT_PEDIDO_INCOMPLETO = """
             Eres la voz oficial de Sierra Nevada, La Cima del Sabor. Te llamas PAKO.
-
             El cliente escribió: "{mensaje_usuario}"
             El gestor de pedidos detectó que el pedido está INCOMPLETO o POCO CLARO:
             {json_pedido}
-
             Tu tarea:
             - Responder SOLO con un JSON válido.
             - NO inventar productos. NO mencionar nada que NO esté en el menú.
@@ -884,14 +869,12 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             - Si el cliente pide algo MUY GENERAL (ej: "una hamburguesa", "una bebida"), debes:
                 * Dar 1 a 3 recomendaciones REALES del menú que sí coincidan.
             - SIEMPRE pedir que el cliente vuelva a escribir TODO su pedido claramente.
-
             Responde SOLO en este formato exacto:
             {{
                 "mensaje": "texto aquí",
                 "recomendaciones": ["Opción 1", "Opción 2"],
                 "intencion": "consulta_menu"
             }}
-
             Reglas estrictas:
             - No inventes productos. Usa ÚNICAMENTE nombres EXACTOS del menú.
             - Si el cliente menciona algo NO presente en el menú, dilo explícitamente.
@@ -964,10 +947,9 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             menu_str=menu_str,
             json_pedido=json_pedido
         )
-
         client = OpenAI()
         response = client.chat.completions.create(
-            model="gpt-4o-mini",   # <--- MUY RECOMENDADO para JSON estricto
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Eres un asistente que ayuda al cliente a consultar el menú y elegir su pedido."},
                 {"role": "user", "content": prompt}
@@ -975,9 +957,7 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             max_tokens=200,
             temperature=0.2
         )
-
         raw = response.choices[0].message.content.strip()
-
         try:
             data = json.loads(raw)
         except Exception:
@@ -992,9 +972,7 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
     except Exception as e:
         log_message(f'Error en función <pedido_incompleto_dynamic>: {e}', 'ERROR')
         logging.error(f"Error en función <pedido_incompleto_dynamic>: {e}")
-
         recomendaciones_backup = [i["nombre"] for i in menu[:2]] if menu else []
-
         return {
             "mensaje": "Si quieres, puedo mostrarte el menú para que elijas mejor.",
             "recomendaciones": recomendaciones_backup,
@@ -1015,14 +993,9 @@ def actualizar_pedido_con_mensaje(
     try:
         log_message('Iniciando función <actualizar_pedido_con_mensaje>.', 'INFO')
         logging.info("Iniciando actualizar_pedido_con_mensaje.")
-        # 0) Asegurar dict
         pedido_actual = _safe_parse_order(pedido_actual)
-
-        # 1) Detectar si el usuario pidió reemplazar todo
         text_for_replace_check = " ".join([str(mensaje_usuario or ""), str(mensaje_chatbot_previo or ""), str(mensaje_usuario_previo or "")]).lower()
         replace_all = any(phrase in text_for_replace_check for phrase in REPLACE_PHRASES)
-
-        # 2) Limpiar not_found del pedido actual (nos sirve como base)
         pedido_actual_limpio = {
             **pedido_actual,
             "items": [
@@ -1030,14 +1003,10 @@ def actualizar_pedido_con_mensaje(
                 if it and it.get("status") != "not_found"
             ]
         }
-
-        # Si replace_all el pedido base para el modelo quedará vacío
         pedido_para_modelo = {
             **pedido_actual_limpio,
             "items": [] if replace_all else pedido_actual_limpio.get("items", [])
         }
-
-        # 3) Construir prompt (ejemplo; mantén tu prompt original si prefieres)
         prompt = f"""
         Eres un asistente experto actualizando pedidos de comida.
         TIENES QUE PROCESAR TODOS los productos que el cliente menciona.
@@ -1106,7 +1075,6 @@ def actualizar_pedido_con_mensaje(
             "Anillos de Cebolla"
             "Papas francesas"
         """
-        # 4) Llamada al modelo
         client = OpenAI()
         response = client.responses.create(model=model, input=prompt, temperature=0)
         raw = ""
@@ -1114,13 +1082,10 @@ def actualizar_pedido_con_mensaje(
             raw = response.output[0].content[0].text.strip()
         except Exception:
             raw = ""
-
-        # 5) Normalizar salida del modelo: intentar json -> ast.literal_eval -> fallback a "{}"
         clean = raw
         clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
         clean = re.sub(r'^```', '', clean).strip()
         clean = re.sub(r'```$', '', clean).strip()
-
         parsed = None
         parse_debug = {"method": None, "raw_excerpt": clean[:1000]}
         try:
@@ -1131,7 +1096,6 @@ def actualizar_pedido_con_mensaje(
                 parsed = ast.literal_eval(clean)
                 parse_debug["method"] = "ast.literal_eval"
             except Exception as e:
-                # si no se pudo parsear, intentamos extraer un JSON con regex simple
                 try:
                     candidate = re.search(r'(\{.*\})', clean, flags=re.DOTALL)
                     if candidate:
@@ -1140,10 +1104,7 @@ def actualizar_pedido_con_mensaje(
                 except Exception:
                     parsed = None
                     parse_debug["error"] = str(e)
-
-        # 6) Si parsed no es dict, fallback: devolver base limpia + debug
         if not isinstance(parsed, dict):
-            # fallback seguro: devolvemos la base (posiblemente merge con heurística simple)
             items_final = pedido_para_modelo.get("items", [])
             total_price = sum(_price_of_item(it) for it in items_final)
             order_complete = bool(items_final) and all(it.get("status") == "found" for it in items_final)
@@ -1153,39 +1114,24 @@ def actualizar_pedido_con_mensaje(
                 "total_price": round(total_price, 2),
                 "debug": {"parse_ok": False, "raw_model": raw, **parse_debug}
             }
-
-        # 7) parsed es dict: extraer items del modelo
         model_items = parsed.get("items") or []
         if not isinstance(model_items, list):
             model_items = []
-
-        # 8) Eliminar not_found de la salida del modelo (requisito tuyo)
         model_items = [it for it in model_items if it and it.get("status") != "not_found"]
-
-        # 9) Fusionar: si replace_all -> solo model_items; si no -> mezclar base y model_items
         final_items = _merge_items(pedido_para_modelo.get("items", []), model_items, replace_all=replace_all)
-
-        # 10) Calcular total_price con seguridad
         total_price = sum(_price_of_item(it) for it in final_items)
         total_price = round(total_price, 2)
-
-        # 11) Definir order_complete: True solo si hay al menos 1 item y todos son found
         order_complete = bool(final_items) and all(it.get("status") == "found" for it in final_items)
-
         result = {
             "order_complete": order_complete,
             "items": final_items,
             "total_price": total_price
         }
-
-        # Incluir debug si el modelo devolvió más info útil (opcional)
         if parsed.get("debug") or parsed.get("warnings"):
             result["debug_from_model"] = parsed.get("debug") or parsed.get("warnings")
-
         logging.info("Finalizando actualizar_pedido_con_mensaje.")
         log_message('Finalizando función <actualizar_pedido_con_mensaje>.', 'INFO')
         return result
-
     except Exception as e:
         logging.exception("Error en actualizar_pedido_con_mensaje")
         return {
@@ -1209,15 +1155,11 @@ def generar_mensaje_confirmacion_pedido(
     """
     try:
         client = OpenAI()
-
         prompt = f"""
             Eres un asistente de WhatsApp de un restaurante llamado Sierra Nevada, La Cima del Sabor.
-
             TU NOMBRE ES PAKO.
-
             RECIBES un JSON de pedido ya completo y validado:
             {json.dumps(pedido_json, ensure_ascii=False)}
-
             TU MISIÓN:
             1. Generar un MENSAJE amable y claro para el cliente preguntando por la confirmación de lo que pidió.
             - Lista cada producto.
@@ -1226,12 +1168,10 @@ def generar_mensaje_confirmacion_pedido(
             - Muestra el total.
             - No inventes productos ni precios.
             2. Devuelve un JSON **VÁLIDO** así:
-
             {{
             "mensaje": "mensaje natural preguntando por la confirmación del pedido",
             "siguiente_intencion": "confirmar_pedido"
             }}
-
             REGLAS:
             - No incluyas ningún texto fuera del JSON.
             - No uses emojis.
@@ -1244,10 +1184,7 @@ def generar_mensaje_confirmacion_pedido(
             input=prompt,
             temperature=0
         )
-
         raw = response.output[0].content[0].text.strip()
-
-        # limpiar markdown
         clean = raw
         clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
         clean = re.sub(r'^```', '', clean).strip()
@@ -1284,15 +1221,11 @@ def generar_mensaje_cancelacion(
         client = OpenAI()
         prompt = f"""
         Eres un asistente de WhatsApp de un restaurante llamado Sierra Nevada, La Cima del Sabor.
-
         TU NOMBRE ES PAKO.
-
         RECIBES esta información del pedido que el cliente había enviado, pero que no se pudo confirmar porque estaba incompleto, confuso o mal estructurado:
-
         - Producto(s): {producto}
         - Total estimado de productos: {total_productos}
         - Nombre cliente: {nombre_cliente}
-
         TU MISIÓN:
         1. Generar un MENSAJE claro y amable explicándole al cliente que su pedido no se pudo confirmar porque algo estaba mal.
         2. Preguntar exactamente: **“¿Qué parte del pedido está mal?”**
@@ -1301,12 +1234,10 @@ def generar_mensaje_cancelacion(
         5. No uses emojis.
         6. No inventes productos, no supongas nada, no des confirmaciones.
         7. Devuelve un JSON **válido**:
-
         {{
         "mensaje": "mensaje natural pidiendo al cliente que explique qué está mal y escriba de nuevo su pedido",
         "siguiente_intencion": "corregir_pedido"
         }}
-
         REGLAS:
         - No incluyas texto fuera del JSON.
         - El mensaje debe ser corto, profesional y conversacional.
@@ -1318,10 +1249,7 @@ def generar_mensaje_cancelacion(
             input=prompt,
             temperature=0
         )
-
         raw = response.output[0].content[0].text.strip()
-
-        # limpiar markdown
         clean = raw
         clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
         clean = re.sub(r'^```', '', clean).strip()
@@ -1339,14 +1267,12 @@ def generar_mensaje_cancelacion(
 def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str) -> dict:
     try:
         log_message('Iniciando función <solicitar_medio_pago>.', 'INFO')
-
         PROMPT_MEDIOS_PAGO = """
         Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
-
+        Te llamas PAKO.
         El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
         Este es el pedido que hizo:
         "{pedido_str}"
-
         TAREA:
         - Haz un comentario alegre, sabroso y un poquito divertido sobre el pedido.
         - Estilo: cálido, entusiasta, como “¡Wow qué delicia eso!”, “Ese pedido está brutal”, etc.
@@ -1355,21 +1281,17 @@ def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedi
         - Después del comentario, pídele que elija su medio de pago.
         - Menciona el local: {nombre_local}
         - Menciona siempre todos los medios de pago disponibles.
-
         Debes listar estas opciones de pago:
         - Efectivo
         - Transferencia (Nequi, Daviplata, Bre-B)
         - Tarjeta débito
         - Tarjeta crédito
-
         FORMATO DE RESPUESTA (OBLIGATORIO):
         {{
             "mensaje": "texto aquí"
         }}
-
         Nada fuera del JSON.
         """
-
         client = OpenAI()
         prompt = PROMPT_MEDIOS_PAGO.format(
             nombre=nombre,
@@ -1377,7 +1299,6 @@ def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedi
             nombre_local=nombre_local,
             pedido_str=pedido_str
         )
-
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -1387,19 +1308,15 @@ def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedi
             max_tokens=150,
             temperature=0.95
         )
-
         raw = response.choices[0].message.content.strip()
-
         try:
             data = json.loads(raw)
         except:
             data = {
                 "mensaje": f"¡{nombre}, ese pedido está para antojar a cualquiera! 🤤 Tu orden ({codigo_unico}) en {nombre_local} quedó tremenda. ¿Qué medio de pago prefieres: efectivo, transferencia (Nequi/Daviplata/Bre-B), tarjeta débito o tarjeta crédito?"
             }
-
         log_message('Finalizando función <solicitar_medio_pago>.', 'INFO')
         return data
-
     except Exception as e:
         log_message(f'Error en función <solicitar_medio_pago>: {e}', 'ERROR')
         logging.error(f"Error en función <solicitar_medio_pago>: {e}")
@@ -1452,4 +1369,83 @@ def enviar_menu_digital(nombre: str, nombre_local: str, menu) -> dict:
         logging.error(f"Error en función <solicitar_medio_pago>: {e}")
         return {
             "mensaje": f"¡{nombre}, ¿qué esperas para pedir del delicioso menú de {nombre_local}? ¡Anímate y cuéntame qué se te antoja hoy!"
+        }
+
+def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: dict, pregunta_usuario: str) -> dict:
+    try:
+        log_message('Iniciando función <ResponderSobrePedido>.', 'INFO')
+        pedido_info_serializable = convert_decimals(pedido_info)
+        pedido_info_serializable = {
+            k: to_json_safe(v)
+            for k, v in pedido_info.items()
+        }
+        PROMPT = f"""
+        Eres PAKO, la voz oficial y amigable de {nombre_local}.
+        Información del pedido:
+        {json.dumps(pedido_info_serializable, ensure_ascii=False)}
+        PREGUNTA:
+        {pregunta_usuario}
+        REGLAS IMPORTANTES:
+        - La respuesta debe basarse SOLO en la información contenida en pedido_info.
+        - Si el usuario pregunta por algo que NO está en pedido_info, responde amablemente
+          que no tienes ese dato exacto y ofrece revisar menú o promociones.
+        - Estilo: cálido, alegre, amable, un poquito divertido, sin sarcasmo y sin exagerar.
+        - Máximo 2 frases.
+        - Siempre incluir un llamado a la acción al final para "consultar menú" o "consultar promociones".
+          Debe ser natural, como:
+          "Si quieres, puedo mostrarte el menú o contarte las promociones".
+        - No inventes datos adicionales.
+        - No mencionar que eres una IA.
+        - Respuesta SIEMPRE en JSON.
+        OPCIONES PARA futura_intencion:
+        - "consulta_menu"
+        - "consulta_promociones"
+        FORMATO DE RESPUESTA OBLIGATORIO:
+        {{
+          "mensaje": "texto aquí",
+          "futura_intencion": "consulta_menu o consulta_promociones"
+        }}
+        Nada por fuera del JSON.
+        REGLA CRÍTICA:
+        NO puedes asumir el estado del pedido. NO puedes decir que está listo, procesado, en preparación, entregado ni nada similar.
+        Solo puedes repetir literalmente lo que aparezca en el campo "estado" dentro de pedido_info.
+        Si "estado" no está presente en pedido_info:
+        - debes responder que no tienes el estado exacto del pedido.
+        - y ofrecer consultar menú o promociones.
+        PROHIBIDO:
+        - Decir que el pedido está "listo", "procesado", "en camino", "confirmado" o cualquier estado NO presente literalmente en el dict.
+        - Interpretar o adivinar datos.
+        - Inventar palabras relacionadas al estado.
+        INFORMACIÓN PERMITIDA:
+        Solo puedes usar lo que aparece literalmente en este diccionario:
+        {json.dumps(pedido_info_serializable, ensure_ascii=False)}
+        Si algo no está allí, responde "No tengo ese dato exacto".
+        """
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": f"Eres PAKO, representante alegre de {nombre_local}."},
+                {"role": "user", "content": PROMPT}
+            ],
+            max_tokens=300,
+            temperature=0.8
+        )
+        raw = response.choices[0].message.content.strip()
+        try:
+            data = json.loads(raw)
+        except:
+            data = {
+                "mensaje": f"{nombre}, aquí en {nombre_local} estoy para ayudarte con tu pedido. "
+                           f"Si quieres, puedo mostrarte el menú o contarte nuestras promociones.",
+                "futura_intencion": "consulta_menu"
+            }
+        log_message('Finalizando función <ResponderSobrePedido>.', 'INFO')
+        return data
+    except Exception as e:
+        log_message(f'Error en función <ResponderSobrePedido>: {e}', 'ERROR')
+        logging.error(f"Error en función <ResponderSobrePedido>: {e}")
+        return {
+            "mensaje": f"{nombre}, tuve un problema procesando tu solicitud, pero si quieres puedo mostrarte el menú o las promociones.",
+            "futura_intencion": "consulta_menu"
         }

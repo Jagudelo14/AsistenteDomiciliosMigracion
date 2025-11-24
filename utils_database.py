@@ -48,3 +48,25 @@ def execute_query(query: str, params: tuple = (), fetchone: bool = False):
     except Exception as e:
         logging.error(f"Error al ejecutar la consulta: {e}")
         raise
+
+def execute_query_columns(query: str, params: tuple = (), fetchone: bool = False, return_columns: bool = False):
+    try:
+        conn = connect_database()
+        cur = conn.cursor()
+        cur.execute(query, params)
+        data = None
+        cols = None
+        if cur.description:  # La query tiene columnas
+            cols = [desc[0] for desc in cur.description]
+        if fetchone:
+            data = cur.fetchone()
+        else:
+            data = cur.fetchall()
+        conn.commit()
+        cur.close()
+        if return_columns:
+            return data, cols
+        return data
+    except Exception as e:
+        logging.error(f"Error en execute_query: {e}")
+        raise e

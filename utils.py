@@ -1,16 +1,17 @@
 # utils.py
 # Last modified: 2025-09-30 by Andrés Bermúdez
 
+from decimal import Decimal
 import logging
 import os
 from heyoo import WhatsApp
 import re
 import ast
-from utils_database import execute_query
+from utils_database import execute_query, execute_query_columns
 import inspect
 import traceback
 from typing import Tuple, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, date, time
 from zoneinfo import ZoneInfo
 import json
 import requests
@@ -929,3 +930,80 @@ def send_pdf_response(sender: str):
         log_message(f'Error en <SendPDFResponse>: {e}', 'ERROR')
         logging.error(f'Error en send_pdf_response: {e}')
         return None, str(e)
+
+def obtener_estado_pedido_por_codigo(sender: str, codigo_unico: str) -> dict:
+    try:
+        log_message('Iniciando función <ObtenerPedidoPorCodigo>.', 'INFO')
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s;"
+        res_idw = execute_query_columns(q_idw, (sender,), fetchone=True)
+        id_whatsapp = res_idw[0] if res_idw else None
+        if id_whatsapp is None:
+            return {"exito": False, "msg": "No existe id_whatsapp para este número."}
+        query_pedido = """
+            SELECT *
+            FROM pedidos
+            WHERE codigo_unico = %s
+              AND id_whatsapp = %s;
+        """
+        pedido_row, pedido_cols = execute_query_columns(
+            query_pedido, (codigo_unico, id_whatsapp),
+            fetchone=True, return_columns=True
+        )
+        if not pedido_row:
+            return {"exito": False, "msg": "No se encontró un pedido con ese código."}
+        pedido_info_serializable = {
+            col: to_json_safe(val)
+            for col, val in zip(pedido_cols, pedido_row)
+        }
+        idsede = pedido_info_serializable.get("idsede")
+        sede_dict = None
+        if idsede:
+            query_sede = "SELECT * FROM sedes WHERE id_sede = %s;"
+            sede_row, sede_cols = execute_query_columns(
+                query_sede, (idsede,), fetchone=True, return_columns=True
+            )
+            if sede_row:
+                sede_dict = {
+                    col: to_json_safe(val)
+                    for col, val in zip(sede_cols, sede_row)
+                }
+        return {
+            "exito": True,
+            "pedido": pedido_info_serializable,
+            "sede": sede_dict
+        }
+    except Exception as e:
+        log_message(f'Error en <ObtenerPedidoPorCodigo>: {e}', 'ERROR')
+        logging.error(f'Error en obtener_pedido_por_codigo: {e}')
+        return {"exito": False, "error": str(e)}
+
+
+def convert_decimals(obj):
+    try:
+        """Convierte objetos Decimal en float dentro de estructuras anidadas."""
+        log_message('Iniciando función <ConvertDecimals>.', 'INFO')
+        if isinstance(obj, dict):
+            log_message('Convirtiendo diccionario en <ConvertDecimals>.', 'INFO')
+            return {k: convert_decimals(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            log_message('Convirtiendo lista en <ConvertDecimals>.', 'INFO')
+            return [convert_decimals(i) for i in obj]
+        elif isinstance(obj, Decimal):
+            log_message('Convirtiendo Decimal en <ConvertDecimals>.', 'INFO')
+            return float(obj)  # o str(obj) si prefieres exactitud
+        else:
+            log_message('No se requiere conversión en <ConvertDecimals>.', 'INFO')
+            return obj
+    except Exception as e:
+        log_message(f'Error en <ConvertDecimals>: {e}', 'ERROR')
+        logging.error(f'Error en convert_decimals: {e}')
+        return obj
+
+def to_json_safe(value):
+    if isinstance(value, Decimal):
+        return float(value)  # o str(value) si prefieres exactitud
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, time):
+        return value.strftime("%H:%M")
+    return value
