@@ -1,6 +1,7 @@
 # utils_subflujos.py
 # Last modified: 2025-11-05 by Andrés Bermúdez
 
+import ast
 import json
 import os
 import random
@@ -17,6 +18,7 @@ from utils import (
     marcar_intencion_como_resuelta,
     marcar_pedido_como_definitivo,
     normalizar_entities_items,
+    obtener_estado_pedido_por_codigo,
     obtener_intencion_futura_mensaje_chatbot,
     obtener_intencion_futura_mensaje_usuario,
     obtener_intencion_futura_observaciones,
@@ -29,7 +31,7 @@ from utils import (
     obtener_intencion_futura,
     borrar_intencion_futura
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_pedido, mapear_pedido_al_menu, pedido_incompleto_dynamic, responder_pregunta_menu_chatgpt, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago
+from utils_chatgpt import actualizar_pedido_con_mensaje, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_pedido, mapear_pedido_al_menu, pedido_incompleto_dynamic, responder_pregunta_menu_chatgpt, responder_sobre_pedido, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago
 from utils_database import execute_query
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
@@ -314,6 +316,27 @@ def subflujo_consulta_menu(sender: str, nombre_cliente: str) -> None:
         log_message(f'Error en <SubflujoConsultaMenu>: {e}.', 'ERROR')
         raise e
 
+def subflujo_consulta_pedido(sender: str, nombre_cliente: str, entidades: str, pregunta_usuario: str) -> None:
+    try:
+        """Maneja la consulta del estado del pedido por parte del usuario."""
+        log_message(f'Iniciando función <SubflujoConsultaPedido> para {sender}.', 'INFO')
+        if isinstance(entidades, dict):
+            entidades_dict = entidades
+        else:
+            try:
+                entidades_dict = json.loads(entidades)
+            except:
+                entidades_dict = ast.literal_eval(str(entidades))
+        pedido_id: str = entidades_dict.get("pedido_id", "")
+        pedido_info: dict = obtener_estado_pedido_por_codigo(sender, pedido_id)
+        respuesta_consulta_pedido: dict = responder_sobre_pedido(nombre_cliente, "Sierra Nevada", pedido_info, pregunta_usuario)
+        send_text_response(sender, respuesta_consulta_pedido.get("mensaje"))
+        guardar_intencion_futura(sender, respuesta_consulta_pedido.get("futura_intencion", "consulta_menu"))
+        log_message(f'Consulta de pedido respondida correctamente para {sender}.', 'INFO')
+    except Exception as e:
+        log_message(f'Error en <SubflujoConsultaPedido>: {e}.', 'ERROR')
+        raise e
+
 # --- ORQUESTADOR DE SUBFLUJOS --- #
 def orquestador_subflujos(
     sender: str,
@@ -334,14 +357,7 @@ def orquestador_subflujos(
             respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender, pregunta_usuario)
             send_text_response(sender, respuesta_bot)
         elif clasificacion_mensaje == "solicitud_pedido":
-            respuesta_bot = (
-                f"Gracias por tu ayuda {nombre_cliente}, retomemos con tu pedido anterior. "
-                "Por favor envíame tu ubicación exacta."
-                if bandera_externo else
-                f"¡Perfecto, {nombre_cliente}! Para continuar con tu pedido, por favor envíame tu ubicación exacta."
-            )
             subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, id_ultima_intencion)
-            #borrar_intencion_futura(sender)
         elif clasificacion_mensaje == "confirmacion_general":
             return subflujo_confirmacion_general(sender, pregunta_usuario)
         elif clasificacion_mensaje == "negacion_general":
@@ -362,7 +378,8 @@ def orquestador_subflujos(
             subflujo_transferencia(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "confirmacion_pedido":
             subflujo_confirmacion_pedido(sender, nombre_cliente)
-        
+        elif clasificacion_mensaje == "consulta_pedido":
+            subflujo_consulta_pedido(sender, nombre_cliente, entidades_text, pregunta_usuario)
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")
