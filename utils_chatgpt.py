@@ -1354,6 +1354,7 @@ def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedi
         - Máximo 1 o 2 frases.
         - Después del comentario, pídele que elija su medio de pago.
         - Menciona el local: {nombre_local}
+        - Menciona siempre todos los medios de pago disponibles.
 
         Debes listar estas opciones de pago:
         - Efectivo
@@ -1404,4 +1405,51 @@ def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedi
         logging.error(f"Error en función <solicitar_medio_pago>: {e}")
         return {
             "mensaje": f"¡{nombre}, tu pedido ({codigo_unico}) quedó delicioso! ¿Qué medio de pago deseas usar?"
+        }
+
+def enviar_menu_digital(nombre: str, nombre_local: str, menu) -> dict:
+    try:
+        log_message('Iniciando función <solicitar_medio_pago>.', 'INFO')
+        PROMPT = f"""
+        Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
+        El cliente {nombre} pidió el menú digital.
+        Este es el menú que tienes disponible:
+        {json.dumps(menu, ensure_ascii=False)}
+        TAREA:
+        - Haz un comentario alegre, sabroso y un poquito divertido sobre el menú.
+        - Estilo: cálido, entusiasta, como “Listo para pedir", vamos a consentirnos hoy y así.
+        - No uses sarcasmo, groserías ni exageres demasiado.
+        - Máximo 1 o 2 frases.
+        - Después del comentario, recomienda que el cliente haga su pedido y 2 opciones del menu (hamburguesas o malteadas).
+        - Menciona el local: {nombre_local}
+        FORMATO DE RESPUESTA (OBLIGATORIO):
+        {{
+            "mensaje": "texto aquí"
+        }}
+        Nada fuera del JSON.
+        """
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres el generador oficial de mensajes alegres y de pago para Sierra Nevada."},
+                {"role": "user", "content": PROMPT}
+            ],
+            max_tokens=250,
+            temperature=0.95
+        )
+        raw = response.choices[0].message.content.strip()
+        try:
+            data = json.loads(raw)
+        except:
+            data = {
+                "mensaje": f"¡{nombre}, el menú de {nombre_local} está para chuparse los dedos! 🤤 ¿Qué esperas para pedir una de nuestras deliciosas hamburguesas como 'La Insaciable' o una refrescante malteada de 'Chocolate y avellanas'?"
+            }
+        log_message('Finalizando función <solicitar_medio_pago>.', 'INFO')
+        return data
+    except Exception as e:
+        log_message(f'Error en función <solicitar_medio_pago>: {e}', 'ERROR')
+        logging.error(f"Error en función <solicitar_medio_pago>: {e}")
+        return {
+            "mensaje": f"¡{nombre}, ¿qué esperas para pedir del delicioso menú de {nombre_local}? ¡Anímate y cuéntame qué se te antoja hoy!"
         }

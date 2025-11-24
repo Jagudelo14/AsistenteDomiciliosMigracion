@@ -23,12 +23,13 @@ from utils import (
     obtener_menu,
     obtener_pedido_por_codigo,
     obtener_ultima_intencion_no_resuelta,
+    send_pdf_response,
     send_text_response,
     guardar_clasificacion_intencion,
     obtener_intencion_futura,
     borrar_intencion_futura
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, clasificar_pregunta_menu_chatgpt, generar_mensaje_cancelacion, generar_mensaje_confirmacion_pedido, mapear_pedido_al_menu, pedido_incompleto_dynamic, responder_pregunta_menu_chatgpt, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago
+from utils_chatgpt import actualizar_pedido_con_mensaje, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_pedido, mapear_pedido_al_menu, pedido_incompleto_dynamic, responder_pregunta_menu_chatgpt, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago
 from utils_database import execute_query
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
@@ -300,6 +301,19 @@ def subflujo_confirmacion_pedido(sender: str, nombre_cliente: str) -> Dict[str, 
         log_message(f'Error en <SubflujoConfirmacionPedido>: {e}.', 'ERROR')
         raise e
 
+def subflujo_consulta_menu(sender: str, nombre_cliente: str) -> None:
+    """Maneja la consulta del menú por parte del usuario."""
+    try:
+        log_message(f'Iniciando función <SubflujoConsultaMenu> para {sender}.', 'INFO')
+        menu = obtener_menu()
+        mensaje_menu: dict = enviar_menu_digital(nombre_cliente, "Sierra Nevada", menu)
+        send_text_response(sender, mensaje_menu.get("mensaje"))
+        send_pdf_response(sender)
+        log_message(f'Menú enviado correctamente a {sender}.', 'INFO')
+    except Exception as e:
+        log_message(f'Error en <SubflujoConsultaMenu>: {e}.', 'ERROR')
+        raise e
+
 # --- ORQUESTADOR DE SUBFLUJOS --- #
 def orquestador_subflujos(
     sender: str,
@@ -336,7 +350,7 @@ def orquestador_subflujos(
             send_text_response(sender, "Claro, aquí tienes nuestras promociones actuales...")
             borrar_intencion_futura(sender)
         elif clasificacion_mensaje == "consulta_menu" and type_text != "pregunta" and type_text != "preguntas_generales":
-            
+            subflujo_consulta_menu(sender, nombre_cliente)
             borrar_intencion_futura(sender)
         elif clasificacion_mensaje == "preguntas_generales" or (clasificacion_mensaje == "consulta_menu" and (type_text == "pregunta" or type_text == "preguntas_generales")):
             subflujo_preguntas_generales(sender, pregunta_usuario, nombre_cliente)

@@ -9,11 +9,11 @@ import ast
 from utils_database import execute_query
 import inspect
 import traceback
-from typing import Tuple, Optional, Dict, Any, List
+from typing import Tuple, Dict, Any, List
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import json
+import requests
 
 REPLACE_PHRASES = [
     "cambia todo", "borra lo que había", "solo quiero esto", "quita lo anterior",
@@ -69,8 +69,8 @@ def send_text_response(to: str, message: str) -> str:
         log_message('Iniciando función <SendTextResponse>.', 'INFO')
         logging.info('Enviando respuesta a WhatsApp')
         token: str = api_whatsapp()
-        phone_number_id: str = '629019633625906'
-        whatsapp: WhatsApp = WhatsApp(token, phone_number_id)
+        PHONE_ID: str = os.environ["PHONE_NUMBER_ID"]
+        whatsapp: WhatsApp = WhatsApp(token, PHONE_ID)
         whatsapp.send_message(message, to)
         logging.info('Respuesta enviada.')
         log_message('Finalizando función <SendTextResponse>.', 'INFO')
@@ -501,7 +501,6 @@ def normalizar_entities_items(entities: dict) -> dict:
             modalidad = item.get("modalidad", "")
             especificaciones = tuple(sorted(item.get("especificaciones", [])))
             cantidad = item.get("cantidad", 1)
-            # clave única por producto + mods + modalidad
             key = (producto, especificaciones, modalidad)
             if key in resultado: # si ya existía, sumamos cantidad
                 resultado[key]["cantidad"] += cantidad
@@ -511,7 +510,6 @@ def normalizar_entities_items(entities: dict) -> dict:
                     "modalidad": modalidad,
                     "especificaciones": list(especificaciones),
                     "cantidad": cantidad }
-            # Reemplazar la lista vieja por la normalizada
         entities["items"] = list(resultado.values())
         log_message('Finalizando función <NormalizarEntitiesItems>.', 'INFO')
         return entities
@@ -602,14 +600,12 @@ def guardar_ordenes(idpedido: int, pedido_json: dict) -> dict:
             raise ValueError("El JSON no contiene items para guardar en ordenes.")
         inserted_ids = []
         for item in items:
-            # Datos del item
             matched = item.get("matched", {})
             requested = item.get("requested", {})
             nombre_producto = matched.get("name", requested.get("producto"))
             precio_producto = matched.get("price", 0)
             especificaciones_list = requested.get("especificaciones", [])
             especificaciones_texto = ", ".join(especificaciones_list) if especificaciones_list else ""
-            # Query INSERT
             query = """
                 INSERT INTO ordenes (
                     desglose_productos,
@@ -717,19 +713,16 @@ def _safe_parse_order(pedido_actual: Any) -> Dict:
     if isinstance(pedido_actual, dict):
         return pedido_actual
     if isinstance(pedido_actual, str):
-        # intentar json primero (por si viene bien formado)
         try:
             return json.loads(pedido_actual)
         except Exception:
             pass
-        # intentar ast.literal_eval (acepta comillas simples, True/False, None)
         try:
             parsed = ast.literal_eval(pedido_actual)
             if isinstance(parsed, dict):
                 return parsed
         except Exception:
             pass
-    # fallback: estructura vacía mínima
     return {"order_complete": False, "items": [], "total_price": 0}
 
 def _normalize_name(item: Dict) -> str:
@@ -746,9 +739,7 @@ def _price_of_item(it: Dict) -> float:
         return 0.0
     matched = it.get("matched") or {}
     price = matched.get("price") or it.get("price") or 0
-    # posibles claves para cantidad
     qty = it.get("quantity") or it.get("qty") or it.get("cantidad") or 1
-    # normalizar qty
     try:
         qty_num = float(qty)
     except Exception:
@@ -765,7 +756,6 @@ def _price_of_item(it: Dict) -> float:
 def _merge_items(base_items: List[Dict], new_items: List[Dict], replace_all: bool = False) -> List[Dict]:
     """Fusiona base_items y new_items evitando duplicados. Si replace_all=True, devuelve solo new_items."""
     if replace_all:
-        # mantener orden y normalizar
         seen = set()
         out = []
         for it in new_items:
@@ -774,18 +764,14 @@ def _merge_items(base_items: List[Dict], new_items: List[Dict], replace_all: boo
                 seen.add(key)
                 out.append(it)
         return out
-
     merged = {}
-    # primero los base (preferir los base si el modelo no incluye matched info)
     for it in base_items or []:
         key = _normalize_name(it)
         if key:
             merged[key] = it
-    # luego agregar/sobrescribir con lo nuevo (priorizar lo que vino del modelo)
     for it in new_items or []:
         key = _normalize_name(it)
         if not key:
-            # si no hay nombre normalizable, agregar con sufijo único
             key = f"_unknown_{len(merged)}"
         merged[key] = it
     return list(merged.values())
@@ -793,8 +779,6 @@ def _merge_items(base_items: List[Dict], new_items: List[Dict], replace_all: boo
 def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
     try:
         log_message('Iniciando función <MarcarPedidoComoDefinitivo>.', 'INFO')
-
-        # 1. Obtener id_whatsapp igual que en guardar_pedido_completo
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
@@ -804,7 +788,6 @@ def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
                 "actualizado": False,
                 "msg": "No existe id_whatsapp para este número."
             }
-        # 2. UPDATE para cambiar es_temporal a FALSE
         query = """
             UPDATE pedidos
             SET es_temporal = FALSE
@@ -833,8 +816,6 @@ def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
 def eliminar_pedido(sender: str, codigo_unico: str) -> dict:
     try:
         log_message('Iniciando función <EliminarPedido>.', 'INFO')
-
-        # 1. Obtener id_whatsapp
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
@@ -844,8 +825,6 @@ def eliminar_pedido(sender: str, codigo_unico: str) -> dict:
                 "eliminado": False,
                 "msg": "No existe id_whatsapp para este número."
             }
-
-        # 2. Eliminar ordenes asociadas al pedido
         query = """
             DELETE FROM ordenes
             WHERE idpedidos = (
@@ -857,8 +836,6 @@ def eliminar_pedido(sender: str, codigo_unico: str) -> dict:
         """
         params = (codigo_unico, id_whatsapp)
         execute_query(query, params)
-
-        # 3. Eliminar el pedido
         query_2 = """
             DELETE FROM pedidos
             WHERE codigo_unico = %s
@@ -886,8 +863,6 @@ def eliminar_pedido(sender: str, codigo_unico: str) -> dict:
 def obtener_pedido_por_codigo(sender: str, codigo_unico: str) -> dict:
     try:
         log_message('Iniciando función <ObtenerPedidoPorCodigo>.', 'INFO')
-
-        # 1. Obtener id_whatsapp
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
@@ -897,8 +872,6 @@ def obtener_pedido_por_codigo(sender: str, codigo_unico: str) -> dict:
                 "exito": False,
                 "msg": "No existe id_whatsapp para este número."
             }
-
-        # 2. Traer registro
         query = """
             SELECT producto, total_productos, codigo_unico
             FROM pedidos
@@ -920,8 +893,39 @@ def obtener_pedido_por_codigo(sender: str, codigo_unico: str) -> dict:
                 "exito": False,
                 "msg": "No se encontró un pedido con ese código y ese id_whatsapp."
             }
-
     except Exception as e:
         log_message(f'Error en <ObtenerPedidoPorCodigo>: {e}', 'ERROR')
         logging.error(f'Error en obtener_pedido_por_codigo: {e}')
         return {"exito": False, "error": str(e)}
+
+def send_pdf_response(sender: str):
+    try:
+        """
+        Envía un PDF al usuario vía WhatsApp Cloud API usando una URL con SAS.
+        """
+        log_message('Iniciando función <SendPDFResponse>.', 'INFO')
+        ACCESS_TOKEN = os.environ["WABA_TOKEN"]
+        PHONE_ID = os.environ["PHONE_NUMBER_ID"]
+        url = f"https://graph.facebook.com/v20.0/{PHONE_ID}/messages"
+        PDF_URL: str = os.environ["PDF_SAS_URL"]
+        FILE_NAME: str = "menu-sierra-nevada.pdf"
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": sender,
+            "type": "document",
+            "document": {
+                "link": PDF_URL,
+                "filename": FILE_NAME
+            }
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {ACCESS_TOKEN}"
+        }
+        res = requests.post(url, json=payload, headers=headers)
+        log_message(f'PDF enviado al usuario {sender} con estado {res.status_code}.', 'INFO')
+        return res.status_code, res.text
+    except Exception as e:
+        log_message(f'Error en <SendPDFResponse>: {e}', 'ERROR')
+        logging.error(f'Error en send_pdf_response: {e}')
+        return None, str(e)
