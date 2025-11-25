@@ -10,14 +10,18 @@ from typing import Any, Dict
 
 # --- IMPORTS INTERNOS --- #
 from utils import (
+    actualizar_medio_pago,
     actualizar_total_productos,
     eliminar_pedido,
+    eliminar_una_instancia_orden_por_nombre,
     guardar_intencion_futura,
     guardar_ordenes,
     guardar_pedido_completo,
+    insertar_orden,
     log_message,
     marcar_intencion_como_resuelta,
     marcar_pedido_como_definitivo,
+    match_item_to_menu,
     normalizar_entities_items,
     obtener_estado_pedido_por_codigo,
     obtener_intencion_futura_mensaje_chatbot,
@@ -25,7 +29,9 @@ from utils import (
     obtener_intencion_futura_observaciones,
     obtener_menu,
     obtener_pedido_por_codigo,
+    obtener_pedido_por_codigo_orignal,
     obtener_ultima_intencion_no_resuelta,
+    recalcular_y_actualizar_pedido,
     send_pdf_response,
     send_text_response,
     guardar_clasificacion_intencion,
@@ -33,7 +39,7 @@ from utils import (
     borrar_intencion_futura,
     to_json_safe
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_pedido, interpretar_eleccion_promocion, mapear_pedido_al_menu, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago
+from utils_chatgpt import actualizar_pedido_con_mensaje, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_pedido, interpretar_eleccion_promocion, mapear_modo_pago, mapear_pedido_al_menu, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida
 from utils_database import execute_query, execute_query_columns
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
@@ -108,42 +114,40 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
             pedido_dict = actualizar_pedido_con_mensaje(observaciones_pedido, pregunta_usuario, items_menu, mensaje_chatbot_intencion_futura, mensaje_usuario_intencion_futura)
             send_text_response(sender, f"Pedido actualizado: {str(pedido_dict)}")
             bandera_revision = True
-            borrar_intencion_futura(sender)
         if not bandera_revision:
             entidades_text = normalizar_entities_items(entidades_text)
             pedido_dict = mapear_pedido_al_menu(entidades_text, items_menu)
         send_text_response(sender, str(pedido_dict))
         if not pedido_dict.get("order_complete", False):
-            no_completo: dict = pedido_incompleto_dynamic_promocion(pregunta_usuario, items_menu, str(pedido_dict))
+            no_completo: dict = pedido_incompleto_dynamic(pregunta_usuario, items_menu, str(pedido_dict))
+            send_text_response(sender, "Analizando tu pedido... pq faltó algo.")
             send_text_response(sender, no_completo.get("mensaje"))
             guardar_intencion_futura(sender, "continuacion_pedido", str(pedido_dict), no_completo.get("mensaje"), pregunta_usuario)
             return
         pedido_info = guardar_pedido_completo(sender, pedido_dict, es_temporal=True)
-        items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict)
+        items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict, sender)
         info_promociones = None
         eleccion_promocion = None
         if obtener_intencion_futura(sender) == "continuacion_promocion":
-            send_text_response(sender, "Procesando tu pedido basado en la promoción...")
             info_promociones = obtener_intencion_futura_observaciones(sender)
             respuesta_previa_promocion = obtener_intencion_futura_mensaje_chatbot(sender)
             eleccion_promocion = interpretar_eleccion_promocion(pregunta_usuario, info_promociones, respuesta_previa_promocion, pedido_dict)
             send_text_response(sender, f"Elección de promoción interpretada: {str(eleccion_promocion)}")
             if eleccion_promocion.get("valida_promocion"):
-                actualizar_total_productos(sender, pedido_info['codigo_unico'], float(eleccion_promocion.get("total_final", pedido_info.get("total_productos", 0.0))), eleccion_promocion.get("idpromocion", ""))
+                actualizar_total_productos(sender, pedido_info['codigo_unico'], float(eleccion_promocion.get("total_final", pedido_info.get("total_productos", 0.0))))
                 bandera_promocion = True
             else:
                 no_completo: dict = pedido_incompleto_dynamic_promocion(pregunta_usuario, items_menu, str(pedido_dict))
                 send_text_response(sender, no_completo.get("mensaje"))
-                borrar_intencion_futura(sender)
                 return
         confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
         send_text_response(sender, confirmacion_pedido.get("mensaje"))
-        guardar_intencion_futura(sender, confirmacion_pedido.get("intencion_siguiente", "confirmar_pedido"), pedido_info['codigo_unico'])
+        guardar_intencion_futura(sender, confirmacion_pedido.get("intencion_siguiente", "confirmar_pedido"), pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario)
         marcar_intencion_como_resuelta(id_ultima_intencion)
     except Exception as e:
         logging.error(f"Error en <SubflujoSolicitudPedido>: {e}")
         log_message(f'Error en <SubflujoSolicitudPedido>: {e}.', 'ERROR')
-        raise e
+        send_text_response(sender, "Lo siento, hubo un error al procesar tu pedido. ¿Podrías intentarlo de nuevo?")
 
 def subflujo_confirmacion_general(sender: str, respuesta_cliente: str) -> Dict[str, Any]:
     """Maneja el caso en que no se detecta una intención específica, con ayuda de IA."""
@@ -308,7 +312,7 @@ def subflujo_confirmacion_pedido(sender: str, nombre_cliente: str) -> Dict[str, 
         log_message(f'Iniciando función <SubflujoConfirmacionPedido> para {sender}.', 'INFO')
         codigo_unico: str = obtener_intencion_futura_observaciones(sender)
         confirmar_dict: dict = marcar_pedido_como_definitivo(sender, codigo_unico)
-        pedido_temp: dict = obtener_pedido_por_codigo(sender, codigo_unico)
+        pedido_temp: dict = obtener_pedido_por_codigo_orignal(sender, codigo_unico)
         total_pedido: float = confirmar_dict.get("total_productos", 0.0)
         if total_pedido > 200000:
             numero_admin: str = os.getenv("NUMERO_ADMIN")
@@ -316,7 +320,7 @@ def subflujo_confirmacion_pedido(sender: str, nombre_cliente: str) -> Dict[str, 
             send_text_response(sender, f"Un asesor se comunicará contigo muy pronto.")
         mensaje_medio_pago: dict = solicitar_medio_pago(nombre_cliente, codigo_unico, "Sierra Nevada", pedido_temp.get("producto", ""))
         send_text_response(sender, mensaje_medio_pago.get("mensaje"))
-        guardar_intencion_futura(sender, "medio_pago")
+        guardar_intencion_futura(sender, "medio_pago", codigo_unico)
         log_message(f'Pedido {confirmar_dict.get("codigo_unico")} confirmado correctamente para {sender}.', 'INFO')
     except Exception as e:
         log_message(f'Error en <SubflujoConfirmacionPedido>: {e}.', 'ERROR')
@@ -388,6 +392,185 @@ def subflujo_promociones(sender: str, nombre_cliente: str, pregunta_usuario: str
         log_message(f'Error en <SubflujoPromociones>: {e}.', 'ERROR')
         raise e
 
+def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str) -> None:
+    try:
+        """Maneja la selección del modo de pago por parte del usuario."""
+        log_message(f'Iniciando función <SubflujoMedioPago> para {sender}.', 'INFO')
+        codigo_unico: str = obtener_intencion_futura_observaciones(sender)
+        medio_pago_real: str = mapear_modo_pago(respuesta_usuario)
+        datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
+        mensaje_metodo_recogida: dict = solicitar_metodo_recogida(nombre_cliente, codigo_unico, "Sierra Nevada", datos_actualizados.get("producto", ""))
+        send_text_response(sender, mensaje_metodo_recogida.get("mensaje"))
+        guardar_intencion_futura(sender, "metodo_recogida", codigo_unico)
+    except Exception as e:
+        log_message(f'Error en <SubflujoMedioPago>: {e}.', 'ERROR')
+        raise e
+
+def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usuario: str) -> dict:
+    """
+    clasificacion_payload ejemplo:
+    {
+      "accion": "quitar" / "añadir" / "reemplazar",
+      "items": [
+         {"producto": "malteada de chocolate", "especificaciones": []},
+         ...
+      ],
+      # Si reemplazar: podríamos recibir también {"replace_with": [...] } o pares en items
+    }
+    Retorna dict con resumen de cambios y nuevo total.
+    """
+    try:
+        log_message(f'Iniciando función <SubflujoModificacionPedido> para {sender}.', 'INFO')
+        codigo_unico: str = obtener_intencion_futura_observaciones(sender)  # como dijiste ya lo tienes
+        clasificacion_payload: dict = obtener_intencion_futura_mensaje_chatbot(sender)
+        if not codigo_unico:
+            raise ValueError("No se encontró codigo_unico en la intención futura del usuario.")
+
+        pedido = obtener_pedido_por_codigo(codigo_unico)
+        if not pedido:
+            raise ValueError(f"No existe pedido con código {codigo_unico}.")
+
+        idpedido = pedido["idpedido"]
+        id_whatsapp = pedido["id_whatsapp"] or 1
+
+        accion = (clasificacion_payload.get("accion") or "").lower()
+        items = clasificacion_payload.get("items", [])
+
+        # obtener menu para mapear productos nuevos
+        items_menu = obtener_menu()
+
+        cambios_aplicados = {
+            "añadidos": [],
+            "quitados": [],
+            "reemplazados": []
+        }
+
+        # Iniciar transacción (si tu execute_query no maneja transacciones, estos comandos intentan manejarlas)
+        try:
+            execute_query("BEGIN;", ())
+        except Exception:
+            # si DB no permite BEGIN así, ignoramos y seguimos (depende de tu wrapper)
+            pass
+
+        if accion in ("añadir", "add", "anadir", "agregar", "agrega"):
+            for it in items:
+                nombre_req = it.get("producto") or it.get("name")
+                especs = ", ".join(it.get("especificaciones", [])) if it.get("especificaciones") else ""
+                match = match_item_to_menu(nombre_req, items_menu)
+                nombre_final = match["name"]
+                precio = match["price"]
+                idorden = insertar_orden(id_whatsapp, idpedido, nombre_final, precio, especs)
+                cambios_aplicados["añadidos"].append({
+                    "idorden": idorden,
+                    "producto": nombre_final,
+                    "precio": precio,
+                    "found_in_menu": match["found"]
+                })
+
+        elif accion in ("quitar", "remove", "eliminar", "sacar"):
+            for it in items:
+                nombre_req = it.get("producto") or it.get("name")
+                especs_text = ", ".join(it.get("especificaciones", [])) if it.get("especificaciones") else ""
+                eliminado = eliminar_una_instancia_orden_por_nombre(idpedido, nombre_req, especs_text)
+                cambios_aplicados["quitados"].append({
+                    "producto_solicitado": nombre_req,
+                    "eliminado": eliminado
+                })
+
+        elif accion in ("reemplazar", "replace"):
+            # Se espera que 'items' contenga pares {'old': {...}, 'new': {...}} o una lista donde primero son a quitar y luego a añadir.
+            # Hacemos soporte flexible:
+            for pair in items:
+                # si viene con estructura de par
+                if "old" in pair and "new" in pair:
+                    old = pair["old"]
+                    new = pair["new"]
+                    old_nombre = old.get("producto")
+                    new_nombre = new.get("producto")
+                    new_especs = ", ".join(new.get("especificaciones", [])) if new.get("especificaciones") else ""
+                    # eliminar una instancia del viejo
+                    eliminado = eliminar_una_instancia_orden_por_nombre(idpedido, old_nombre)
+                    # insertar nuevo mapeado al menu
+                    match = match_item_to_menu(new_nombre, items_menu)
+                    idorden = insertar_orden(id_whatsapp, idpedido, match["name"], match["price"], new_especs)
+                    cambios_aplicados["reemplazados"].append({
+                        "eliminado": {"producto": old_nombre, "status": eliminado},
+                        "añadido": {"idorden": idorden, "producto": match["name"], "precio": match["price"], "found_in_menu": match["found"]}
+                    })
+                else:
+                    # fallback: intentar eliminar y luego añadir
+                    old_nombre = pair.get("producto") or pair.get("old_producto")
+                    new_nombre = pair.get("reemplazo") or pair.get("nuevo_producto")
+                    if old_nombre and new_nombre:
+                        eliminado = eliminar_una_instancia_orden_por_nombre(idpedido, old_nombre)
+                        match = match_item_to_menu(new_nombre, items_menu)
+                        idorden = insertar_orden(id_whatsapp, idpedido, match["name"], match["price"])
+                        cambios_aplicados["reemplazados"].append({
+                            "eliminado": {"producto": old_nombre, "status": eliminado},
+                            "añadido": {"idorden": idorden, "producto": match["name"], "precio": match["price"], "found_in_menu": match["found"]}
+                        })
+
+        else:
+            # si no entendemos la acción, intentar inferir por texto libre
+            # por ejemplo: si pregunta_usuario contiene "añade" o "agrega" tratamos como añadir
+            txt = pregunta_usuario.lower()
+            if any(k in txt for k in ["añad", "agreg", "pon", "mete"]):
+                # reusar lógica de añadir:
+                for it in items:
+                    nombre_req = it.get("producto") or it.get("name")
+                    especs = ", ".join(it.get("especificaciones", [])) if it.get("especificaciones") else ""
+                    match = match_item_to_menu(nombre_req, items_menu)
+                    idorden = insertar_orden(id_whatsapp, idpedido, match["name"], match["price"], especs)
+                    cambios_aplicados["añadidos"].append({
+                        "idorden": idorden,
+                        "producto": match["name"],
+                        "precio": match["price"],
+                        "found_in_menu": match["found"]
+                    })
+            elif any(k in txt for k in ["quitar", "sacar", "eliminar", "quité", "quita"]):
+                for it in items:
+                    nombre_req = it.get("producto") or it.get("name")
+                    eliminado = eliminar_una_instancia_orden_por_nombre(idpedido, nombre_req)
+                    cambios_aplicados["quitados"].append({
+                        "producto_solicitado": nombre_req,
+                        "eliminado": eliminado
+                    })
+            else:
+                # acción desconocida: rollback y devolver error
+                try:
+                    execute_query("ROLLBACK;", ())
+                except Exception:
+                    pass
+                raise ValueError("Acción de modificación no reconocida.")
+
+        # Recalcular totales y actualizar pedido
+        resumen_actualizado = recalcular_y_actualizar_pedido(idpedido)
+
+        try:
+            execute_query("COMMIT;", ())
+        except Exception:
+            pass
+
+        # Respuesta/salida: resumen de cambios y nuevo total
+        mensaje_resumen = {
+            "status": "success",
+            "codigo_unico": resumen_actualizado["codigo_unico"],
+            "idpedido": resumen_actualizado["idpedido"],
+            "nuevo_total": resumen_actualizado["total_productos"],
+            "cambios": cambios_aplicados
+        }
+        log_message(f'Pedido {resumen_actualizado["codigo_unico"]} modificado: {json.dumps(cambios_aplicados)}', 'INFO')
+        send_text_response(sender, json.dumps(mensaje_resumen))
+        return mensaje_resumen
+
+    except Exception as e:
+        send_text_response(sender, f"Error: {e}")
+        try:
+            execute_query("ROLLBACK;", ())
+        except Exception:
+            pass
+        log_message(f'Error en <SubflujoModificacionPedido>: {e}.', 'ERROR')
+        return {"status": "error", "mensaje": str(e)}
 
 # --- ORQUESTADOR DE SUBFLUJOS --- #
 def orquestador_subflujos(
@@ -409,7 +592,6 @@ def orquestador_subflujos(
             respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender, pregunta_usuario)
             send_text_response(sender, respuesta_bot)
         elif clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "continuacion_promocion":
-
             subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, id_ultima_intencion)
         elif clasificacion_mensaje == "confirmacion_general":
             return subflujo_confirmacion_general(sender, pregunta_usuario)
@@ -417,8 +599,7 @@ def orquestador_subflujos(
             subflujo_negacion_general(sender, pregunta_usuario, nombre_cliente)
         elif clasificacion_mensaje == "consulta_promociones":
             subflujo_promociones(sender, nombre_cliente, pregunta_usuario)
-           
-        elif clasificacion_mensaje == "consulta_menu" and type_text != "pregunta" and type_text != "preguntas_generales":
+        elif clasificacion_mensaje == "consulta_menu" and type_text != "pregunta":
             subflujo_consulta_menu(sender, nombre_cliente)
             borrar_intencion_futura(sender)
         elif clasificacion_mensaje == "preguntas_generales" or (clasificacion_mensaje == "consulta_menu" and (type_text == "pregunta" or type_text == "preguntas_generales")):
@@ -434,8 +615,9 @@ def orquestador_subflujos(
         elif clasificacion_mensaje == "consulta_pedido":
             subflujo_consulta_pedido(sender, nombre_cliente, entidades_text, pregunta_usuario)
         elif clasificacion_mensaje == "validacion_pago" and obtener_intencion_futura(sender) == "medio_pago":
-            pass
-            
+            subflujo_medio_pago(sender, nombre_cliente, pregunta_usuario)
+        elif clasificacion_mensaje == "modificacion_pedido":
+            subflujo_modificacion_pedido(sender, nombre_cliente, pregunta_usuario)
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")

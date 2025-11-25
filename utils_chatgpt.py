@@ -57,13 +57,33 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
                 ]
             }
             }
+            EJEMPLO DE ENTRADA:
+            "me das una sierra picante con extra picante y una malteada de chocolate"
 
-            Debes responder **únicamente** en formato JSON válido con la siguiente estructura:
+            EJEMPLO DE SALIDA:
+            {
+            "intent": "solicitud_pedido",
+            "type": "pedido",
+            "entities": {
+                "items": [
+                {
+                    "producto": "sierra picante",
+                    "especificaciones": ["extra picante"]
+                },
+                {
+                    "producto": "malteada de chocolate",
+                    "especificaciones": []
+                }
+                ]
+            }
+            }
+            Debes responder únicamente en formato JSON válido con la siguiente estructura:
             {
             "intent": "<una de las intenciones permitidas>",
             "type": "<tipo de mensaje>",
             "entities": { }
             }
+
             Lista de intenciones posibles:
             - confirmacion_general (puede ser en otros idiomas: yes, oui, ja, etc.)
             - consulta_menu
@@ -73,21 +93,25 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - direccion
             - info_personal
             - mas_datos_direccion
-            - modificar_pedido
+            - modificar_pedido (puede ser con palabras clave como cambiar, quitar, agregar, modificar, también, etc.)
+            Ejemplo: "quiero agregar una malteada de vainilla", "quiero que la hamburguesa no traiga lechuga", "cambia mi pedido por favor por...", "quitar la malteada", "también quiero una gaseosa coca cola original", "dame también una malteada de chocolate", etc.
             - negacion_general (puede ser en otros idiomas: no, non, nein, etc.)
             - preguntas_generales
-            - quejas (quejas de menor nivel: retraso en la entrega, mal servicio del domiciliario, problemas con la app, cocción desfasada solamente)
+            - quejas (quejas de menor nivel)
             - saludo
             - sin_intencion
-            - solicitud_pedido
-            - transferencia (quejas de mayor nivel: no entrega de domicilio, pedido equivocado, mal estado del pedido solamente)
-            - validacion_pago
+            - solicitud_pedido (pedidos de comida o bebida)
+            - transferencia (quejas de mayor nivel)
+            - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo)
+            - recoger_restaurante   (NUEVA intención: cuando el usuario dice que pasará a recoger, irá al restaurante o lo recoge en tienda)
+            - domicilio             (NUEVA intención: cuando el usuario pide entrega a domicilio, "tráelo", "envíamelo", "a mi casa", etc.)
 
             Instrucciones importantes:
             - No incluyas texto fuera del JSON.
             - No uses comentarios, explicaciones o saltos de línea innecesarios.
             - Si no puedes determinar la intención, usa "sin_intencion".
             """
+
         messages = [
             {"role": "system", "content": classification_prompt},
             {"role": "user", "content": msj}
@@ -96,7 +120,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
         respuesta: Any = client.chat.completions.create(
             model="ft:gpt-3.5-turbo-0125:net-applications:domicilios:CaSlaPnG",
             messages=messages,
-            max_tokens=500,
+            max_tokens=700,
             temperature=0
         )
         raw_response: str = respuesta.choices[0].message.content.strip()
@@ -361,7 +385,7 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
             "productos": []
         }
 
-def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model: str = "gpt-4o") -> dict:
+def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model: str = "gpt-5.1") -> dict:
     """
     Mapear los items provenientes del clasificador AL MENÚ usando GPT.
     """
@@ -371,144 +395,136 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         Eres un asistente encargado de mapear pedidos (extraídos por un clasificador) a un MENÚ estructurado.
         Debes RESPONDER ÚNICA Y EXCLUSIVAMENTE con un JSON válido (sin texto adicional) con esta estructura:
         {{
-        "order_complete": true|false,
-        "items": [
-            {{
-            "requested": {{ "producto": "...", "modalidad": "...", "especificaciones": [ ... ] }},
-            "status": "found" | "not_found" | "multiple_matches",
-            "matched": {{ "name": "...", "id": "...", "price": number }},
-            "candidates": [ {{ "name":"...", "id":"...", "price": number }}, ... ],
-            "modifiers_applied": [ ... ],
-            "note": ""
-            }}
-        ],
-        "total_price": number
+            "order_complete": true|false,
+            "items": [
+                {{
+                    "requested": {{ "producto": "...", "modalidad": "...", "especificaciones": [ ... ] }},
+                    "status": "found" | "not_found" | "multiple_matches",
+                    "matched": {{ "name": "...", "id": "...", "price": number }},
+                    "candidates": [ {{ "name":"...", "id":"...", "price": number }}, ... ],
+                    "modifiers_applied": [ ... ],
+                    "note": ""
+                }}
+            ],
+            "total_price": number
         }}
 
-        REGLAS CLAVE:
-        1) Usa exactamente el nombre del producto tal como aparece en 'name' del MENÚ cuando haya coincidencia.
-        2) Coincidencia case-insensitive. Usa 'aliases' si están disponibles.
+        ======================================================
+        = COMPORTAMIENTO GLOBAL DEL MODELO =
+        ======================================================
+        Debes identificar los productos del menú incluso cuando estén:
+        - mal escritos,
+        - abreviados,
+        - rotos en sílabas,
+        - fusionados,
+        - con espacios de más o de menos,
+        - escritos fonéticamente,
+        - mezclados con palabras irrelevantes,
+        - con diminutivos o versiones coloquiales,
+        - con apodos informales,
+        - usando solo parte del nombre (ej: “insaciable”, “clásica”, “queso”, “mulata”, “costeña”, “malte vaini”, “roman 400”, “perro toci”, etc.).
 
-        === ALGORITMO DE MATCHING ULTRA-ROBUSTO Y TOLERANTE A ERRORES (NUEVO) ===
+        DEBES RECONOCER *CUALQUIER* producto del menú mediante:
+        - normalización,
+        - sinonimia,
+        - fuzzy matching,
+        - similitud semántica,
+        - heurísticas inteligentes.
 
-        Debes reconocer lo que el cliente quiso pedir aunque:
-        - esté mal escrito,
-        - tenga errores de tipeo,
-        - use diminutivos,
-        - use sinónimos,
-        - use marcas parcialmente,
-        - no especifique el tamaño,
-        - use palabras extra,
-        - mezcle palabras del menú.
+        ======================================================
+        = NORMALIZACIÓN EXTREMA (APLICAR A TODA ENTRADA) =
+        ======================================================
+        Antes de buscar coincidencias debes:
+        - pasar todo a minúsculas,
+        - quitar acentos,
+        - corregir repeticiones (“queeesssooo” → “queso”),
+        - eliminar palabras vacías (un, una, de, porfa, porfaaa, ml, tamaño, etc.),
+        - corregir deformaciones fonéticas:
+            * “quesuo”, “kezo”, “keeso” → “queso”
+            * “vete”, “vegui”, “begui” → “veggie”
+            * “ancasiable”, “insasiable” → “insaciable”
+            * “melaoo”, “melaon”, “melado” → “melao”
+            * “paguer”, “power”, “pauer” → “pagüer”
+            * “mulate”, “mulatta”, “mulada” → “mulata”
+            * “costeno”, “costenio” → “costeño”
+            * “super pero”, “supe perro”, “superperro” → “super perro”
+            * “tocino”, “tocineta”, “tocinita” → “tocineta”
+            * “fuse”, “fuzetea” → “fuze tea”
+        - convertir palabras con número → posibles tamaños (ej: 400 → 400 ml)
+        - eliminar texto irrelevante (“porfa”, “quiero”, “dame”, “sería”, “de pronto”, etc.)
 
-        EJEMPLOS DE ENTRADAS QUE DEBES INTERPRETAR:
-        "gasosa coca cola 400", "coka normal", "coquita", "kolita roman", "sprite 4",
-        "fuze limom", "aguita con gas", "coca zero", "coca sin azucar",
-        "gaseosa negra", "refresco coca", "coca 400ml", "coquitas", "fuse tea manzana".
+        ======================================================
+        = SINONIMIA SEMÁNTICA (PARA TODO EL MENÚ) =
+        ======================================================
+        Debes asumir que los clientes pueden decir:
+        - solo una parte del nombre (“insaciable”, “queso”, “paguer”, “perro toci”)
+        - apodos: 
+            * “clasica” → “Sierra Clasica”
+            * “melao” → “Sierra Melao”
+            * “picante” → “Sierra Picante”
+            * “costeña” → “Sierra Costeña”
+            * “bomba” → “Sierra Bomba”
+            * “mulata” → “Sierra Mulata”
+            * "doble carne" → "Doble Carne"
+        - equivalencias:
+            * “hamburguesa”, “burgesa”, “burguer”, “hambur” → categoría hamburguesas
+            * “perro”, “hotdog”, “dog”, “hot dog” → perros calientes
+            * “papa”, “papitas”, “fritas” → papas / acompañamientos
+            * “adicion”, “agregado”, “extra”, “sumale” → adicionales
+            * “salsita”, “sauce”, “aderezo” → salsas
 
-        ============================================
-        = NORMALIZACIÓN AGRESIVA =
-        ============================================
-        Antes de comparar, normaliza:
-        - minúsculas
-        - quitar tildes
-        - quitar repeticiones ("gaaasssosa" → "gasosa")
-        - eliminar palabras irrelevantes: una, un, de, la, porfa, ml, etc.
-        - corregir deformaciones:
-          * "coka", "coquita", "cocla", "cocacola" → "coca cola"
-          * "fuse", "fuze", "fusse" → "fuze tea"
-          * "spray", "spritee" → "sprite"
-          * "roman", "kolita" → "kola roman"
-          * "agüita", "aguaa" → "agua"
-
-        ============================================
-        = SINONIMIA SEMÁNTICA =
-        ============================================
-        - gaseosa = refresco = soda = bebida
-        - cola = coca = coke
-        - "coca normal", "coca roja", "coca clásica" → Coca Cola Original 400 ml
-        - "coca zero", "coca sin azúcar", "coca light" → Coca Cola Sin Azúcar 400 ml
-        - "gaseosa negra" → si solo hay Coca Cola → FOUND; si hay 2 (original y sin azúcar) → MULTIPLE_MATCHES
-        - "té durazno", "tea durazno", "fuze durazno" → Fuze Tea Durazno
-        - "agua con gas", "agua gasificada" → Agua con gas 600ml
-
-        ============================================
-        = TOLERANCIA A ERRORES (FUZZY MATCHING) =
-        ============================================
-        Considera match plausible si:
-        - distancia de edición < 30%
+        ======================================================
+        = TOLERANCIA TOTAL A ERRORES (FUZZY MATCHING) =
+        ======================================================
+        Un producto cuenta como posible match si:
+        - distancia Levenshtein < 35%
         - similitud semántica razonable
-        Ej: gasosa~gaseosa, limom~limón, fuzze~fuze.
+        - palabra base suena similar (matching fonético)
+        - comparte palabras clave del nombre real
 
-        ============================================
+        Ejemplo:
+        - “vegui queso” → “Veggie Queso”
+        - “perro toci” → “Perro Tocineta”
+        - “insasiable” → “La Insaciable”
+        - “paguer” → “Sierra Pagüer”
+        - “queso sierra” → “Sierra Queso”
+
+        ======================================================
         = PRIORIDAD DE MATCHING =
-        ============================================
-        A) Coincidencia exacta/alias → FOUND.
-        B) Coincidencia parcial fuerte → FOUND.
-        C) Coincidencia semántica → FOUND si solo apunta a 1.
-        D) Fuzzy match → FOUND si solo 1 producto coincide.
-        E) Si 2+ coinciden → MULTIPLE_MATCHES (máx 3).
-        F) Si 0 coinciden → NOT_FOUND + sugerencias.
+        ======================================================
+        A) Coincidencia exacta → FOUND.
+        B) Coincidencia por alias → FOUND.
+        C) Coincidencia parcial fuerte → FOUND.
+        D) Coincidencia semántica → FOUND.
+        E) Fuzzy match → FOUND si solo coincide uno.
+        F) Si 2+ coinciden → MULTIPLE_MATCHES.
+        G) Si 0 coinciden:
+            → NOT_FOUND
+            → sugerir máximo 3 alternativas de la misma categoría.
 
-        ============================================
-        = SUGERENCIAS AUTOMÁTICAS =
-        ============================================
-        Si el cliente describe un producto no disponible:
-        - Ofrece alternativas de la misma categoría o sabor.
-        Ej: "coca cola 400" no disponible → sugiere:
-            * Coca Cola Original 400 ml
-            * Coca Cola Sin Azúcar 400 ml
-            * Sprite 400 ml
+        ======================================================
+        = REGLAS FINALES =
+        ======================================================
+        - Usa exactamente el nombre del menú en el campo matched.name.
+        - Si un ítem es not_found → order_complete = false.
+        - total_price = suma de precios.
+        - Respuesta SIEMPRE debe ser solamente el JSON.
 
-        ============================================
-        = REGLAS DE PRECIO =
-        ============================================
-        total_price = suma de matched.price × cantidad (si existe).
-        Si un ítem es not_found → order_complete = false.
-
-        LAS HAMBURGESAS SE LLAMAN:
-            "Veggie Queso","La Insaciable","Sierra Bomba","Sierra Mulata",
-            "Sierra Pagüer","Sierra Picante","Sierra Costeña","Sierra Melao",
-            "Sierra Clasica","Camino a la cima","Sierra Queso"
-
-        HAY PERROS CALIENTES LLAMADOS:
-            "Super Perro","Super Chanchita","Perro Tocineta"
-
-        ADICIONALES PERMITIDOS:
-            "Carne de res 120g","Cebollas caramelizadas","Cebollas caramelizadas picantes",
-            "Pepinillos agridulces","Plátano maduro frito","Suero costeño","Chicharrón",
-            "Tocineta","Queso costeño frito","Queso cheddar"
-
-        SALSAS PERMITIDAS:
-            "Salsa de tomate","Salsa mostaza","Salsa bbq","Salsa mayonesa"
-
-        BEBIDAS PERMITIDAS:
-            "Malteada de Vainilla","Malteada de Mil0","Malteada de Frutos Rojos",
-            "Malteada de Chocolate y avellanas","Malteada de Arequipe","Malteada Oblea",
-            "Malteada Galleta","Fuze tea de manzana 400 ml","Fuze tea de limón 400 ml",
-            "Fuze tea de durazno 400 ml","Kola Roman 400 ml","Quatro 400 ml",
-            "Sprite 400ml","Coca Cola Sin Azúcar 400 ml","Coca Cola Original 400 ml",
-            "Agua normal 600 ml","Agua con gas 600ml","Limonada de panela orgánica 350Ml"
-
-        ACOMPAÑAMIENTOS PERMITIDOS:
-            "Platanitos maduros","Papas Costeñas (francesas medianas + 4 deditos de queso costeño)",
-            "Costeñitos fritos + Suero Costeño","Anillos de Cebolla","Papas francesas"
-
-        MENU:
+        MENÚ COMPLETO:
         {json.dumps(menu_items, ensure_ascii=False)}
 
         CLASIFICADOR:
         {json.dumps(contenido_clasificador, ensure_ascii=False)}
 
         DEVUELVE SOLO EL JSON.
-    """
-
+        """
     try:
         log_message('Iniciando función <MapearPedidoAlMenu>.', 'INFO')
 
         response = client.responses.create(
             model=model,
             input=prompt,
+            max_completion_tokens = 500,
             temperature=0
         )
 
@@ -949,15 +965,15 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
         )
         client = OpenAI()
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5.1",
             messages=[
                 {"role": "system", "content": "Eres un asistente que ayuda al cliente a consultar el menú y elegir su pedido."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=200,
+            max_tokens=450,
             temperature=0.2
         )
-        raw = response.choices[0].message.content.strip()
+        raw = response.choices[0].message.content
         try:
             data = json.loads(raw)
         except Exception:
@@ -985,7 +1001,7 @@ def actualizar_pedido_con_mensaje(
         menu_items: List[Dict],
         mensaje_chatbot_previo: str = "",
         mensaje_usuario_previo: str = "",
-        model: str = "gpt-4o"
+        model: str = "gpt-5.1"
         ) -> Dict:
     """
     Función robusta para actualizar pedidos con lógica de fallback y limpieza.
@@ -1146,7 +1162,7 @@ def generar_mensaje_confirmacion_pedido(
         promocion: bool = False,
         promociones_info: list = None,
         pedido_completo_promocion: dict = None,
-        model: str = "gpt-4o",
+        model: str = "gpt-5.1",
     ) -> dict:
     """
     Genera un mensaje de confirmación de pedido.
@@ -1268,7 +1284,7 @@ def generar_mensaje_cancelacion(
         sender: str,
         codigo_unico: str,
         nombre_cliente: str,
-        model: str = "gpt-4o",
+        model: str = "gpt-5.1",
     ) -> dict:
     """
     Genera un JSON con el mensaje de confirmación de pedido.
@@ -1488,12 +1504,12 @@ def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: dict, pr
         """
         client = OpenAI()
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": f"Eres PAKO, representante alegre de {nombre_local}."},
                 {"role": "user", "content": PROMPT}
             ],
-            max_tokens=300,
+            max_tokens=200,
             temperature=0.8
         )
         raw = response.choices[0].message.content.strip()
@@ -1563,12 +1579,12 @@ def responder_sobre_promociones(nombre: str, nombre_local: str, promociones_info
 
         client = OpenAI()
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5.1",
             messages=[
                 {"role": "system", "content": f"Eres PAKO, representante alegre y amigable de {nombre_local}, experto en promociones."},
                 {"role": "user", "content": PROMPT}
             ],
-            max_tokens=350,
+            max_completion_tokens=350,
             temperature=0.85
         )
 
@@ -1600,16 +1616,13 @@ def interpretar_eleccion_promocion(pregunta_usuario: str, info_promociones_str: 
     info_promociones_str: viene como STR desde intencion_futura → lo convertimos a lista
     pedido_dict: contiene items, total_price, etc.
     """
-    try:
-        info_promociones = ast.literal_eval(info_promociones_str)
-    except:
-        info_promociones = []
+    log_message('Iniciando función <interpretar_eleccion_promocion>.', 'INFO')
     prompt = f"""
         Eres un sistema experto en análisis de promociones.
         ### Productos del pedido:
         {pedido_dict}
         ### Promociones disponibles:
-        {info_promociones}
+        {info_promociones_str}
         ### Mensaje previo del chatbot:
         "{respuesta_previa_promocion}"
         ### Mensaje actual del usuario:
@@ -1641,13 +1654,16 @@ def interpretar_eleccion_promocion(pregunta_usuario: str, info_promociones_str: 
         """
     client = OpenAI()
     response = client.responses.create(
-        model="gpt-4o",
+        model="gpt-5.1",
         input=prompt,
-        max_output_tokens=500
+        max_output_tokens=500,
+        temperature=0
     )
     try:
-        data = json.loads(response.output_text)
-    except:
+        raw = response.output_text   # ← ESTE ES EL CORRECTO
+        data = json.loads(raw)
+    except Exception as e:
+        log_message(f"Error en <interpretar_eleccion_promocion>: {e}", "ERROR")
         data = {
             "valida_promocion": False,
             "idpromocion": "",
@@ -1655,6 +1671,7 @@ def interpretar_eleccion_promocion(pregunta_usuario: str, info_promociones_str: 
             "nombre_promocion": "",
             "motivo": "Error interpretando la IA"
         }
+    log_message('Finalizando función <interpretar_eleccion_promocion>.', 'INFO')
     return data
 
 def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: str, json_pedido: str) -> dict:
@@ -1671,15 +1688,6 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
         Tu tarea:
         - Responder SOLO con un JSON válido.
         - NO inventar productos. NO mencionar nada que NO esté en el menú.
-
-        REGLA NUEVA (indispensable):
-        - Si el pedido actual contiene productos que NO pertenecen a ninguna promoción activa,
-          debes decir amablemente:
-            * "Por favor elige solo los productos de la promoción disponible,
-               o inicia un pedido desde cero escribiendo 'menu' u 'hola'."
-        - NO debes continuar el flujo ni pedir aclaraciones del pedido.
-        - NO sugerir menú completo si el usuario está en un flujo de promoción.
-        - NO permitir mezclar productos de promo con productos normales.
 
         Otras reglas:
         - Si el cliente pide algo que NO existe en el menú, indícalo y sugiere 1 a 3 opciones reales.
@@ -1763,48 +1771,161 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
             "Costeñitos fritos + Suero Costeño"
             "Anillos de Cebolla"
             "Papas francesas"
+        si el pedido es general, no específico, sugiere opciones del menú. siempre con un call 2 action.
         """
-
-        # Crear listado de menú para incluir en el prompt
         promociones_str = str(promociones_lst)
-
         prompt = PROMPT_PEDIDO_INCOMPLETO.format(
             mensaje_usuario=mensaje_usuario.lower(),
             promociones_str=promociones_str,
             json_pedido=json_pedido
         )
-
         client = OpenAI()
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-5.1",
             messages=[
                 {"role": "system", "content": "Eres PAKO, asistente oficial de Sierra Nevada."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=200,
-            temperature=0.2
+            max_completion_tokens=200,
+            temperature=0.8
         )
-
         raw = response.choices[0].message.content.strip()
-
         try:
             data = json.loads(raw)
         except Exception:
-            
             data = {
                 "mensaje": "Por favor elige solo los productos de la promoción o inicia un pedido desde cero escribiendo 'menu' u 'hola'.",
                 "recomendaciones": [],
                 "intencion": "consulta_menu"
             }
-
         log_message('Finalizando función <pedido_incompleto_dynamic_promocion>.', 'INFO')
         return data
-
     except Exception as e:
         log_message(f'Error en función <pedido_incompleto_dynamic_promocion>: {e}', 'ERROR')
-        
         return {
             "mensaje": "Por favor elige solo los productos de la promoción o inicia un pedido desde cero escribiendo 'menu' u 'hola'.",
             "recomendaciones": [],
             "intencion": "consulta_menu"
+        }
+
+def mapear_modo_pago(respuesta_usuario: str) -> str:
+    try:
+        """Mapea la respuesta del usuario al método de pago estandarizado."""
+        log_message('Iniciando función <mapear_modo_pago>.', 'INFO')
+        client = OpenAI()
+        PROMPT_MAPEO_PAGO = """
+        Eres un clasificador experto en interpretar el método de pago que un cliente escribe en WhatsApp, incluso cuando lo escribe con errores, abreviaciones o de forma muy informal.
+
+        Debes analizar el texto del usuario y responder exclusivamente uno de los siguientes valores:
+
+        - "transferencia - nequi"
+        - "transferencia - daviplata"
+        - "transferencia - bre-b"
+        - "transferencia - otro"
+        - "efectivo"
+        - "tarjeta"
+        - "nfc"
+        - "desconocido"
+
+        Reglas:
+        1. Aunque esté mal escrito, identifica la intención correcta.
+        2. Si menciona:
+        - nequi / neki / nekii / nequi bbva → "transferencia - nequi"
+        - daviplata / davi / dabiplya / daviplaya → "transferencia - daviplata"
+        - bre-b / breb → "transferencia - bre-b"
+        - “movil”, “transfer”, “transfe”, “pse”, “lo hago por el celu”, “paso por app” → "transferencia - otro"
+        3. tarjeta, tc, td, targta, tarjta, crédito, débito → "tarjeta"
+        4. nfc, acercar la tarjeta, contactless → "nfc"
+        5. efectivo, cash → "efectivo"
+        6. Si no puedes entenderlo → "desconocido"
+
+        Formato de salida OBLIGATORIO (JSON puro):
+        {
+            "metodo": "uno de los valores permitidos"
+        }
+        """
+        if not respuesta_usuario:
+            return "desconocido"
+
+        prompt = PROMPT_MAPEO_PAGO + f'\n\nTexto del usuario: "{respuesta_usuario}"'
+        response = client.responses.create(
+            model="gpt-3.5-turbo",
+            input=prompt,
+            max_output_tokens=60,
+            temperature=0
+        )
+        raw = response.output_text
+        data = json.loads(raw)
+        metodo = data.get("metodo", "desconocido")
+        log_message('Finalizando función <mapear_modo_pago>.', 'INFO')
+        return metodo
+    except Exception as e:
+        log_message(f"Error mapeando método de pago: {e}", "ERROR")
+        return "desconocido"
+
+def solicitar_metodo_recogida(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str) -> dict:
+    try:
+        log_message('Iniciando función <solicitar_metodo_recogida>.', 'INFO')
+        PROMPT_METODOS_RECOGIDA = """
+            Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
+            Te llamas PAKO.
+            El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
+            Este es el pedido que hizo:
+            "{pedido_str}"
+
+            TAREA:
+            - Haz un comentario alegre, sabroso y un poquito divertido sobre el pedido.
+            - Estilo: cálido, entusiasta, como “¡Wow qué delicia eso!”, “Ese pedido está brutal!”, etc.
+            - No uses sarcasmo, groserías ni exageres demasiado.
+            - Máximo 1 o 2 frases.
+
+            Después del comentario:
+            - Pregúntale de forma amable y cercana dónde quiere recibir su pedido.
+            - Menciona el local: {nombre_local}.
+            - Lista claramente las dos opciones de recogida que puede elegir:
+                • Recoger en tienda:
+                    Centro Mayor (Cc. Centro Mayor, local 3-019)
+                    Galerías (Calle 53 # 27-16)
+                    Centro Internacional (Calle 32 # 07-10)
+                    Chicó 2.0 (Calle 100 # 9a - 45 local 7A)
+                    Virrey (Carrera 15 # 88-67)
+                • Envío a domicilio (depende de la zona y tiene costo adicional).
+            Haz que el cliente se sienta especial y bien atendido.
+            Siempre envia el codigo unico del pedido en el mensaje.
+            FORMATO DE RESPUESTA (OBLIGATORIO):
+            {{
+                "mensaje": "texto aquí"
+            }}
+            Nada fuera del JSON.
+        """
+        client = OpenAI()
+        prompt = PROMPT_METODOS_RECOGIDA.format(
+            nombre=nombre,
+            codigo_unico=codigo_unico,
+            nombre_local=nombre_local,
+            pedido_str=pedido_str
+        )
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres el generador oficial de mensajes alegres y de pago para Sierra Nevada."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=150,
+            temperature=0.95
+        )
+        raw = response.choices[0].message.content.strip()
+        try:
+            data = json.loads(raw)
+        except:
+            data = {
+                "mensaje": f"¡{nombre}, ese pedido está para antojar a cualquiera! 🤤 Tu orden ({codigo_unico}) en {nombre_local} quedó tremenda. ¿Vas a querer domicilio o prefieres recogerlo en el restaurante?"
+            }
+        log_message('Finalizando función <solicitar_metodo_recogida>.', 'INFO')
+        return data
+    except Exception as e:
+        log_message(f'Error en función <solicitar_metodo_recogida>: {e}', 'ERROR')
+        logging.error(f"Error en función <solicitar_metodo_recogida>: {e}")
+        return {
+            "mensaje": f"¡{nombre}, tu pedido ({codigo_unico}) quedó delicioso! ¿Vas a querer domicilio o prefieres recogerlo en el restaurante?"
         }
