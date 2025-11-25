@@ -39,7 +39,7 @@ from utils import (
     borrar_intencion_futura,
     to_json_safe
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_pedido, interpretar_eleccion_promocion, mapear_modo_pago, mapear_pedido_al_menu, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida
+from utils_chatgpt import actualizar_pedido_con_mensaje, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_confirmacion_pedido, interpretar_eleccion_promocion, mapear_modo_pago, mapear_pedido_al_menu, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida
 from utils_database import execute_query, execute_query_columns
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
@@ -144,9 +144,11 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
                 no_completo: dict = pedido_incompleto_dynamic_promocion(pregunta_usuario, items_menu, str(pedido_dict))
                 send_text_response(sender, no_completo.get("mensaje"))
                 return
-        confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
-        send_text_response(sender, confirmacion_pedido.get("mensaje"))
-        guardar_intencion_futura(sender, confirmacion_pedido.get("intencion_siguiente", "confirmar_pedido"), pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario)
+        confirmacion_modificacion_pedido: dict = generar_mensaje_confirmacion_modificacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
+        send_text_response(sender, confirmacion_modificacion_pedido.get("mensaje"))
+        #confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
+        #send_text_response(sender, confirmacion_pedido.get("mensaje"))
+        guardar_intencion_futura(sender, "confirmacion_modificacion_pedido", pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario)
         marcar_intencion_como_resuelta(id_ultima_intencion)
     except Exception as e:
         logging.error(f"Error en <SubflujoSolicitudPedido>: {e}")
