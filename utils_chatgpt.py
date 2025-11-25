@@ -1739,13 +1739,15 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
             "Queso costeño frito"
             "Queso cheddar"
 
-        CUANDO PIDAN SALSAS, SOLO PUEDE SER:
+        CUANDO PIDAN SALSAS, Usa coincidencia aproximada para entender la intención.
+        PERO la respuesta final siempre debe ser una bebida EXACTA del menú.:
             "Salsa de tomate"
             "Salsa mostaza"
             "Salsa bbq"
             "Salsa mayonesa"
 
-        CUANDO PIDAN BEBIDAS, SOLO PUEDE SER:
+        CUANDO PIDAN BEBIDAS, Usa coincidencia aproximada para entender la intención.
+        PERO la respuesta final siempre debe ser una bebida EXACTA del menú.:
             "Malteada de Vainilla"
             "Malteada de Mil0"
             "Malteada de Frutos Rojos"
@@ -1765,7 +1767,8 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
             "Agua con gas 600ml"
             "Limonada de panela orgánica 350Ml"
 
-        CUANDO PIDAN ACOMPAÑAMIENTOS, SOLO PUEDE SER:
+        CUANDO PIDAN ACOMPAÑAMIENTOS,Usa coincidencia aproximada para entender la intención.
+        PERO la respuesta final siempre debe ser una bebida EXACTA del menú.:
             "Platanitos maduros"
             "Papas Costeñas (francesas medianas + 4 deditos de queso costeño)"
             "Costeñitos fritos + Suero Costeño"
