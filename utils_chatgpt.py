@@ -524,7 +524,7 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         response = client.responses.create(
             model=model,
             input=prompt,
-            max_completion_tokens = 500,
+ #           max_completion_tokens = 500,
             temperature=0
         )
 
