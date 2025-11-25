@@ -885,6 +885,9 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             - Si el cliente pide algo MUY GENERAL (ej: "una hamburguesa", "una bebida"), debes:
                 * Dar 1 a 3 recomendaciones REALES del menú que sí coincidan.
             - SIEMPRE pedir que el cliente vuelva a escribir TODO su pedido claramente.
+            -Si el cliente pide algo válido pero con nombre aproximado
+                * Acepta coincidencias parciales SOLO si es OBVIO que se refiere a un producto real.
+                * Nunca adivines si hay más de una opción posible.
             Responde SOLO en este formato exacto:
             {{
                 "mensaje": "texto aquí",
@@ -914,7 +917,7 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             "Super Perro"
             "Super Chanchita"
             "Perro Tocineta"
-        CUANDO PIDAN UN ADICIONAL EN CUALQUIER PRODUCTO, SOLO PUEDE SER:
+        CUANDO PIDAN UN ADICIONAL EN CUALQUIER PRODUCTO, PUEDE SER UNO DE ESTOS, PUEDES USAR COINCIDENCIAS PARCIALES O APROXIMADAS PERO NADA FUERA DE AQUI:
         	"Carne de res 120g"
             "Cebollas caramelizadas"
             "Cebollas caramelizadas picantes"
@@ -955,6 +958,7 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             "Costeñitos fritos + Suero Costeño"
             "Anillos de Cebolla"
             "Papas francesas"
+        TEN EN CUENTA PUEDES USAR COINCIDENCIAS PARCIALES SOLO SI ES UNA VARIANTE CLARA PERO NO INVENTAR NI REEMPLAZAR SABORES.    
             """
         menu_str = "\n".join([f"- {item['nombre']}" for item in menu])
 
@@ -1657,7 +1661,7 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
 
         Reglas estrictas:
         - No inventes productos.
-        - Usa ÚNICAMENTE nombres EXACTOS del menú.
+        - Usa coincidencia aproximada para entender la intención del cliente,pero la respuesta final debe ser EXACTA del menú.
 
         Aquí está las promociones disponibles:
         {promociones_str}
@@ -1680,7 +1684,8 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
             "Super Chanchita"
             "Perro Tocineta"
 
-        CUANDO PIDAN UN ADICIONAL EN CUALQUIER PRODUCTO, SOLO PUEDE SER:
+        CUANDO PIDAN UN ADICIONAL EN CUALQUIER PRODUCTO, Usa coincidencia aproximada para entender la intención.
+        PERO la respuesta final siempre debe ser una salsa EXACTA del menú:
             "Carne de res 120g"
             "Cebollas caramelizadas"
             "Cebollas caramelizadas picantes"
@@ -1693,7 +1698,7 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
             "Queso cheddar"
 
         CUANDO PIDAN SALSAS, Usa coincidencia aproximada para entender la intención.
-        PERO la respuesta final siempre debe ser una bebida EXACTA del menú.:
+        PERO la respuesta final siempre debe ser una salsa EXACTA del menú.:
             "Salsa de tomate"
             "Salsa mostaza"
             "Salsa bbq"
@@ -1721,7 +1726,7 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
             "Limonada de panela orgánica 350Ml"
 
         CUANDO PIDAN ACOMPAÑAMIENTOS,Usa coincidencia aproximada para entender la intención.
-        PERO la respuesta final siempre debe ser una bebida EXACTA del menú.:
+        PERO la respuesta final siempre debe ser un acompañamiento EXACTO del menú.:
             "Platanitos maduros"
             "Papas Costeñas (francesas medianas + 4 deditos de queso costeño)"
             "Costeñitos fritos + Suero Costeño"
