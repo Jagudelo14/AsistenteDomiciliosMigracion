@@ -1932,3 +1932,120 @@ def solicitar_metodo_recogida(nombre: str, codigo_unico: str, nombre_local: str,
         return {
             "mensaje": f"¡{nombre}, tu pedido ({codigo_unico}) quedó delicioso! ¿Vas a querer domicilio o prefieres recogerlo en el restaurante?"
         }
+
+def generar_mensaje_confirmacion_modificacion_pedido(
+        pedido_json: dict,
+        promocion: bool = False,
+        promociones_info: list = None,
+        pedido_completo_promocion: dict = None,
+        model: str = "gpt-5.1",
+    ) -> dict:
+    """
+    Presenta el pedido al cliente y finaliza SIEMPRE con:
+    “¿Desea modificar algo de su pedido?”
+
+    No realiza confirmaciones ni preguntas adicionales.
+    """
+
+    raw = ""
+
+    try:
+        client = OpenAI()
+
+        # ------------------------------------------------------------------
+        # PROMPT NORMAL
+        # ------------------------------------------------------------------
+        if not promocion:
+            prompt = f"""
+Eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada, La Cima del Sabor.
+
+RECIBES un JSON de pedido validado:
+{json.dumps(pedido_json, ensure_ascii=False)}
+
+TU MISIÓN:
+1. Presentar el pedido al cliente:
+   - Lista cada producto.
+   - Incluye sus modificadores (si existen).
+   - Muestra precios individuales.
+   - Muestra el total.
+   - No inventes productos ni precios.
+
+2. Finaliza SIEMPRE con esta única pregunta:
+   “¿Desea modificar algo de su pedido?”
+
+FORMATO OBLIGATORIO (JSON LISO):
+{{
+  "mensaje": "mensaje breve en lenguaje natural presentando el pedido y cerrando con la pregunta obligatoria",
+  "intencion_siguiente": "preguntar_modificacion"
+}}
+
+REGLAS:
+- No incluyas texto fuera del JSON.
+- No uses emojis.
+- Tono cálido, profesional y conciso.
+"""
+
+        # ------------------------------------------------------------------
+        # PROMPT PROMOCIONES
+        # ------------------------------------------------------------------
+        else:
+            if promociones_info is None or pedido_completo_promocion is None:
+                raise ValueError("promociones_info y pedido_completo_promocion son obligatorios cuando promocion=True.")
+
+            prompt = f"""
+Eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada.
+
+RECIBES:
+1) Pedido original:
+{json.dumps(pedido_json, ensure_ascii=False)}
+
+2) Pedido final con promociones aplicadas:
+{json.dumps(pedido_completo_promocion, ensure_ascii=False)}
+
+3) Promociones vigentes:
+{json.dumps(promociones_info, ensure_ascii=False)}
+
+TU MISIÓN:
+- Presentar el pedido final al cliente.
+- Explicar brevemente cuál promoción aplica (si aplica).
+- Indicar los precios finales por producto.
+- No inventes datos.
+
+FINAL OBLIGATORIO:
+“¿Desea modificar algo de su pedido?”
+
+FORMATO JSON EXACTO:
+{{
+  "mensaje": "presentación del pedido + pregunta obligatoria",
+  "intencion_siguiente": "preguntar_modificacion"
+}}
+
+REGLAS:
+- No uses emojis.
+- No incluyas texto fuera del JSON.
+- Tono cálido y profesional.
+"""
+
+        # ------------------ Llamado al modelo ------------------
+        response = client.responses.create(
+            model=model,
+            input=prompt,
+            temperature=0
+        )
+
+        raw = response.output[0].content[0].text.strip()
+
+        clean = raw
+        clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
+        clean = re.sub(r'^```', '', clean).strip()
+        clean = re.sub(r'```$', '', clean).strip()
+
+        return json.loads(clean)
+
+    except Exception as e:
+        log_message(f'Error en función <generar_mensaje_confirmacion_modificacion_pedido>: {e}', 'ERROR')
+        return {
+            "mensaje": "Hubo un error generando el mensaje.",
+            "intencion_siguiente": "preguntar_modificacion",
+            "raw_output": raw
+        }
