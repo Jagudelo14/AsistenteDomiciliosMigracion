@@ -970,7 +970,7 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
                 {"role": "system", "content": "Eres un asistente que ayuda al cliente a consultar el menú y elegir su pedido."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=450,
+#este modelo no limita los tokens            max_tokens=450,
             temperature=0.2
         )
         raw = response.choices[0].message.content
@@ -1584,7 +1584,7 @@ def responder_sobre_promociones(nombre: str, nombre_local: str, promociones_info
                 {"role": "system", "content": f"Eres PAKO, representante alegre y amigable de {nombre_local}, experto en promociones."},
                 {"role": "user", "content": PROMPT}
             ],
-            max_completion_tokens=350,
+#            max_completion_tokens=350,
             temperature=0.85
         )
 
@@ -1656,7 +1656,7 @@ def interpretar_eleccion_promocion(pregunta_usuario: str, info_promociones_str: 
     response = client.responses.create(
         model="gpt-5.1",
         input=prompt,
-        max_output_tokens=500,
+#        max_output_tokens=500,
         temperature=0
     )
     try:
@@ -1786,7 +1786,7 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
                 {"role": "system", "content": "Eres PAKO, asistente oficial de Sierra Nevada."},
                 {"role": "user", "content": prompt}
             ],
-            max_completion_tokens=200,
+#            max_completion_tokens=200,
             temperature=0.8
         )
         raw = response.choices[0].message.content.strip()
