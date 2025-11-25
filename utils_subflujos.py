@@ -429,15 +429,15 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
     """Maneja la modificación del pedido por parte del usuario."""
     try:
         log_message(f'Iniciando función <SubflujoModificacionPedido> para {sender}.', 'INFO')
-        send_text_response(sender, "Procesando la modificación de tu pedido desde dentro..")
+        bandera_promocion: bool = False
         items_menu: list = obtener_menu()
+        pedido_dict: dict = {}
         pedido_anterior = obtener_intencion_futura_mensaje_chatbot(sender)
         nuevos_elementos: str = pregunta_usuario
         
         pedido_dict = actualizar_pedido_con_mensaje_modificacion(pedido_anterior, items_menu, nuevos_elementos)
         if not pedido_dict.get("order_complete", False):
             no_completo: dict = pedido_incompleto_dynamic(pregunta_usuario, items_menu, str(pedido_dict))
-            send_text_response(sender, "Analizando tu pedido... pq faltó algo.")
             send_text_response(sender, no_completo.get("mensaje"))
             guardar_intencion_futura(sender, "continuacion_pedido", str(pedido_dict), no_completo.get("mensaje"), pregunta_usuario)
             return
@@ -495,7 +495,7 @@ def orquestador_subflujos(
         if clasificacion_mensaje == "saludo":
             respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender, pregunta_usuario)
             send_text_response(sender, respuesta_bot)
-        elif clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "continuacion_promocion":
+        elif (clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "continuacion_promocion") and obtener_intencion_futura(sender) != "confirmacion_modificacion_pedido":
             subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, id_ultima_intencion)
         elif clasificacion_mensaje == "confirmacion_general":
             return subflujo_confirmacion_general(sender, pregunta_usuario)
@@ -520,12 +520,10 @@ def orquestador_subflujos(
             subflujo_consulta_pedido(sender, nombre_cliente, entidades_text, pregunta_usuario)
         elif clasificacion_mensaje == "validacion_pago" and obtener_intencion_futura(sender) == "medio_pago":
             subflujo_medio_pago(sender, nombre_cliente, pregunta_usuario)
-        elif (clasificacion_mensaje == "modificacion_pedido" or clasificacion_mensaje == "continuacion_pedido" or clasificacion_mensaje == "solicitud_pedido") and obtener_intencion_futura(sender) == "confirmacion_modificacion_pedido":
-            send_text_response(sender, "Procesando la modificación de tu pedido...")
+        elif (clasificacion_mensaje == "modificacion_pedido" or clasificacion_mensaje == "continuacion_pedido" or clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "solicitud_pedido") and obtener_intencion_futura(sender) == "confirmacion_modificacion_pedido":
             subflujo_modificacion_pedido(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "confirmacion_modificacion_pedido":
             send_text_response(sender, "Escribe lo que quieras modificar de tu pedido de manera clara y específica.")
-            
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")
