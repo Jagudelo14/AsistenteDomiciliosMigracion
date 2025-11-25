@@ -542,6 +542,7 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
+        logging.info(f"[GuardarPedidoCompleto] id_whatsapp para {sender}: {id_whatsapp}")
         # ------------------------------- # 2. Determinar si es persona nueva # -------------------------------
         q_prev = "SELECT COUNT(*) FROM pedidos WHERE id_whatsapp = %s"
         res_prev = execute_query(q_prev, (id_whatsapp,), fetchone=True)
@@ -575,20 +576,23 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         query = """ INSERT INTO pedidos ( producto, total_productos, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING idpedido, codigo_unico """
         params = ( productos_str, total_price, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal )
         # ------------------------------- # 8. Ejecutar y retornar el id # -------------------------------
+        logging.info(f"[GuardarPedidoCompleto] Ejecutando INSERT pedidos. params={params}")
         res = execute_query(query, params, fetchone=True)
+        logging.info(f"[GuardarPedidoCompleto] Resultado INSERT (res) = {res}")
         # Verificación defensiva: si la consulta no devolvió fila, registrar y retornar None
         if not res:
             log_message('La inserción de pedido no devolvió resultados (res is None).', 'ERROR')
-            logging.error('La inserción de pedido no devolvió resultados. Query o DB pueden haber fallado.')
+            logging.error('La inserción de pedido no devolvió resultados. Query o DB pueden haber fallado. params=%s', params)
             return None
         log_message(f'Pedido guardado con ID {res[0]} y código único {res[1]}', 'INFO')
         return {
             "idpedido": res[0],
             "codigo_unico": res[1]
-            }
+        }
     except Exception as e:
-        log_message(f'Error al hacer uso de función <GuardarPedidoCompleto>: {e}.', 'ERROR')
-        logging.error(f'Error al hacer uso de función <GuardarPedidoCompleto>: {e}.')
+        tb = traceback.format_exc()
+        log_message(f'Error al hacer uso de función <GuardarPedidoCompleto>: {e}.\nTRACEBACK:\n{tb}', 'ERROR')
+        logging.error(f'Error al hacer uso de función <GuardarPedidoCompleto>: {e}.\n{tb}')
         return {}
 
 def guardar_ordenes(idpedido: int, pedido_json: dict, sender: str) -> dict:
