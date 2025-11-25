@@ -8,7 +8,7 @@ from typing import Any, List, Optional, Tuple, Dict
 import os
 import json
 import ast
-from utils import REPLACE_PHRASES, obtener_pedido_por_codigo, send_text_response, limpiar_respuesta_json, log_message, _safe_parse_order, _merge_items, _price_of_item, convert_decimals, to_json_safe
+from utils import REPLACE_PHRASES, _apply_direct_selection_from_text, obtener_pedido_por_codigo, send_text_response, limpiar_respuesta_json, log_message, _safe_parse_order, _merge_items, _price_of_item, convert_decimals, to_json_safe
 
 def get_openai_key() -> str:
     try:
@@ -1005,11 +1005,20 @@ def actualizar_pedido_con_mensaje(
         ) -> Dict:
     """
     Función robusta para actualizar pedidos con lógica de fallback y limpieza.
+    Ahora incluye intento de selección directa cuando el usuario nombra una candidate.
     """
     try:
         log_message('Iniciando función <actualizar_pedido_con_mensaje>.', 'INFO')
         logging.info("Iniciando actualizar_pedido_con_mensaje.")
         pedido_actual = _safe_parse_order(pedido_actual)
+
+        # --- NUEVA ETAPA: intentar aplicar selección directa antes de llamar al modelo ---
+        try:
+            pedido_actual = _apply_direct_selection_from_text(pedido_actual, mensaje_usuario)
+        except Exception:
+            logging.exception("Fallo en etapa de selección directa (se continúa normalmente).")
+        # ------------------------------------------------------------------------------
+
         text_for_replace_check = " ".join([str(mensaje_usuario or ""), str(mensaje_chatbot_previo or ""), str(mensaje_usuario_previo or "")]).lower()
         replace_all = any(phrase in text_for_replace_check for phrase in REPLACE_PHRASES)
         pedido_actual_limpio = {
@@ -1033,63 +1042,7 @@ def actualizar_pedido_con_mensaje(
         {json.dumps(pedido_para_modelo, ensure_ascii=False)}
         === MENÚ ===
         {json.dumps(menu_items, ensure_ascii=False)}
-        LAS HAMBURGESAS SE LLAMAN:
-            "Veggie Queso"
-            "La Insaciable"
-            "Sierra Bomba"
-            "Sierra Mulata"
-            "Sierra Pagüer"
-            "Sierra Picante"
-            "Sierra Costeña"
-            "Sierra Melao"
-            "Sierra Clasica"
-            "Camino a la cima"
-            "Sierra Queso"
-        HAY PERROS CALIENTES LLAMADOS:
-            "Super Perro"
-            "Super Chanchita"
-            "Perro Tocineta"
-        CUANDO PIDAN UN ADICIONAL EN CUALQUIER PRODUCTO, SOLO PUEDE SER:
-        	"Carne de res 120g"
-            "Cebollas caramelizadas"
-            "Cebollas caramelizadas picantes"
-            "Pepinillos agridulces"
-            "Plátano maduro frito"
-            "Suero costeño"
-            "Chicharrón"
-            "Tocineta"
-            "Queso costeño frito"
-            "Queso cheddar"
-        CUANDO PIDAN SALSAS, SOLO PUEDE SER:
-            "Salsa de tomate"
-            "Salsa mostaza"
-            "Salsa bbq"
-            "Salsa mayonesa"
-        CUANDO PIDAN BEBIDAS, SOLO PUEDE SER:
-            "Malteada de Vainilla"
-            "Malteada de Mil0"
-            "Malteada de Frutos Rojos"
-            "Malteada de Chocolate y avellanas"
-            "Malteada de Arequipe"
-            "Malteada Oblea"
-            "Malteada Galleta"
-            "Fuze tea de manzana 400 ml"
-            "Fuze tea de limón 400 ml"
-            "Fuze tea de durazno 400 ml"
-            "Kola Roman 400 ml"
-            "Quatro 400 ml"
-            "Sprite 400ml"
-            "Coca Cola Sin Azúcar 400 ml"
-            "Coca Cola Original 400 ml"
-            "Agua normal 600 ml"
-            "Agua con gas 600ml"
-            "Limonada de panela orgánica 350Ml"
-        CUANDO PIDAN ACOMPAÑAMIENTOS, SOLO PUEDE SER:
-            "Platanitos maduros"
-            "Papas Costeñas (francesas medianas + 4 deditos de queso costeño)"
-            "Costeñitos fritos + Suero Costeño"
-            "Anillos de Cebolla"
-            "Papas francesas"
+        
         """
         client = OpenAI()
         response = client.responses.create(model=model, input=prompt, temperature=0)
@@ -2048,4 +2001,144 @@ REGLAS:
             "mensaje": "Hubo un error generando el mensaje.",
             "intencion_siguiente": "preguntar_modificacion",
             "raw_output": raw
+        }
+
+def actualizar_pedido_con_mensaje_modificacion(
+        pedido_anterior: Any,
+        items_menu: List[Dict],
+        nuevos_elementos: str,
+        model: str = "gpt-5.1"
+    ) -> Dict:
+    """
+    Versión paralela de actualizar_pedido_con_mensaje para manejar modificaciones.
+    Recibe:
+      - pedido_anterior: dict con la estructura del pedido actual.
+      - items_menu: lista (obtener_menu()).
+      - nuevos_elementos: texto libre con instrucciones (añade, quita, modifica, reemplaza, etc.)
+    Devuelve:
+      - dict { "order_complete": bool, "items": [...], "total_price": number, ... }
+    """
+    try:
+        log_message('Iniciando función <actualizar_pedido_con_mensaje_modificacion>.', 'INFO')
+        logging.info("Iniciando actualizar_pedido_con_mensaje_modificacion.")
+        pedido_actual = _safe_parse_order(pedido_anterior)
+
+        # --- Intento de selección directa basado en texto de modificación antes de llamar al modelo ---
+        try:
+            pedido_actual = _apply_direct_selection_from_text(pedido_actual, nuevos_elementos)
+        except Exception:
+            logging.exception("Fallo en etapa de selección directa (se continúa normalmente).")
+        # ------------------------------------------------------------------------------
+
+        text_for_replace_check = str(nuevos_elementos or "").lower()
+        replace_all = any(phrase in text_for_replace_check for phrase in REPLACE_PHRASES)
+
+        # Limpiar items 'not_found' tal como en la función original
+        pedido_actual_limpio = {
+            **pedido_actual,
+            "items": [
+                it for it in (pedido_actual.get("items") or [])
+                if it and it.get("status") != "not_found"
+            ]
+        }
+
+        # Si detectamos una frase de reemplazo total, vaciamos items para el modelo
+        pedido_para_modelo = {
+            **pedido_actual_limpio,
+            "items": [] if replace_all else pedido_actual_limpio.get("items", [])
+        }
+
+        # Construcción del prompt (misma semántica que la función original, adaptada a 'nuevos_elementos')
+        prompt = f"""
+        Eres un asistente experto actualizando pedidos de comida.
+        TIENES QUE PROCESAR TODOS los productos/acciones que el cliente menciona en 'NUEVOS ELEMENTOS'.
+        Devuelve un JSON solo con la estructura: {{ "order_complete": bool, "items":[...], "total_price": number }}
+        === NUEVOS ELEMENTOS ===
+        {nuevos_elementos}
+        === PEDIDO ANTERIOR LIMPIO ===
+        {json.dumps(pedido_para_modelo, ensure_ascii=False)}
+        === MENÚ ===
+        {json.dumps(items_menu, ensure_ascii=False)}
+        """
+
+        client = OpenAI()
+        response = client.responses.create(model=model, input=prompt, temperature=0)
+
+        raw = ""
+        try:
+            raw = response.output[0].content[0].text.strip()
+        except Exception:
+            raw = ""
+
+        clean = raw
+        clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
+        clean = re.sub(r'^```', '', clean).strip()
+        clean = re.sub(r'```$', '', clean).strip()
+
+        parsed = None
+        parse_debug = {"method": None, "raw_excerpt": clean[:1000]}
+        try:
+            parsed = json.loads(clean)
+            parse_debug["method"] = "json.loads"
+        except Exception:
+            try:
+                parsed = ast.literal_eval(clean)
+                parse_debug["method"] = "ast.literal_eval"
+            except Exception as e:
+                try:
+                    candidate = re.search(r'(\{.*\})', clean, flags=re.DOTALL)
+                    if candidate:
+                        parsed = json.loads(candidate.group(1))
+                        parse_debug["method"] = "regex_json_extract"
+                except Exception:
+                    parsed = None
+                    parse_debug["error"] = str(e)
+
+        # Si no se pudo parsear, devolvemos el pedido tal como está (o vacío si replace_all)
+        if not isinstance(parsed, dict):
+            items_final = pedido_para_modelo.get("items", [])
+            total_price = sum(_price_of_item(it) for it in items_final)
+            order_complete = bool(items_final) and all(it.get("status") == "found" for it in items_final)
+            return {
+                "order_complete": order_complete,
+                "items": items_final,
+                "total_price": round(total_price, 2),
+                "debug": {"parse_ok": False, "raw_model": raw, **parse_debug}
+            }
+
+        # Procesar items devueltos por el modelo
+        model_items = parsed.get("items") or []
+        if not isinstance(model_items, list):
+            model_items = []
+        # Filtrar coincidencias 'not_found' (igual que en la original)
+        model_items = [it for it in model_items if it and it.get("status") != "not_found"]
+
+        # Fusionar items del pedido anterior con los nuevos del modelo
+        final_items = _merge_items(pedido_para_modelo.get("items", []), model_items, replace_all=replace_all)
+
+        total_price = sum(_price_of_item(it) for it in final_items)
+        total_price = round(total_price, 2)
+        order_complete = bool(final_items) and all(it.get("status") == "found" for it in final_items)
+
+        result = {
+            "order_complete": order_complete,
+            "items": final_items,
+            "total_price": total_price
+        }
+
+        # Adjuntar debug provisto por el modelo (si viene)
+        if parsed.get("debug") or parsed.get("warnings"):
+            result["debug_from_model"] = parsed.get("debug") or parsed.get("warnings")
+
+        logging.info("Finalizando actualizar_pedido_con_mensaje_modificacion.")
+        log_message('Finalizando función <actualizar_pedido_con_mensaje_modificacion>.', 'INFO')
+        return result
+
+    except Exception as e:
+        logging.exception("Error en actualizar_pedido_con_mensaje_modificacion")
+        return {
+            "order_complete": False,
+            "items": [],
+            "total_price": 0,
+            "error": str(e)
         }

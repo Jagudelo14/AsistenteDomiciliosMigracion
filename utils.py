@@ -4,6 +4,7 @@
 from decimal import Decimal
 import logging
 import os
+import unicodedata
 from heyoo import WhatsApp
 import re
 import ast
@@ -1276,3 +1277,71 @@ def obtener_datos_promocion(telefono: str) -> dict | None:
     except Exception as e:
         log_message(f"Error al consultar datos de promoción: {e}", "ERROR")
         return None
+
+def _normalize_text(s: str) -> str:
+    if not s:
+        return ""
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    s = s.lower()
+    # dejar solo letras/números/espacios
+    s = re.sub(r'[^a-z0-9\s]', ' ', s)
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+def _apply_direct_selection_from_text(pedido: dict, mensaje_usuario: str, fuzzy_cutoff: float = 0.78) -> dict:
+    """
+    Busca en cada item con status 'multiple_matches' si el mensaje del usuario
+    menciona claramente alguna candidate. Si la encuentra, actualiza el item en sitio:
+    - matched -> candidate
+    - status -> 'found'
+    - candidates -> []
+    - añade nota explicativa
+    """
+    if not mensaje_usuario:
+        return pedido
+    mensaje_norm = _normalize_text(mensaje_usuario)
+
+    for it in pedido.get("items", []):
+        try:
+            if not it or it.get("status") != "multiple_matches":
+                continue
+            candidates = it.get("candidates") or []
+            # construir lista de nombres normalizados
+            for cand in candidates:
+                # el nombre preferido puede estar en 'name' o 'id'
+                cand_name = str(cand.get("name") or cand.get("id") or "")
+                cand_norm = _normalize_text(cand_name)
+                if not cand_norm:
+                    continue
+                # 1) substring directo (más seguro)
+                if cand_norm in mensaje_norm.split():
+                    # si el usuario solo escribió la palabra clave suelta
+                    it["matched"] = cand
+                    it["status"] = "found"
+                    it["candidates"] = []
+                    it["modifiers_applied"] = it.get("modifiers_applied", [])
+                    it["note"] = f"Seleccionado automáticamente por mención del cliente: '{cand_name}'."
+                    break
+                if cand_norm in mensaje_norm:  # permite 'quiero una sierra clasica'
+                    it["matched"] = cand
+                    it["status"] = "found"
+                    it["candidates"] = []
+                    it["modifiers_applied"] = it.get("modifiers_applied", [])
+                    it["note"] = f"Seleccionado automáticamente por mención del cliente: '{cand_name}'."
+                    break
+                # 2) comparación fuzzy: medir similitud con todo el mensaje
+                # usamos difflib comparando el nombre candidato frente al mensaje normalizado
+                close = difflib.get_close_matches(cand_norm, [mensaje_norm], n=1, cutoff=fuzzy_cutoff)
+                if close:
+                    it["matched"] = cand
+                    it["status"] = "found"
+                    it["candidates"] = []
+                    it["modifiers_applied"] = it.get("modifiers_applied", [])
+                    it["note"] = f"Seleccionado por coincidencia fuzzy con el mensaje del cliente: '{cand_name}'."
+                    break
+        except Exception:
+            # no romper el flujo por un error en un item
+            logging.exception("Error aplicando selección directa en item del pedido")
+            continue
+    return pedido
