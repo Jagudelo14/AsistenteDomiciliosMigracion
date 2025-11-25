@@ -125,6 +125,10 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
             guardar_intencion_futura(sender, "continuacion_pedido", str(pedido_dict), no_completo.get("mensaje"), pregunta_usuario)
             return
         pedido_info = guardar_pedido_completo(sender, pedido_dict, es_temporal=True)
+        if not pedido_info or not isinstance(pedido_info, dict) or "idpedido" not in pedido_info:
+            log_message(f'No se pudo crear el pedido para {sender}. pedido_info={pedido_info}', 'ERROR')
+            send_text_response(sender, "Lo siento, no pude guardar tu pedido. Por favor inténtalo de nuevo más tarde.")
+            return
         items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict, sender)
         info_promociones = None
         eleccion_promocion = None
