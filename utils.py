@@ -562,6 +562,11 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         params = ( productos_str, total_price, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal )
         # ------------------------------- # 8. Ejecutar y retornar el id # -------------------------------
         res = execute_query(query, params, fetchone=True)
+        # Verificación defensiva: si la consulta no devolvió fila, registrar y retornar None
+        if not res:
+            log_message('La inserción de pedido no devolvió resultados (res is None).', 'ERROR')
+            logging.error('La inserción de pedido no devolvió resultados. Query o DB pueden haber fallado.')
+            return None
         log_message(f'Pedido guardado con ID {res[0]} y código único {res[1]}', 'INFO')
         return {
             "idpedido": res[0],
