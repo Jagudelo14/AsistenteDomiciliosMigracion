@@ -11,3 +11,4 @@ heyoo
 openai
 scikit-learn
 googlemaps
+unidecode

@@ -15,6 +15,8 @@ from datetime import datetime, date, time
 from zoneinfo import ZoneInfo
 import json
 import requests
+import unidecode
+import difflib
 
 REPLACE_PHRASES = [
     "cambia todo", "borra lo que había", "solo quiero esto", "quita lo anterior",
@@ -548,11 +550,11 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         total_price = float(pedido_dict.get("total_price", 0))
         # ------------------------------- # 5. Hora y fecha Bogotá # -------------------------------
         now = datetime.now(ZoneInfo("America/Bogota"))
-        fecha = now.date().isoformat()
+        fecha = now.strftime("%Y-%m-%d %H:%M:%S")
         hora = now.strftime("%H:%M")
         # ------------------------------- # 6. Campos fijos # ------------------------------- 
-        idcliente = 1
-        idsede = 1
+        idcliente = 5
+        idsede = 15
         estado = "pendiente"
         metodo_pago = "efectivo"
         # ------------------------------- # 7. Query con RETURNING # -------------------------------
@@ -570,7 +572,7 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         logging.error(f'Error al hacer uso de función <GuardarPedidoCompleto>: {e}.')
         return {}
 
-def guardar_ordenes(idpedido: int, pedido_json: dict) -> dict:
+def guardar_ordenes(idpedido: int, pedido_json: dict, sender: str) -> dict:
     """
     Guarda cada item del pedido en la tabla 'ordenes'.
     Estructura esperada de pedido_json:
@@ -597,6 +599,9 @@ def guardar_ordenes(idpedido: int, pedido_json: dict) -> dict:
     try:
         log_message('Iniciando función <GuardarOrdenes>.', 'INFO')
         items = pedido_json.get("items", [])
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
+        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        id_whatsapp = res_idw[0] if res_idw else None
         if not items:
             raise ValueError("El JSON no contiene items para guardar en ordenes.")
         inserted_ids = []
@@ -621,7 +626,7 @@ def guardar_ordenes(idpedido: int, pedido_json: dict) -> dict:
             params = (
                 nombre_producto,
                 precio_producto,
-                1,                 # id_whatsapp fijo
+                id_whatsapp,
                 idpedido,
                 especificaciones_texto
                 )
@@ -861,7 +866,7 @@ def eliminar_pedido(sender: str, codigo_unico: str) -> dict:
         logging.error(f'Error en eliminar_pedido: {e}')
         return {"eliminado": False, "error": str(e)}
     
-def obtener_pedido_por_codigo(sender: str, codigo_unico: str) -> dict:
+def obtener_pedido_por_codigo_orignal(sender: str, codigo_unico: str) -> dict:
     try:
         log_message('Iniciando función <ObtenerPedidoPorCodigo>.', 'INFO')
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
@@ -1008,26 +1013,16 @@ def to_json_safe(value):
         return value.strftime("%H:%M")
     return value
 
-def actualizar_total_productos(sender: str, codigo_unico: str, nuevo_total: float, id_promocion_str: str):
+def actualizar_total_productos(sender: str, codigo_unico: str, nuevo_total: float):
     """
     Actualiza total_productos e id_promocion del pedido según codigo_unico y sender.
     Retorna el idpedido y los valores actualizados.
     """
-
     try:
         log_message("Iniciando <actualizar_total_productos>", "INFO")
-
-        # Convertir id_promocion recibido como str
-        # Si viene vacío, nulo o no numérico -> lo guardamos como None
-        try:
-            id_promocion = int(id_promocion_str) if id_promocion_str and id_promocion_str.isdigit() else None
-        except:
-            id_promocion = None
-
         query = """
             UPDATE pedidos
-            SET total_productos = %s,
-                id_promocion = %s
+            SET es_promocion = true,
             WHERE codigo_unico = %s
               AND id_whatsapp = (
                     SELECT id_whatsapp
@@ -1036,16 +1031,26 @@ def actualizar_total_productos(sender: str, codigo_unico: str, nuevo_total: floa
                 )
             RETURNING idpedido, total_productos, id_promocion;
         """
-
-        params = (nuevo_total, id_promocion, codigo_unico, sender)
+        params = (nuevo_total, codigo_unico, sender)
+        res_promo = execute_query(query, params, fetchone=True)
+        query = """
+            UPDATE pedidos
+            SET total_productos = %s,
+            WHERE codigo_unico = %s
+              AND id_whatsapp = (
+                    SELECT id_whatsapp
+                    FROM clientes_whatsapp
+                    WHERE telefono = %s
+                )
+            RETURNING idpedido, total_productos, id_promocion;
+        """
+        params = (nuevo_total, codigo_unico, sender)
         res = execute_query(query, params, fetchone=True)
-
         if not res:
             return {
                 "success": False,
                 "mensaje": "No encontré un pedido con ese código para este usuario."
             }
-
         idpedido, total_actualizado, promo_actualizada = res
         log_message(f"Total actualizado para pedido {idpedido}: {total_actualizado}, promoción: {promo_actualizada}", "INFO")
         return {
@@ -1054,10 +1059,153 @@ def actualizar_total_productos(sender: str, codigo_unico: str, nuevo_total: floa
             "total_productos": float(total_actualizado),
             "id_promocion": promo_actualizada
         }
-
     except Exception as e:
         log_message(f"Error en <actualizar_total_productos>: {e}", "ERROR")
         return {
             "success": False,
             "mensaje": f"Error: {e}"
         }
+
+def actualizar_medio_pago(sender: str, codigo_unico: str, metodo_pago: str) -> dict:
+    try:
+        log_message('Iniciando función <MarcarPedidoComoDefinitivo>.', 'INFO')
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
+        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        id_whatsapp = res_idw[0] if res_idw else None
+
+        if id_whatsapp is None:
+            return {
+                "actualizado": False,
+                "msg": "No existe id_whatsapp para este número."
+            }
+        query = """
+            UPDATE pedidos
+            SET metodo_pago = %s
+            WHERE codigo_unico = %s
+              AND id_whatsapp = %s
+            RETURNING idpedido, producto;
+        """
+        params = (metodo_pago, codigo_unico, id_whatsapp)
+        res = execute_query(query, params, fetchone=True)
+        if res:
+            return {
+                "actualizado": True,
+                "idpedido": res[0],
+                "producto": res[1],
+                "codigo_unico": codigo_unico
+            }
+        else:
+            return {
+                "actualizado": False,
+                "msg": "No se encontró un pedido temporal con ese código y ese id_whatsapp."
+            }
+    except Exception as e:
+        log_message(f'Error en <MarcarPedidoComoDefinitivo>: {e}', 'ERROR')
+        logging.error(f'Error en marcar_pedido_como_definitivo: {e}')
+        return {"actualizado": False, "error": str(e)}
+
+def obtener_pedido_por_codigo(codigo_unico: str) -> dict:
+    q = "SELECT idpedido, producto, total_productos, fecha, hora, id_whatsapp, es_temporal FROM pedidos WHERE codigo_unico = %s"
+    res = execute_query(q, (codigo_unico,), fetchone=True)
+    if not res:
+        return {}
+    return {
+        "idpedido": res[0],
+        "producto": res[1],
+        "total_productos": float(res[2]) if res[2] is not None else 0.0,
+        "fecha": res[3],
+        "hora": res[4],
+        "id_whatsapp": res[5],
+        "es_temporal": res[6]
+    }
+
+# Helper: obtener ordenes existentes por idpedido (cada fila representa un item)
+def obtener_ordenes_por_idpedido(idpedido: int) -> List[dict]:
+    q = """
+        SELECT idorden, desglose_productos, desglose_precio, especificaciones
+        FROM ordenes
+        WHERE idpedidos = %s
+        ORDER BY idorden
+    """
+    rows = execute_query(q, (idpedido,), fetchall=True)
+    ordenes = []
+    for r in rows:
+        ordenes.append({
+            "idorden": r[0],
+            "producto": r[1],
+            "precio": float(r[2]) if r[2] is not None else 0.0,
+            "especificaciones": r[3] or ""
+        })
+    return ordenes
+
+# Helper: insertar una orden (retorna idorden)
+def insertar_orden(id_whatsapp: int, idpedido: int, nombre_producto: str, precio: float, especificaciones_texto: str = "") -> int:
+    q = """
+        INSERT INTO ordenes (desglose_productos, desglose_precio, id_whatsapp, idpedidos, especificaciones)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING idorden;
+    """
+    res = execute_query(q, (nombre_producto, precio, id_whatsapp, idpedido, especificaciones_texto), fetchone=True)
+    return res[0]
+
+# Helper: eliminar una orden por idorden
+def eliminar_orden_por_idorden(idorden: int) -> None:
+    q = "DELETE FROM ordenes WHERE idorden = %s"
+    execute_query(q, (idorden,))
+
+# Helper: eliminar una orden por nombre (elimina una instancia que más se parezca)
+def eliminar_una_instancia_orden_por_nombre(idpedido: int, nombre_producto: str, especificaciones_texto: str = "") -> bool:
+    ordenes = obtener_ordenes_por_idpedido(idpedido)
+    # buscar coincidencia exacta primero, si no fuzzy match
+    for o in ordenes:
+        if o["producto"].lower() == nombre_producto.lower() and (not especificaciones_texto or o["especificaciones"] == especificaciones_texto):
+            eliminar_orden_por_idorden(o["idorden"])
+            return True
+    # fuzzy match por nombre
+    productos = [o["producto"] for o in ordenes]
+    if productos:
+        match = difflib.get_close_matches(nombre_producto, productos, n=1, cutoff=0.6)
+        if match:
+            # eliminar la primera coincidencia que tenga ese nombre
+            for o in ordenes:
+                if o["producto"] == match[0]:
+                    eliminar_orden_por_idorden(o["idorden"])
+                    return True
+    return False
+
+# Helper: recalcular totales y actualizar tabla pedidos
+def recalcular_y_actualizar_pedido(idpedido: int) -> dict:
+    q = "SELECT desglose_productos, desglose_precio FROM ordenes WHERE idpedidos = %s"
+    rows = execute_query(q, (idpedido,), fetchall=True)
+    productos = [r[0] for r in rows] if rows else []
+    total = sum([float(r[1]) for r in rows]) if rows else 0.0
+    productos_str = " | ".join(productos) if productos else ""
+    q_upd = "UPDATE pedidos SET producto = %s, total_productos = %s WHERE idpedido = %s RETURNING idpedido, codigo_unico, total_productos"
+    res = execute_query(q_upd, (productos_str, total, idpedido), fetchone=True)
+    return {
+        "idpedido": res[0],
+        "codigo_unico": res[1],
+        "total_productos": float(res[2])
+    }
+
+# Helper: buscar producto en el menu (obtiene nombre oficial y precio)
+def match_item_to_menu(product_name: str, items_menu: List[dict]) -> dict:
+    # items_menu: lista de dicts; intentamos buscar por keys comunes 'name','price' o 'nombre','precio'
+    nombres = []
+    mapping = {}
+    for it in items_menu:
+        name = it.get("name") or it.get("nombre") or it.get("producto") or ""
+        price = it.get("price") or it.get("precio") or 0.0
+        nombres.append(name)
+        mapping[name] = price
+    # buscar coincidencia exacta (case-insensitive)
+    for n in nombres:
+        if n.lower() == product_name.lower():
+            return {"name": n, "price": float(mapping[n]), "found": True}
+    # fuzzy match
+    match = difflib.get_close_matches(product_name, nombres, n=1, cutoff=0.6)
+    if match:
+        n = match[0]
+        return {"name": n, "price": float(mapping[n]), "found": True}
+    # no encontrado
+    return {"name": product_name, "price": 0.0, "found": False}
