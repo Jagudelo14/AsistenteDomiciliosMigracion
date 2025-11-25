@@ -23,6 +23,7 @@ from utils import (
     marcar_pedido_como_definitivo,
     match_item_to_menu,
     normalizar_entities_items,
+    obtener_datos_promocion,
     obtener_estado_pedido_por_codigo,
     obtener_intencion_futura_mensaje_chatbot,
     obtener_intencion_futura_mensaje_usuario,
@@ -148,7 +149,12 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
         send_text_response(sender, confirmacion_modificacion_pedido.get("mensaje"))
         #confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
         #send_text_response(sender, confirmacion_pedido.get("mensaje"))
-        guardar_intencion_futura(sender, "confirmacion_modificacion_pedido", pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario)
+        datos_promocion = {
+            "info_promociones": info_promociones,
+            "eleccion_promocion": eleccion_promocion,
+            "bandera_promocion": bandera_promocion
+        }
+        guardar_intencion_futura(sender, "confirmacion_modificacion_pedido", pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario, datos_promocion)
         marcar_intencion_como_resuelta(id_ultima_intencion)
     except Exception as e:
         logging.error(f"Error en <SubflujoSolicitudPedido>: {e}")
@@ -202,9 +208,16 @@ def subflujo_negacion_general(sender: str, respuesta_cliente: str, nombre_client
             dict_temp_cancelacion: dict = generar_mensaje_cancelacion(sender, codigo_unico_temp, nombre_cliente)
             datos_eliminar: dict = eliminar_pedido(sender, codigo_unico_temp)
             send_text_response(sender, dict_temp_cancelacion.get("mensaje"))
+            borrar_intencion_futura(sender)
+        elif anterior_intencion == "confirmacion_modificacion_pedido":
+            datos_promocion: dict = obtener_datos_promocion(sender)
+            codigo_unico_temp: str = obtener_intencion_futura_observaciones(sender)
+            pedido_dict: str = obtener_intencion_futura_mensaje_chatbot(sender)
+            send_text_response(sender, "Listo, entonces, ¿confirmas el pedido que te envié?")
+            guardar_intencion_futura(sender, "confirmar_pedido", codigo_unico_temp, pedido_dict, "", datos_promocion)
         else:
             send_text_response(sender, "Entendido. Si necesitas algo más, no dudes en escribirme. ¡Estoy aquí para ayudarte!")
-        borrar_intencion_futura(sender)
+            borrar_intencion_futura(sender)
         return analisis
     except Exception as e:
         logging.error(f"Error en <SubflujoNegacionGeneral>: {e}")
@@ -624,6 +637,9 @@ def orquestador_subflujos(
             subflujo_medio_pago(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "modificacion_pedido":
             subflujo_modificacion_pedido(sender, nombre_cliente, pregunta_usuario)
+        elif clasificacion_mensaje == "confirmacion_modificacion_pedido":
+            send_text_response(sender, "Parece que modificas tu pedido.")
+            
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")

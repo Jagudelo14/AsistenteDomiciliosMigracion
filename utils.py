@@ -399,24 +399,37 @@ def marcar_intencion_como_resuelta(id_intencion: int) -> bool:
         log_message(f"Error al actualizar la intención {id_intencion} a 'resuelta': {e}", "ERROR")
         return False
 
-def guardar_intencion_futura(telefono: str, intencion_futura: str, observaciones: str = "", mensaje_chatbot: str = "", mensaje_usuario: str = "") -> None:
+def guardar_intencion_futura(telefono: str, intencion_futura: str, observaciones: str = "", mensaje_chatbot: str = "", mensaje_usuario: str = "", datos_promocion: dict = None) -> None:
     """
     Inserta o actualiza la intención futura de un cliente según su número de teléfono.
     Si no existe el registro, lo crea. Si ya existe, actualiza la intención.
     """
     try:
+        log_message('Iniciando función <GuardarIntencionFutura>.', 'INFO')
         query = """
-            INSERT INTO clasificacion_intenciones_futuras (telefono, intencion_futura, fecha_actualizacion, observaciones, mensaje_chatbot, mensaje_usuario)
-            VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s, %s)
+            INSERT INTO clasificacion_intenciones_futuras 
+            (telefono, intencion_futura, fecha_actualizacion, observaciones, mensaje_chatbot, mensaje_usuario, datos_promocion)
+            VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s::jsonb)
             ON CONFLICT (telefono)
             DO UPDATE SET
                 intencion_futura = EXCLUDED.intencion_futura,
                 fecha_actualizacion = CURRENT_TIMESTAMP,
                 observaciones = EXCLUDED.observaciones,
                 mensaje_chatbot = EXCLUDED.mensaje_chatbot,
-                mensaje_usuario = EXCLUDED.mensaje_usuario;
+                mensaje_usuario = EXCLUDED.mensaje_usuario,
+                datos_promocion = EXCLUDED.datos_promocion;
         """
-        execute_query(query, (telefono, intencion_futura, observaciones, mensaje_chatbot, mensaje_usuario))
+        execute_query(
+            query,
+            (
+                telefono,
+                intencion_futura,
+                observaciones,
+                mensaje_chatbot,
+                mensaje_usuario,
+                json.dumps(datos_promocion, ensure_ascii=False)
+            )
+        )
         log_message(f"Intención futura guardada/actualizada para {telefono}: {intencion_futura}", "INFO")
     except Exception as e:
         log_message(f"Error al guardar la intención futura: {e}", "ERROR")
@@ -1214,3 +1227,52 @@ def match_item_to_menu(product_name: str, items_menu: List[dict]) -> dict:
         return {"name": n, "price": float(mapping[n]), "found": True}
     # no encontrado
     return {"name": product_name, "price": 0.0, "found": False}
+
+def obtener_datos_promocion(telefono: str) -> dict | None:
+    """
+    Retorna un diccionario con:
+      - bandera_promocion (bool)
+      - info_promociones (list)
+      - eleccion_promocion (dict)
+    
+    Consultado desde la columna JSONB `datos_promocion` de la tabla
+    public.clasificacion_intenciones_futuras.
+
+    Si no existe el registro o la columna está vacía, retorna None.
+    """
+
+    try:
+        query = """
+            SELECT datos_promocion
+            FROM public.clasificacion_intenciones_futuras
+            WHERE telefono = %s
+            LIMIT 1;
+        """
+
+        resultado = execute_query(query, (telefono,), fetchone=True)
+        log_message(f"Datos de promoción obtenidos para {telefono}: {resultado}", "INFO")
+
+        if not resultado:
+            return None  # No existe el registro
+
+        datos_json = resultado[0]
+
+        if not datos_json:
+            return None  # La columna está vacía o null
+
+        # PostgreSQL → Python: dict automático
+        # Si tu driver ya devuelve JSON como dict (psycopg2 lo hace), puedes usarlo directo.
+        # Si lo devuelve como string JSON, lo parseamos.
+        if isinstance(datos_json, str):
+            datos_json = json.loads(datos_json)
+
+        # Garantizar que retorna las 3 claves aunque falten
+        return {
+            "bandera_promocion": datos_json.get("bandera_promocion"),
+            "info_promociones": datos_json.get("info_promociones"),
+            "eleccion_promocion": datos_json.get("eleccion_promocion"),
+        }
+
+    except Exception as e:
+        log_message(f"Error al consultar datos de promoción: {e}", "ERROR")
+        return None
