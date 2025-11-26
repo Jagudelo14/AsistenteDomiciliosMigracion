@@ -9,6 +9,7 @@ import os
 import json
 import ast
 from utils import REPLACE_PHRASES, _apply_direct_selection_from_text, obtener_pedido_por_codigo, send_text_response, limpiar_respuesta_json, log_message, _safe_parse_order, _merge_items, _price_of_item, convert_decimals, to_json_safe
+from utils_database import execute_query
 
 def get_openai_key() -> str:
     try:
@@ -623,52 +624,61 @@ def saludo_dynamic(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict
     try:
         log_message('Iniciando función <saludo_dynamic>.', 'INFO')
         PROMPT_SALUDO_DYNAMIC = """
-            Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
-            Tu tarea es generar un saludo personalizado según el tono que use el cliente.
+Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
+Tu tarea es generar un saludo personalizado según el tono que use el cliente.
 
-            El cliente escribió: "{mensaje_usuario}"
+El cliente escribió: "{mensaje_usuario}"
 
-            PAUTAS DE TONO:
-            1. Si el cliente usa expresiones informales como:
-            "q hubo", "quiubo", "k hubo", "que más", "que mas", "q mas",
-            "hey", "holi", "epa", "epaaa", "hoola", "hola parce",
-            entonces:
-                - Usa un tono cercano, relajado y natural, sin jerga excesiva.
-                - Puedes usar 1 emoji suave si fluye bien.
-                - Mantén calidez y sensación de bienvenida al estilo Sierra Nevada.
+PAUTAS DE TONO:
+1. Si el cliente usa expresiones informales como:
+"q hubo", "quiubo", "k hubo", "que más", "que mas", "q mas",
+"hey", "holi", "epa", "epaaa", "hoola", "hola parce",
+entonces:
+    - Usa un tono cercano, relajado y natural, sin jerga excesiva.
+    - Puedes usar 1 emoji suave si fluye bien.
+    - Mantén calidez y sensación de bienvenida al estilo Sierra Nevada.
 
-            2. Si el cliente usa expresiones formales como:
-            "buenas tardes", "buenos días", "buen dia",
-            "cordial saludo", "mucho gusto", "estimados",
-            entonces:
-                - Usa un tono respetuoso, profesional y sereno.
-                - No uses emojis.
-                - Mantén claridad, amabilidad y un toque cálido sin exagerar.
+2. Si el cliente usa expresiones formales como:
+"buenas tardes", "buenos días", "buen dia",
+"cordial saludo", "mucho gusto", "estimados",
+entonces:
+    - Usa un tono respetuoso, profesional y sereno.
+    - No uses emojis.
+    - Mantén claridad, amabilidad y un toque cálido sin exagerar.
 
-            3. En cualquier otro caso:
-                - Usa un tono cordial estándar: amable, natural y con sabor.
-                - Puedes usar un emoji suave si queda orgánico.
+3. En cualquier otro caso:
+    - Usa un tono cordial estándar: amable, natural y con sabor.
+    - Puedes usar un emoji suave si queda orgánico.
 
-            REGLAS DE ESTILO SIERRA NEVADA:
-            - Habla como un buen anfitrión: cálido, claro y con energía positiva.
-            - Evita expresiones barriales, sarcasmo o exageraciones.
-            - Mantén un lenguaje cotidiano y respetuoso.
-            - No inventes productos ni detalles.
-            - Puedes mencionar solamente: “menú”, “promociones”, “burgers”, “recomendaciones”.
-            - Incluye siempre el nombre del cliente: {nombre}
-            - Incluye siempre el nombre del local: {nombre_local}
-            - Responde en máximo 1 o 2 frases.
-            - Escoge UNA intención entre:
-                - "consulta_menu"
-                - "consulta_promociones"
-            FORMATO:
-            Debes responder en un JSON válido:
-            {{
-                "mensaje": "texto aquí",
-                "intencion": "consulta_menu"
-            }}
-            No incluyas texto adicional fuera del JSON.
-            """
+REGLAS DE ESTILO SIERRA NEVADA:
+- Habla como un buen anfitrión: cálido, claro y con energía positiva.
+- Evita expresiones barriales, sarcasmo o exageraciones.
+- Mantén un lenguaje cotidiano y respetuoso.
+- No inventes productos ni detalles.
+- Puedes mencionar solamente: “menú”, “promociones”, “burgers”, “recomendaciones”.
+- Incluye siempre el nombre del cliente: {nombre}
+- Incluye siempre el nombre del local: {nombre_local}
+- Responde en máximo 1 o 2 frases.
+- Escoge UNA intención entre:
+    - "consulta_menu"
+    - "consulta_promociones"
+
+TIPS PARA QUE EL CLIENTE TENGA UNA MEJOR EXPERIENCIA CON EL BOT:
+- Invítalo de forma amable a escribir mensajes claros y específicos.
+- Recuérdale que envíe **un mensaje a la vez**, sin mezclar varias solicitudes.
+- Indícale que siga los pasos que le compartas, sin saltarlos.
+- Pídele que espere la respuesta antes de enviar otro mensaje.
+- Explica brevemente que esto ayuda a procesar mejor la orden y evitar errores.
+- Todo debe sonar natural, positivo y sin regaños.
+
+FORMATO:
+Debes responder en un JSON válido:
+{
+    "mensaje": "texto aquí",
+    "intencion": "consulta_menu"
+}
+No incluyas texto adicional fuera del JSON.
+"""
         client = OpenAI()
         prompt = PROMPT_SALUDO_DYNAMIC.format(
             nombre=nombre,
@@ -1305,61 +1315,59 @@ def generar_mensaje_cancelacion(
 def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str) -> dict:
     try:
         log_message('Iniciando función <solicitar_medio_pago>.', 'INFO')
-        PROMPT_MEDIOS_PAGO = """
-        Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
-        Te llamas PAKO.
-        El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
-        Este es el pedido que hizo:
-        "{pedido_str}"
-        TAREA:
-        - Haz un comentario alegre, sabroso y un poquito divertido sobre el pedido.
-        - Estilo: cálido, entusiasta, como “¡Wow qué delicia eso!”, “Ese pedido está brutal”, etc.
-        - No uses sarcasmo, groserías ni exageres demasiado.
-        - Máximo 1 o 2 frases.
-        - Después del comentario, pídele que elija su medio de pago.
-        - Menciona el local: {nombre_local}
-        - Menciona siempre todos los medios de pago disponibles.
-        Debes listar estas opciones de pago:
-        - Efectivo
-        - Transferencia (Nequi, Daviplata, Bre-B)
-        - Tarjeta débito
-        - Tarjeta crédito
-        FORMATO DE RESPUESTA (OBLIGATORIO):
-        {{
-            "mensaje": "texto aquí"
-        }}
-        Nada fuera del JSON.
-        """
+
+        PROMPT_MEDIOS_PAGO = f"""
+Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
+Te llamas PAKO.
+
+El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
+Este es el pedido que hizo:
+"{pedido_str}"
+
+TAREA:
+- Haz un comentario alegre y sabroso sobre el pedido.
+- Estilo: cálido, entusiasta.
+- 1 o 2 frases máximo.
+- Luego pídele elegir medio de pago.
+- Menciona el local: {nombre_local}
+- Lista opciones disponibles:
+  * Efectivo
+  * Transferencia (Nequi, Daviplata, Bre-B)
+  * Tarjeta débito
+  * Tarjeta crédito
+
+Debe responder estrictamente un JSON con el campo:
+{{
+   "mensaje": "texto aquí"
+}}
+"""
+
         client = OpenAI()
-        prompt = PROMPT_MEDIOS_PAGO.format(
-            nombre=nombre,
-            codigo_unico=codigo_unico,
-            nombre_local=nombre_local,
-            pedido_str=pedido_str
-        )
+
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",   # O gpt-4o / gpt-5 / gpt-5.1
             messages=[
-                {"role": "system", "content": "Eres el generador oficial de mensajes alegres y de pago para Sierra Nevada."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=150,
-            temperature=0.95
+                {"role": "system", "content": "Eres PAKO y respondes siempre en JSON limpio."},
+                {"role": "user", "content": PROMPT_MEDIOS_PAGO}
+            ]
         )
-        raw = response.choices[0].message.content.strip()
+
+        raw_text = response.choices[0].message.content
         try:
-            data = json.loads(raw)
-        except:
+            data = json.loads(raw_text)
+        except json.JSONDecodeError:
+            # Fallback si GPT no devuelve JSON válido
             data = {
                 "mensaje": f"¡{nombre}, ese pedido está para antojar a cualquiera! 🤤 Tu orden ({codigo_unico}) en {nombre_local} quedó tremenda. ¿Qué medio de pago prefieres: efectivo, transferencia (Nequi/Daviplata/Bre-B), tarjeta débito o tarjeta crédito?"
             }
+
         log_message('Finalizando función <solicitar_medio_pago>.', 'INFO')
         return data
+
     except Exception as e:
         log_message(f'Error en función <solicitar_medio_pago>: {e}', 'ERROR')
-        logging.error(f"Error en función <solicitar_medio_pago>: {e}")
         return {
-            "mensaje": f"¡{nombre}, tu pedido ({codigo_unico}) quedó delicioso! ¿Qué medio de pago deseas usar?"
+            "mensaje": f"¡{nombre}, ese pedido está para antojar a cualquiera! 🤤 Tu orden ({codigo_unico}) en {nombre_local} quedó tremenda. ¿Qué medio de pago prefieres: efectivo, transferencia (Nequi/Daviplata/Bre-B), tarjeta débito o tarjeta crédito?"
         }
 
 def enviar_menu_digital(nombre: str, nombre_local: str, menu) -> dict:
@@ -1829,66 +1837,53 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
 def solicitar_metodo_recogida(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str) -> dict:
     try:
         log_message('Iniciando función <solicitar_metodo_recogida>.', 'INFO')
-        PROMPT_METODOS_RECOGIDA = """
-            Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
-            Te llamas PAKO.
-            El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
-            Este es el pedido que hizo:
-            "{pedido_str}"
 
-            TAREA:
-            - Haz un comentario alegre, sabroso y un poquito divertido sobre el pedido.
-            - Estilo: cálido, entusiasta, como “¡Wow qué delicia eso!”, “Ese pedido está brutal!”, etc.
-            - No uses sarcasmo, groserías ni exageres demasiado.
-            - Máximo 1 o 2 frases.
+        prompt = f"""
+Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
+Te llamas PAKO.
 
-            Después del comentario:
-            - Pregúntale de forma amable y cercana dónde quiere recibir su pedido.
-            - Menciona el local: {nombre_local}.
-            - Lista claramente las dos opciones de recogida que puede elegir:
-                • Recoger en tienda:
-                    Centro Mayor (Cc. Centro Mayor, local 3-019)
-                    Galerías (Calle 53 # 27-16)
-                    Centro Internacional (Calle 32 # 07-10)
-                    Chicó 2.0 (Calle 100 # 9a - 45 local 7A)
-                    Virrey (Carrera 15 # 88-67)
-                • Envío a domicilio (depende de la zona y tiene costo adicional).
-            Haz que el cliente se sienta especial y bien atendido.
-            Siempre envia el codigo unico del pedido en el mensaje.
-            FORMATO DE RESPUESTA (OBLIGATORIO):
-            {{
-                "mensaje": "texto aquí"
-            }}
-            Nada fuera del JSON.
-        """
+El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
+Este es el pedido que hizo:
+"{pedido_str}"
+
+TAREA:
+- Haz un comentario alegre, sabroso y un poquito divertido sobre el pedido.
+- Estilo: cálido, entusiasta.
+- Máximo 1 o 2 frases.
+Después:
+- Pregunta amablemente dónde quiere recibir su pedido.
+- Menciona el local: {nombre_local}.
+- Lista ambas opciones:
+  • Recoger en tienda:
+      Centro Mayor (Cc. Centro Mayor, local 3-019)
+      Galerías (Calle 53 # 27-16)
+      Centro Internacional (Calle 32 # 07-10)
+      Chicó 2.0 (Calle 100 # 9a - 45 local 7A)
+      Virrey (Carrera 15 # 88-67)
+  • Envío a domicilio (depende de la zona y tiene costo adicional).
+Incluye el código único del pedido en el mensaje.
+FORMATO ESTRICTO:
+{{
+  "mensaje": "texto aquí"
+}}
+"""
+
         client = OpenAI()
-        prompt = PROMPT_METODOS_RECOGIDA.format(
-            nombre=nombre,
-            codigo_unico=codigo_unico,
-            nombre_local=nombre_local,
-            pedido_str=pedido_str
-        )
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
+            response_format={"type": "json_object"},
             messages=[
-                {"role": "system", "content": "Eres el generador oficial de mensajes alegres y de pago para Sierra Nevada."},
+                {"role": "system", "content": "Eres PAKO y respondes siempre en JSON válido."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=150,
-            temperature=0.95
         )
-        raw = response.choices[0].message.content.strip()
-        try:
-            data = json.loads(raw)
-        except:
-            data = {
-                "mensaje": f"¡{nombre}, ese pedido está para antojar a cualquiera! 🤤 Tu orden ({codigo_unico}) en {nombre_local} quedó tremenda. ¿Vas a querer domicilio o prefieres recogerlo en el restaurante?"
-            }
+
+        data = response.choices[0].message.parsed
         log_message('Finalizando función <solicitar_metodo_recogida>.', 'INFO')
         return data
+
     except Exception as e:
         log_message(f'Error en función <solicitar_metodo_recogida>: {e}', 'ERROR')
-        logging.error(f"Error en función <solicitar_metodo_recogida>: {e}")
         return {
             "mensaje": f"¡{nombre}, tu pedido ({codigo_unico}) quedó delicioso! ¿Vas a querer domicilio o prefieres recogerlo en el restaurante?"
         }
@@ -2149,3 +2144,314 @@ def actualizar_pedido_con_mensaje_modificacion(
             "total_price": 0,
             "error": str(e)
         }
+
+def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> dict:
+    """
+    Genera un mensaje personalizado para confirmar la dirección de envío,
+    usando ChatGPT con tono cálido y cercano.
+    """
+    try:
+        log_message('Iniciando función <solicitar_confirmacion_direccion>.', 'INFO')
+
+        PROMPT_CONFIRMAR_DIRECCION = """
+        Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
+        Te llamas PAKO.
+
+        El cliente se llama: {cliente_nombre}.
+
+        Información de la sede asignada:
+        - ID sede: {id_sede}
+        - Nombre sede: {nombre_sede}
+        - Ciudad: {ciudad_sede}
+        - Distancia desde cliente: {distancia_km} km
+
+        Dirección detectada del cliente:
+        "{direccion_envio}"
+
+        TAREA:
+        - Envíale un mensaje cálido, alegre y amigable al cliente llamándolo por su nombre.
+        - Dale un contexto breve de que ya tenemos la dirección detectada.
+        - Pregunta SIEMPRE si esa dirección está correcta para realizar el envío.
+        - Tono: amable, cercano, estilo “¡Hola {cliente_nombre}! Qué alegría tenerte por aquí 🙌”.
+        - Máximo 1 o 2 frases antes de la pregunta.
+        - No uses groserías ni sarcasmo.
+
+        FORMATO DE RESPUESTA (OBLIGATORIO):
+        {{
+            "mensaje": "texto aquí"
+        }}
+        Nada fuera del JSON.
+        """
+
+        prompt = PROMPT_CONFIRMAR_DIRECCION.format(
+            cliente_nombre=cliente_nombre,
+            id_sede=sede_info.get("id"),
+            nombre_sede=sede_info.get("nombre"),
+            ciudad_sede=sede_info.get("ciudad"),
+            distancia_km=sede_info.get("distancia_km"),
+            direccion_envio=sede_info.get("direccion_envio")
+        )
+
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres PAKO, generador oficial de mensajes cálidos y profesionales de Sierra Nevada."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=150,
+            temperature=0.85
+        )
+
+        raw = response.choices[0].message.content.strip()
+
+        try:
+            data = json.loads(raw)
+        except:
+            # fallback seguro
+            data = {
+                "mensaje": (
+                    f"¡Hola {cliente_nombre}! Qué alegría tenerte por aquí 🙌 "
+                    f"Tenemos registrada la dirección: \"{sede_info.get('direccion_envio')}\". "
+                    "¿Nos confirmas si está correcta para enviarte tu pedido?"
+                )
+            }
+
+        log_message('Finalizando función <solicitar_confirmacion_direccion>.', 'INFO')
+        return data
+
+    except Exception as e:
+        log_message(f'Error en función <solicitar_confirmacion_direccion>: {e}', 'ERROR')
+        logging.error(f"Error en función <solicitar_confirmacion_direccion>: {e}")
+
+        return {
+            "mensaje": (
+                f"¡Hola {cliente_nombre}! Tenemos la dirección: \"{sede_info.get('direccion_envio')}\". "
+                "¿Está correcta para hacerte el envío?"
+            )
+        }
+
+def generar_mensaje_invitar_pago(
+        nombre_cliente: str,
+        valor: float,
+        duracion: str,
+        distancia: float,
+        direccion_envio: str,
+        codigo_pedido: str,
+        valor_total_pedido: str,
+        model: str = "gpt-3.5-turbo"
+    ) -> str:
+    """
+    Llama a ChatGPT para generar un mensaje cordial que:
+    - Sintetice valor, duración, distancia y dirección de envío.
+    - Invite al cliente a realizar el pago.
+    """
+
+    try:
+        prompt = f"""
+Eres un asistente amable de una hamburguesería.
+Genera un mensaje CORTO, cálido y claro para un cliente.
+
+Datos:
+- Valor del domicilio: {valor}
+- Duración estimada del envío: {duracion}
+- Distancia aproximada: {distancia} m
+- Dirección de envío: {direccion_envio}
+- Nombre del cliente: {nombre_cliente}
+- Código del pedido {codigo_pedido}
+- Valor total pedido: {valor_total_pedido}
+
+Instrucciones del mensaje:
+- Resume los datos de manera natural.
+- Confirma que esa es la dirección de envío.
+- Invita al cliente a realizar el pago para continuar con el pedido.
+- No inventes información adicional.
+- Tono amable, profesional y cercano.
+- Siempre di el codigo del pedido, valor del domicilio y total del pedido
+"""
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Eres un asistente de pedidos experto en atención al cliente."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=200,
+            temperature=0.5
+        )
+
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        return f"Error al generar mensaje: {str(e)}"
+
+def generar_mensaje_seleccion_sede(nombre_cliente: str, model: str = "gpt-3.5-turbo") -> str:
+    """
+    Genera un mensaje personalizado con ChatGPT invitando al cliente
+    a seleccionar una de las sedes disponibles.
+    """
+    try:
+        prompt = f"""
+Eres PAKO, la voz oficial de Sierra Nevada, La Cima del Sabor.
+Tu misión es hablar de manera cálida, confiable y amigable.
+
+El cliente se llama: {nombre_cliente}
+
+Genera un mensaje corto y amable invitándolo a escoger una de las siguientes sedes:
+
+📍 **Sedes disponibles**
+- Galerías: Calle 53 #27-16
+- Centro Mayor: CC Centro Mayor, local 3-019
+- Centro Internacional: Calle 32 #07-10
+- Chicó 2.0: Calle 100 #9A-45, local 7A
+- Virrey: Carrera 15 #88-67
+
+Instrucciones:
+- Habla como asistente conversacional (no en formato técnico).
+- Menciona su nombre.
+- Invita a seleccionar una sede.
+- No inventes sedes nuevas.
+- Se detallado con las direcciones de cada una
+- No enumeres
+- Pide que escriban el nombre de la sede para recoger
+"""
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Eres un asistente experto redactando mensajes conversacionales."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=200,
+            temperature=0.7
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        log_message(f"Error al generar mensae seleccion sede {e}", "ERROR")
+        return f"Error al generar mensaje: {e}"
+    
+def mapear_sede_cliente(texto_cliente: str):
+    """
+    Usa ChatGPT 5.1 para identificar la sede mencionada por el cliente
+    y retorna sus datos completos desde la BD.
+    """
+    client = OpenAI()
+    # 1. Obtener sedes desde BD
+    sedes = execute_query("""
+        SELECT nombre, direccion, id_sede, latitud, longitud
+        FROM sedes
+    """)
+
+    if not sedes:
+        return {"error": "No se encontraron sedes en la base de datos."}
+
+    # Construir un diccionario para ChatGPT
+    lista_sedes = [
+        {
+            "nombre": s[0],
+            "direccion": s[1],
+            "id_sede": s[2],
+            "latitud": s[3],
+            "longitud": s[4]
+        }
+        for s in sedes
+    ]
+
+    # 2. Prompt para ChatGPT
+    prompt = f"""
+Eres un asistente experto en normalización de texto.
+Un cliente escribió: "{texto_cliente}"
+
+Tu tarea: identificar cuál de las siguientes sedes quiso decir el cliente.
+
+Sedes disponibles (datos reales):
+{lista_sedes}
+
+Reglas:
+- Debes devolver el nombre EXACTO de la sede según está en la lista.
+- Si el cliente escribe con errores, corrige e interpreta.
+- Si escribe solo una palabra ("virrey", "galerias", "centro mayor"), mapea a la sede correcta.
+- Si no puedes identificar ninguna sede, responde "NINGUNA".
+
+Devuelve SOLO el nombre EXACTO de la sede, sin explicaciones.
+"""
+
+    # 3. Llamada a GPT-5.1
+    completion = client.chat.completions.create(
+        model="gpt-5.1",
+        messages=[
+            {"role": "system", "content": "Eres un asistente preciso para mapear sedes de restaurantes."},
+            {"role": "user", "content": prompt}
+        ]
+    )
+    nombre_predicho = completion.choices[0].message.content
+    if nombre_predicho.upper() == "NINGUNA":
+        return {"error": "No se pudo identificar la sede mencionada."}
+
+    # 4. Buscar la sede real en la tabla
+    for sede in lista_sedes:
+        if sede["nombre"].lower() == nombre_predicho.lower():
+            return {
+                "nombre_sede": sede["nombre"],
+                "direccion_sede": sede["direccion"],
+                "id_sede": sede["id_sede"],
+                "latitud_sede": sede["latitud"],
+                "longitud_sede": sede["longitud"]
+            }
+
+    return {"error": "La IA mencionó una sede que no existe en la BD."}
+
+def generar_mensaje_recogida_invitar_pago(
+        nombre_cliente: str,
+        nombre_sede: str,
+        direccion_sede: str,
+        valor_total_pedido: float,
+        tiempo_pedido: str,
+        codigo_pedido: str,
+        model: str = "gpt-5.1"
+    ) -> str:
+    """
+    Genera un mensaje amable para pedidos con recogida en sede.
+    """
+    try:
+        client = OpenAI()
+        prompt = f"""
+Eres PAKO, la voz oficial de Sierra Nevada, La Cima del Sabor.
+
+Tu tarea:
+Generar un mensaje cálido, claro y corto para un cliente que recogerá su pedido en una sede.
+
+Datos:
+- Nombre del cliente: {nombre_cliente}
+- Sede de recogida: {nombre_sede}
+- Dirección de la sede: {direccion_sede}
+- Tiempo estimado de preparación: {tiempo_pedido}
+- Valor total del pedido: {valor_total_pedido}
+- Código del pedido: {codigo_pedido}
+
+Instrucciones del mensaje:
+- Habla con tono amable y profesional.
+- Di el nombre del cliente.
+- Confirma la sede y su dirección donde recogerá el pedido.
+- Indica en cuánto tiempo puede pasar por él.
+- Indica el valor total del pedido.
+- Menciona claramente el código del pedido.
+- Invítalo a realizar el pago para comenzar la preparación.
+- No mencionar domicilio ni distancias porque es recogida en tienda.
+- No inventar información adicional.
+"""
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Eres un asistente experto redactando mensajes cordiales y personalizados para clientes."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.4
+        )
+
+        return response.choices[0].message.content
+
+    except Exception as e:
+        log_message(f"Error en generar mensaje recogida invitar pago {e}", "ERROR")
+        return f"Error al generar mensaje: {e}"

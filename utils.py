@@ -1358,3 +1358,154 @@ def _apply_direct_selection_from_text(pedido: dict, mensaje_usuario: str, fuzzy_
             logging.exception("Error aplicando selección directa en item del pedido")
             continue
     return pedido
+
+def obtener_datos_cliente_por_telefono(telefono: str, id_restaurante: str):
+    """
+    Retorna latitud, longitud e id_sede del cliente según su teléfono.
+    Si no existe devuelve None.
+    """
+    try:
+        query = """
+            SELECT latitud, longitud, id_sede
+            FROM clientes_whatsapp
+            WHERE telefono = %s AND id_restaurante = %s;
+        """
+        
+        resultado = execute_query(query, (telefono, id_restaurante), fetchone=True)
+
+        if not resultado:
+            log_message(f"No se encontró cliente con teléfono {telefono}", "INFO")
+            return None
+
+        latitud, longitud, id_sede = resultado
+        return {
+            "latitud": latitud,
+            "longitud": longitud,
+            "id_sede": id_sede
+        }
+    except Exception as e:
+        log_message(f"Error en obtener_datos_cliente_por_telefono: {e}", "ERROR")
+        return None
+
+def obtener_pedido_pendiente_reciente(sender: str) -> dict:
+    """
+    Retorna el pedido más reciente (última hora) cuyo:
+    - es_temporal = FALSE
+    - estado = 'Pendiente'
+    - asociado al sender
+    """
+    try:
+        log_message('Iniciando función <ObtenerPedidoPendienteReciente>.', 'INFO')
+
+        # 1. Obtener id_whatsapp
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
+        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        id_whatsapp = res_idw[0] if res_idw else None
+
+        if id_whatsapp is None:
+            return {
+                "existe": False,
+                "msg": "No existe id_whatsapp para este número."
+            }
+
+        # 2. Buscar pedido dentro de la última hora, no temporal, estado pendiente
+        query = """
+            SELECT idpedido, codigo_unico, fecha
+            FROM pedidos
+            WHERE id_whatsapp = %s
+              AND es_temporal = FALSE
+              AND estado = 'Pendiente'
+              AND fecha >= NOW() - INTERVAL '1 hour'
+            ORDER BY fecha DESC
+            LIMIT 1;
+        """
+
+        res = execute_query(query, (id_whatsapp,), fetchone=True)
+
+        if not res:
+            return {
+                "existe": False,
+                "msg": "No hay pedidos pendientes recientes."
+            }
+        log_message(f"Finaliza obtener pedido pendiente reciente sin lios", "INFO")
+        return {
+            "existe": True,
+            "idpedido": res[0],
+            "codigo_unico": res[1],
+            "fecha_creado": str(res[2])
+        }
+
+    except Exception as e:
+        log_message(f'Error en <ObtenerPedidoPendienteReciente>: {e}', 'ERROR')
+        logging.error(f'Error en obtener_pedido_pendiente_reciente: {e}')
+        return {"existe": False, "error": str(e)}
+
+def actualizar_costos_y_tiempos_pedido(
+        sender: str,
+        codigo_unico: str,
+        valor: float,
+        duracion: str,
+        distancia: float
+    ) -> dict:
+    """
+    Actualiza total_domicilio, tiempo_estimado, distancia, direccion_envio
+    y total_final = total_productos + total_domicilio.
+    """
+    try:
+        log_message("Iniciando función <ActualizarCostosYTiempoPedido>.", "INFO")
+
+        # 1. Obtener id_whatsapp
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
+        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        id_whatsapp = res_idw[0] if res_idw else None
+
+        if id_whatsapp is None:
+            return {
+                "actualizado": False,
+                "msg": "No existe id_whatsapp para este número."
+            }
+
+        # 2. Actualizar los valores + recalcular total_final
+        query = """
+            UPDATE pedidos
+            SET 
+                total_domicilio = %s,
+                tiempo_estimado = %s,
+                distancia = %s,
+                total_final = total_productos + %s
+            WHERE codigo_unico = %s
+              AND id_whatsapp = %s
+            RETURNING idpedido, total_final;
+        """
+
+        params = (
+            valor,
+            duracion,
+            distancia,
+            valor,            # total_final = total_productos + valor
+            codigo_unico,
+            id_whatsapp
+        )
+
+        res = execute_query(query, params, fetchone=True)
+
+        if not res:
+            return {
+                "actualizado": False,
+                "msg": "No se encontró un pedido con ese código y ese id_whatsapp."
+            }
+
+        return {
+            "actualizado": True,
+            "idpedido": res[0],
+            "total_final": float(res[1])
+        }
+
+    except Exception as e:
+        log_message(f"Error en <ActualizarCostosYTiempoPedido>: {e}", "ERROR")
+        logging.error(f"Error en actualizar_costos_y_tiempos_pedido: {e}")
+        return {
+            "actualizado": False,
+            "error": str(e)
+        }
+
