@@ -5,7 +5,7 @@ import azure.functions as func
 import logging
 import os
 import json
-from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta
+from utils import obtener_intencion_futura_observaciones, send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta
 from utils_chatgpt import get_classifier
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta
@@ -16,7 +16,7 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 # Constantes desde variables de entorno
 VERIFY_TOKEN: str = os.environ["META_VERIFY_TOKEN"] 
 ACCESS_TOKEN: str = os.environ["WABA_TOKEN"]
-ID_RESTAURANTE: str = os.environ.get("ID_RESTAURANTE", "1")
+ID_RESTAURANTE: str = os.environ.get("ID_RESTAURANTE", "5")
 #PHONE_ID:str = os.environ["PHONE_NUMBER_ID"] 
 
 @app.function_name(name="wpp_webhook")
@@ -127,7 +127,6 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 logging.info(
                     f"Clasificación: {classification}, Tipo: {type_text}, Entidades: {entities_text}"
                 )
-                send_text_response(sender, f"Clasificación: {classification}, Tipo: {type_text}, Entidades: {entities_text}")
                 # Guardar mensaje en base de datos
                 save_message_to_db(sender, text, classification, type_text, str(entities_text), tipo_general, ID_RESTAURANTE)
                 # Verificar si el usuario ya existe en la base de datos
@@ -143,30 +142,13 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     nombre_local="Sierra Nevada",
                     type_text = type_text
                 )
-                send_text_response(sender, classification or "Sin clasificación")
                 log_message('Finalizando función <ProcessMessage>.', 'INFO')
                 return func.HttpResponse("EVENT_RECEIVED", status_code=200)
             elif tipo_general == "location":
                 latitude_temp = message["location"]["latitude"]
                 longitude_temp = message["location"]["longitude"]
                 log_message(f"Ubicación recibida: lat {latitude_temp}, lon {longitude_temp}", "INFO")
-                sedes_cercanas = orquestador_ubicacion_exacta(sender, latitude_temp, longitude_temp, ID_RESTAURANTE)
-                if sedes_cercanas:
-                    # Sede principal (la más cercana)
-                    sede_principal = sedes_cercanas
-                    mensaje = (
-                        f"🏢 La sede más cercana a tu ubicación es:\n"
-                        f"➡️ {sede_principal['nombre']} en {sede_principal['ciudad']}, "
-                        f"a {sede_principal['distancia_km']} km "
-                        f"(~{sede_principal['tiempo_min']} min en carro).\n\n"
-                    )
-                
-                    send_text_response(sender, mensaje)
-                else:
-                    send_text_response(
-                        sender,
-                        "📍 Gracias por tu ubicación.\n\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\n\nEsperamos próximamente en tu barrio. 😊 - Sierra Nevada"
-                    )
+                orquestador_ubicacion_exacta(sender, latitude_temp, longitude_temp, ID_RESTAURANTE, nombre_cliente)
             else:
                 logging.warning(f"⚠️ Tipo de mensaje no soportado: {tipo_general}")
                 send_text_response(sender, "Por el momento solo puedo procesar mensajes de texto.")

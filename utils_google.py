@@ -4,14 +4,15 @@
 import logging
 import googlemaps
 import math
-from utils import log_message, point_in_polygon
+from utils import borrar_intencion_futura, guardar_intencion_futura, log_message, obtener_intencion_futura_observaciones, obtener_pedido_pendiente_reciente, point_in_polygon, send_text_response
+from utils_chatgpt import solicitar_confirmacion_direccion
 from utils_database import execute_query
 import json
 
 CANTIDAD_TIEMPO_PEDIDO: int = 5 # Cantidad de tiempo por pedido en cola en minutos
 TIEMPO_TOLERANCIA: int = 10 # Cantidad de minutos de tolerancia para tiempo total de domicilio
 UMBRAL_TIEMPO: int = 150 # Cantidad de minutos de umbral máximo para un domicilio (2 horas y 30 minutos)
-API_KEY_GOOGLE_MAPS: str = 'AIzaSyC_6rzG31npWbVIIOGprcB-jEQtHnHJKSc'
+API_KEY_GOOGLE_MAPS: str = 'AIzaSyCFsdUvOlE_iMJPbSXrbCoCdWJIqebZHKc'
 
 def obtener_cliente_google_maps() -> googlemaps:
     try:
@@ -46,23 +47,60 @@ def primera_regla_tiempo(id_sede: str, tiempo_base: int) -> int:
     """
     try:
         log_message("Iniciando primera regla de tiempo.", "INFO")
+
         query = """
             SELECT COUNT(*) 
             FROM pedidos
             WHERE estado = 'En preparación'
-              AND producto ILIKE '%hamburguesa%'
-              AND id_sede = %s;
+              AND producto ILIKE %s
+              AND idsede = %s;
         """
-        resultado = execute_query(query, (id_sede,), fetchone=True)
-        hamburguesas_en_preparacion = resultado[0] if resultado and resultado[0] is not None else 0
+
+        # Dos parámetros porque hay dos placeholders
+        resultado = execute_query(query, ("%sierra%", id_sede), fetchone=True)
+
+        hamburguesas_en_preparacion = resultado[0] if resultado else 0
         log_message(f"Hamburguesas en preparación: {hamburguesas_en_preparacion}", "INFO")
+
         incremento = (hamburguesas_en_preparacion // 10) * 8
         tiempo_estimado = int(tiempo_base + incremento)
         log_message(f"Tiempo base: {tiempo_base} | Incremento: {incremento} | Total estimado: {tiempo_estimado}", "INFO")
+
         return tiempo_estimado
+
     except Exception as e:
         log_message(f"Error en primera_regla_tiempo: {str(e)}", "ERROR")
         return tiempo_base
+
+def formatear_tiempo_entrega(minutos: int) -> str:
+    """
+    Convierte minutos enteros en un string presentable.
+    Ejemplos:
+    - 45 -> '45 minutos'
+    - 70 -> '1 hora 10 minutos'
+    - 120 -> '2 horas'
+    """
+    try:
+        if minutos < 0:
+            return "Tiempo no disponible"
+
+        if minutos < 60:
+            return f"{minutos} minutos"
+
+        horas = minutos // 60
+        mins = minutos % 60
+
+        # Pluralización correcta
+        h_text = "hora" if horas == 1 else "horas"
+
+        if mins == 0:
+            return f"{horas} {h_text}"
+
+        return f"{horas} {h_text} {mins} minutos"
+
+    except Exception:
+        return "Tiempo no disponible"
+
 
 def calcular_tiempo_pedido(tiempo_domicilio: str, id_sede: str) -> int:
     try:
@@ -95,6 +133,10 @@ def calcular_tiempo_pedido(tiempo_domicilio: str, id_sede: str) -> int:
 def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente: float, id_restaurante: str):
     try:
         log_message(f"Buscando la sede más cercana dentro de su área para coordenadas ({latitud_cliente}, {longitud_cliente})", "INFO")
+
+        # ------------------------------------
+        # 1. Obtener sedes
+        # ------------------------------------
         sedes = execute_query("""
             SELECT id_sede, nombre, ciudad, latitud, longitud
             FROM sedes
@@ -103,10 +145,16 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
               AND latitud IS NOT NULL
               AND longitud IS NOT NULL;
         """, (id_restaurante,))
+
         if not sedes:
             return None
+
         ids = [s[0] for s in sedes]
         areas_map = {}
+
+        # ------------------------------------
+        # 2. Obtener áreas de cobertura
+        # ------------------------------------
         if ids:
             placeholders = ",".join(["%s"] * len(ids))
             query_areas = f"""
@@ -115,10 +163,12 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
                 WHERE id_sede IN ({placeholders});
             """
             areas_rows = execute_query(query_areas, tuple(ids))
+
             if areas_rows:
                 for id_sede_row, valor in areas_rows:
                     parsed = None
                     logging.info(f"Valor: {valor}")
+
                     if valor is None:
                         parsed = None
                     elif isinstance(valor, (dict, list)):
@@ -132,17 +182,28 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
                                 parsed = json.loads(cleaned)
                             except Exception:
                                 parsed = None
+
                     logging.info(f"Final parsed {parsed}")
+
                     if parsed:
                         areas_map.setdefault(id_sede_row, []).append(parsed)
+
+        # ------------------------------------
+        # 3. Verificar si el cliente cae dentro de un área válida
+        # ------------------------------------
         candidatos = []
+
         for s in sedes:
             sede_id, nombre, ciudad, lat_sede, lon_sede = s
             polygons = areas_map.get(sede_id)
+
             logging.info(f"Polys {polygons}")
+
             if not polygons:
                 continue
+
             encontrada = None
+
             for poly in polygons:
                 logging.info(f"Poly for in {poly}")
                 try:
@@ -151,24 +212,42 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
                         break
                 except Exception as e:
                     logging.info(f"Error e {e}")
+                    log_message(f"Error al verificar punto en polígono: {e}", "ERROR")
                     continue
+
             if encontrada is not None:
                 candidatos.append((s, lat_sede, lon_sede, encontrada))
+
         if not candidatos:
             return None
+
+        # ------------------------------------
+        # 4. Llamar Google Distance Matrix
+        # ------------------------------------
         gmaps = obtener_cliente_google_maps()
+
         origen = (latitud_cliente, longitud_cliente)
-        destinos = [(lat, lon) for (_, lat, lon, _) in candidatos]
-        logging.info(f"destinos {destinos}")
         destinos = [(item[1], item[2]) for item in candidatos]
+
+        logging.info(f"destinos {destinos}")
+
         resultado = gmaps.distance_matrix(
             origins=[origen],
             destinations=destinos,
             mode="driving",
             language="es"
         )
+
+        # Direcciones humanas devueltas por Google
+        direccion_origen = resultado.get("origin_addresses", [""])[0]
+        direcciones_destinos = resultado.get("destination_addresses", [])
+
+        # ------------------------------------
+        # 5. Construir opciones válidas
+        # ------------------------------------
         opciones_validas = []
         elements = resultado.get("rows", [])[0].get("elements", []) if resultado.get("rows") else []
+
         for i, elem in enumerate(elements):
             if elem.get("status") != "OK":
                 continue
@@ -176,35 +255,59 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
             duracion_s = elem["duration"]["value"]
             sede_tuple = candidatos[i][0]
             area_usada = candidatos[i][3]
+            direccion_destino = direcciones_destinos[i] if i < len(direcciones_destinos) else ""
             opciones_validas.append({
                 "id": sede_tuple[0],
                 "nombre": sede_tuple[1],
                 "ciudad": sede_tuple[2],
                 "distancia_km": round(distancia_m / 1000, 2),
                 "tiempo_min": round(duracion_s / 60, 1),
-                "area": area_usada
+                "lat": candidatos[i][1],
+                "lon": candidatos[i][2],
+                "area": area_usada,
+                "direccion_envio": direccion_destino  # <-- agregado
             })
         if not opciones_validas:
             return None
+        # ------------------------------------
+        # 6. Seleccionar la sede más cercana
+        # ------------------------------------
         opciones_validas.sort(key=lambda x: x["distancia_km"])
         return opciones_validas[0]
     except Exception as e:
         logging.error(f"Error en buscar_sede_mas_cercana_dentro_area: {e}")
+        log_message(f"Ocurrió un error al buscar sede más cercana: {e}", "ERROR")
         return None
 
-def set_sede_cliente(id_sede: str, numero_cliente, id_restaurante: str) -> None:
+def set_sede_cliente(id_sede: str, numero_cliente, id_restaurante: str) -> bool:
     try:
         """Asigna la sede seleccionada al cliente en la base de datos."""
-        log_message(f"Asignando sede {id_sede} al cliente {id_restaurante}", "INFO")
+        log_message(f"Asignando sede {id_sede} al cliente {numero_cliente}", "INFO")
         execute_query("""
             UPDATE clientes_whatsapp
             SET id_sede = %s
             WHERE telefono = %s AND id_restaurante = %s;
         """, (id_sede, numero_cliente, id_restaurante))
         log_message(f"Sede asignada correctamente.", "INFO")
+        return True
     except Exception as e:
         log_message(f"Error al asignar sede al cliente: {e}", "ERROR")
-        raise e
+        return False
+
+def set_lat_lon(numero_cliente: str, latitud_client: float, longitud_client: float, id_restaurante) -> bool:
+    try:
+        """Asigna la sede seleccionada al cliente en la base de datos."""
+        log_message(f"Asignando lat y long al cliente {numero_cliente}", "INFO")
+        execute_query("""
+            UPDATE clientes_whatsapp
+            SET latitud = %s, longitud = %s
+            WHERE telefono = %s AND id_restaurante = %s;
+        """, (latitud_client, longitud_client, numero_cliente, id_restaurante))
+        log_message(f"Sede asignada correctamente.", "INFO")
+        return True
+    except Exception as e:
+        log_message(f"Error al asignar sede al cliente: {e}", "ERROR")
+        return False
 
 def set_direccion_cliente(numero_cliente: str, direccion: str, id_restaurante: str) -> bool:
     try:
@@ -220,6 +323,15 @@ def set_direccion_cliente(numero_cliente: str, direccion: str, id_restaurante: s
     except Exception as e:
         log_message(f"Error al actualizar dirección del cliente: {e}", "ERROR")
         raise e
+
+def calcular_valor(distancia) -> float:    
+    if distancia <= 2000:
+        valor = 2000
+    else:
+        valor = 2000 + ((distancia - 2000) * 0.4)
+
+    valor_redondeado = round(valor // 100) * 100
+    return valor_redondeado
 
 def calcular_distancia_y_tiempo(origen: tuple, destino: tuple, numero_telefono: str, id_restaurante: str, id_sede: str):
     try:
@@ -237,25 +349,74 @@ def calcular_distancia_y_tiempo(origen: tuple, destino: tuple, numero_telefono: 
         distancia = resultado['rows'][0]['elements'][0]['distance']['text']
         distancia_metros = resultado['rows'][0]['elements'][0]['distance']['value']
         duracion = calcular_tiempo_pedido(duracion, id_sede)
-        valor = CalcularValor(distancia_metros)
-        log_message(f"Envío a: {direccion_envio}")
-        log_message(f"Tiempo estimado: {duracion}")
-        log_message(f"Distancia: {distancia}")
-        log_message(f"Valor del envío: ${valor:.0f}")
-        logging.info("Terminando conexión con Google Maps")
-        return valor, duracion, distancia, direccion_envio
+        tiempo_pedido: str = formatear_tiempo_entrega(duracion)
+        valor = calcular_valor(distancia_metros)
+        log_message(f"Termina de calcular distancia y tiempo", "INFO")
+        return valor, tiempo_pedido, float(distancia_metros), direccion_envio
     except Exception as e:
+        log_message(f"Error en la funcion calcular distancia y tiempo {e}", "ERROR")
         logging.error(f"Error en la función main_googlemaps: {e}")
         return None
 
-def orquestador_ubicacion_exacta(numero_telefono: str, latitud_cliente: float, longitud_cliente: float, id_restaurante: str) -> tuple:
+def obtener_valores_sede(id_sede: str) -> tuple:
     try:
-        """Orquestador principal cuando se envia un mensaje tipo ubicación exacta"""
+        log_message(f"Empieza obtener valores sede", "INFO")
+        sede_info = execute_query("""
+                SELECT latitud, longitud
+                FROM sedes
+                WHERE id_sede = %s;
+            """, (id_sede,), fetchone=True)
+        if not sede_info:
+            log_message(f"No se encontró información de la sede con id {id_sede}", "ERROR")
+            return None
+        lat_sede, lon_sede = sede_info
+        return lat_sede, lon_sede
+    except Exception as e:
+        log_message(f"Error en obtener valores sede", "ERROR")
+        raise e
+
+def orquestador_ubicacion_exacta(sender: str, latitud_cliente: float, longitud_cliente: float, id_restaurante: str, nombre_cliente: str):
+    try:
         log_message(f"Se inicia el orquestador con datos de longitud {longitud_cliente} y latitud {latitud_cliente}", "INFO")
+        codigo_pedido: str = obtener_intencion_futura_observaciones(sender)
+        if not codigo_pedido:
+            codigo_pedido = obtener_pedido_pendiente_reciente(sender)
+            if not codigo_pedido:
+                send_text_response("Lo siento, no tienes un pedido activo dentro de la última hora, te invitamos a pedir nuevamente. 😊 - Sierra Nevada")
         sede_cercana = buscar_sede_mas_cercana_dentro_area(latitud_cliente, longitud_cliente, id_restaurante)
-        set_sede_cliente(sede_cercana["id"], numero_telefono, id_restaurante)
-        calcular_distancia_y_tiempo(sede_cercana["ubicacion"], (latitud_cliente, longitud_cliente), numero_telefono, id_restaurante, sede_cercana["id"])
-        return sede_cercana
+        if sede_cercana is None:
+            log_message("No se encontró sede cercana. Retornando None.", "WARNING")
+            send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos próximamente en tu barrio. 😊 - Sierra Nevada")
+            borrar_intencion_futura(sender)
+        if not set_sede_cliente(sede_cercana["id"], sender, id_restaurante) or not set_lat_lon(sender, latitud_cliente, longitud_cliente, id_restaurante) or not set_direccion_cliente(sender, sede_cercana["direccion_envio"], id_restaurante):
+            return None
+        mensaje_direccion: dict = solicitar_confirmacion_direccion(nombre_cliente, sede_cercana)
+        guardar_intencion_futura(sender, "confirmar_direccion", codigo_pedido)
+        send_text_response(sender, mensaje_direccion.get("mensaje"))
     except Exception as e:
         log_message(f"Ocurrió un error con el orquestador, revisar {e}", "ERROR")
+        raise e
+
+def orquestador_tiempo_y_valor_envio(latitud_cliente: float, longitud_cliente: float, id_sede: str, numero_telefono: str, id_restaurante: str):
+    try:
+        log_message(f"Se inicia orquestador tiempo y valor envio con latitud {latitud_cliente} y longitud {longitud_cliente}", "INFO")
+        sede_info = execute_query("""
+            SELECT latitud, longitud
+            FROM sedes
+            WHERE id_sede = %s;
+        """, (id_sede,), fetchone=True)
+        if not sede_info:
+            log_message(f"No se encontró información de la sede con id {id_sede}", "ERROR")
+            return None
+        lat_sede, lon_sede = sede_info
+        resultado = calcular_distancia_y_tiempo(
+            origen=(lat_sede, lon_sede),
+            destino=(latitud_cliente, longitud_cliente),
+            numero_telefono=numero_telefono,
+            id_restaurante=id_restaurante,
+            id_sede=id_sede
+        )
+        return resultado
+    except Exception as e:
+        log_message(f"Ocurrió un error en orquestador tiempo y valor envio: {e}", "ERROR")
         raise e
