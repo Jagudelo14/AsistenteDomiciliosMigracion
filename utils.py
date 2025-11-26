@@ -560,7 +560,16 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         # ------------------------------- # 4. Preparar productos y total # ------------------------------- 
         productos = []
         for item in pedido_dict.get("items", []):
-            productos.append(item["matched"]["name"])
+            matched = item.get("matched")
+
+            if matched and matched.get("name"):
+                productos.append(matched["name"])
+            else:
+                # Registrar el ítem que llegó sin match
+                log_message(f"[WARN] Item sin matched en <GuardarPedidoCompleto>: {item}", "WARN")
+
+                # Evitas romper la función, pero registras algo legible
+                productos.append("SIN_MATCH")
         productos_str = " | ".join(productos)
         total_price = float(pedido_dict.get("total_price", 0))
         # ------------------------------- # 5. Hora y fecha Bogotá # -------------------------------
