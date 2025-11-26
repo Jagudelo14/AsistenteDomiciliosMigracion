@@ -1732,6 +1732,8 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
             "Costeñitos fritos + Suero Costeño"
             "Anillos de Cebolla"
             "Papas francesas"
+        Acepta coincidencias parciales SOLO si es OBVIO que se refiere a un producto real.
+        Nunca adivines si hay más de una opción posible.
         si el pedido es general, no específico, sugiere opciones del menú. siempre con un call 2 action.
         """
         promociones_str = str(promociones_lst)
