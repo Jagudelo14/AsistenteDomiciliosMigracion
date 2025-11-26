@@ -434,7 +434,8 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
         pedido_dict: dict = {}
         pedido_anterior = obtener_intencion_futura_mensaje_chatbot(sender)
         nuevos_elementos: str = pregunta_usuario
-        
+        codigo_unico_anterior: str = obtener_intencion_futura_observaciones(sender)
+        eliminar_pedido(sender, codigo_unico_anterior)
         pedido_dict = actualizar_pedido_con_mensaje_modificacion(pedido_anterior, items_menu, nuevos_elementos)
         if not pedido_dict.get("order_complete", False):
             no_completo: dict = pedido_incompleto_dynamic(pregunta_usuario, items_menu, str(pedido_dict))
@@ -524,6 +525,10 @@ def orquestador_subflujos(
             subflujo_modificacion_pedido(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "confirmacion_modificacion_pedido":
             send_text_response(sender, "Escribe lo que quieras modificar de tu pedido de manera clara y específica.")
+        elif clasificacion_mensaje == "domicilio":
+            send_text_response(sender, "Por favor, proporciona tu dirección completa para el domicilio. No olvides incluir detalles como calle, número, ciudad y cualquier referencia adicional.También puedes enviarme tu ubicación si lo prefieres.")
+            codigo_unico: str = obtener_intencion_futura_observaciones(sender)
+            guardar_clasificacion_intencion(sender, "primera_direccion_domicilio", codigo_unico)
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")
