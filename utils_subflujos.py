@@ -33,6 +33,7 @@ from utils import (
     obtener_menu,
     obtener_pedido_por_codigo,
     obtener_pedido_por_codigo_orignal,
+    obtener_promociones_activas,
     obtener_ultima_intencion_no_resuelta,
     recalcular_y_actualizar_pedido,
     send_pdf_response,
@@ -348,7 +349,8 @@ def subflujo_consulta_menu(sender: str, nombre_cliente: str) -> None:
     try:
         log_message(f'Iniciando función <SubflujoConsultaMenu> para {sender}.', 'INFO')
         menu = obtener_menu()
-        mensaje_menu: dict = enviar_menu_digital(nombre_cliente, "Sierra Nevada", menu)
+        promociones_list: list = obtener_promociones_activas()
+        mensaje_menu: dict = enviar_menu_digital(nombre_cliente, "Sierra Nevada", menu, promociones_list)
         send_text_response(sender, mensaje_menu.get("mensaje"))
         send_pdf_response(sender)
         log_message(f'Menú enviado correctamente a {sender}.', 'INFO')
@@ -381,21 +383,7 @@ def subflujo_promociones(sender: str, nombre_cliente: str, pregunta_usuario: str
     """Maneja la consulta de promociones por parte del usuario."""
     try:
         log_message(f'Iniciando función <SubflujoPromociones> para {sender}.', 'INFO')
-        promos_rows, promo_cols = execute_query_columns(
-            """
-            SELECT *
-            FROM promociones
-            WHERE fecha_inicio <= NOW()
-              AND fecha_fin >= NOW()
-              AND estado = 'true';
-            """,
-            fetchone=False,
-            return_columns=True
-        )
-        promociones_info = [
-            {col: to_json_safe(val) for col, val in zip(promo_cols, row)}
-            for row in promos_rows
-        ]
+        promociones_info: list = obtener_promociones_activas()
         respuesta = responder_sobre_promociones(
             nombre=nombre_cliente,
             nombre_local="Sierra Nevada",

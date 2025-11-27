@@ -1509,3 +1509,26 @@ def actualizar_costos_y_tiempos_pedido(
             "error": str(e)
         }
 
+def obtener_promociones_activas() -> list:
+    try:
+        log_message(f"Inicia obtener promociones activas", "INFO")
+        promos_rows, promo_cols = execute_query_columns(
+            """
+            SELECT *
+            FROM promociones
+            WHERE fecha_inicio <= NOW()
+              AND fecha_fin > NOW()
+              AND estado = 'true';
+            """,
+            fetchone=False,
+            return_columns=True
+        )
+        promociones_info = [
+            {col: to_json_safe(val) for col, val in zip(promo_cols, row)}
+            for row in promos_rows
+        ]
+        log_message(f"Termina obtener promociones activas {str(promociones_info)}", "INFO")
+        return promociones_info
+    except Exception as e:
+        log_message(f"Error al obtener promociones activas {e}", "ERROR")
+        return None

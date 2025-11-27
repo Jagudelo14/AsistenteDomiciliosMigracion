@@ -2,6 +2,7 @@
 # Last modified: 2025-09-30 by Andrés Bermúdez
 
 import azure.functions as func
+from datetime import datetime
 import logging
 import os
 import json
@@ -163,37 +164,73 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
 def health_check(req: func.HttpRequest) -> func.HttpResponse:
     """
     Endpoint simple para probar disponibilidad desde Postman.
-    - GET → responde con OK + tiempo
-    - POST → devuelve el JSON recibido
+    - GET  → responde con una página HTML sencilla que dice "Todo OK" y la hora.
+    - POST → devuelve una página HTML que dice "Todo OK" y muestra el JSON/texto recibido.
     """
     try:
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
         if req.method == "GET":
+            html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Health Check</title>
+</head>
+<body>
+  <h1>Todo OK</h1>
+  <p>Servicio activo — {now}</p>
+</body>
+</html>"""
             return func.HttpResponse(
-                json.dumps({"status": "OK", "message": "Servicio activo"}),
+                html,
                 status_code=200,
-                mimetype="application/json"
+                mimetype="text/html"
             )
 
         if req.method == "POST":
             body_raw = req.get_body().decode("utf-8")
+            # intentamos parsear JSON para mostrarlo bonito, si no, mostramos el texto plano
             try:
                 body = json.loads(body_raw)
-            except:
-                body = body_raw  # por si mandas texto plano
+                pretty_body = json.dumps(body, ensure_ascii=False, indent=2)
+            except Exception:
+                pretty_body = body_raw
 
+            html = f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Health Check - POST</title>
+</head>
+<body>
+  <h1>Todo OK</h1>
+  <p>Servicio activo — {now}</p>
+  <h2>Contenido recibido:</h2>
+  <pre>{func.HtmlEscape(pretty_body)}</pre>
+</body>
+</html>"""
+            # Si tu versión de azure.functions no tiene HtmlEscape, reemplaza por: pretty_body.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
             return func.HttpResponse(
-                json.dumps({
-                    "status": "OK",
-                    "received": body
-                }),
+                html,
                 status_code=200,
-                mimetype="application/json"
+                mimetype="text/html"
             )
 
     except Exception as e:
         logging.error(f"Error en /health: {e}")
+        error_html = f"""<!DOCTYPE html>
+<html lang="es">
+<head><meta charset="utf-8"><title>Error</title></head>
+<body>
+  <h1>ERROR</h1>
+  <p>{str(e)}</p>
+</body>
+</html>"""
         return func.HttpResponse(
-            json.dumps({"status": "ERROR", "detail": str(e)}),
+            error_html,
             status_code=500,
-            mimetype="application/json"
+            mimetype="text/html"
         )

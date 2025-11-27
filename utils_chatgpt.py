@@ -10,6 +10,7 @@ import json
 import ast
 from utils import REPLACE_PHRASES, _apply_direct_selection_from_text, obtener_pedido_por_codigo, send_text_response, limpiar_respuesta_json, log_message, _safe_parse_order, _merge_items, _price_of_item, convert_decimals, to_json_safe
 from utils_database import execute_query
+from datetime import datetime, date
 
 def get_openai_key() -> str:
     try:
@@ -623,6 +624,7 @@ def sin_intencion_respuesta_variable(contenido_usuario: str, nombre_cliente: str
 def saludo_dynamic(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
     try:
         log_message('Iniciando función <saludo_dynamic>.', 'INFO')
+
         PROMPT_SALUDO_DYNAMIC = """
 Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
 Tu tarea es generar un saludo personalizado según el tono que use el cliente.
@@ -663,53 +665,75 @@ REGLAS DE ESTILO SIERRA NEVADA:
     - "consulta_menu"
     - "consulta_promociones"
 
-TIPS PARA QUE EL CLIENTE TENGA UNA MEJOR EXPERIENCIA CON EL BOT:
-- Invítalo de forma amable a escribir mensajes claros y específicos.
-- Recuérdale que envíe **un mensaje a la vez**, sin mezclar varias solicitudes.
-- Indícale que siga los pasos que le compartas, sin saltarlos.
-- Pídele que espere la respuesta antes de enviar otro mensaje.
-- Explica brevemente que esto ayuda a procesar mejor la orden y evitar errores.
-- Todo debe sonar natural, positivo y sin regaños.
+TIPS PARA UNA MEJOR EXPERIENCIA (OBLIGATORIO INCLUIRLOS EN EL JSON):
+Incluye SIEMPRE un campo "tips" con una lista de 3 a 5 tips breves.
+Los tips deben sonar amables, útiles y positivos.
+Ejemplos:
+- Sé claro y específico con lo que necesitas.
+- Envía un mensaje a la vez.
+- Sigue los pasos que te indique el bot.
+- Espera mi respuesta antes de enviar otro mensaje.
+- Esto ayuda a procesar tu pedido sin errores.
 
 FORMATO:
 Debes responder en un JSON válido:
-{
+{{
     "mensaje": "texto aquí",
-    "intencion": "consulta_menu"
-}
+    "intencion": "consulta_menu",
+    "tips": ["tip1", "tip2", "tip3"]
+}}
 No incluyas texto adicional fuera del JSON.
 """
+
         client = OpenAI()
         prompt = PROMPT_SALUDO_DYNAMIC.format(
             nombre=nombre,
             nombre_local=nombre_local,
             mensaje_usuario=mensaje_usuario.lower()
         )
+        
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "Eres un generador de saludos que adapta su tono al del cliente."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=150,
+            max_tokens=350,
             temperature=0.85
         )
+
         raw = response.choices[0].message.content.strip()
+
         try:
             data = json.loads(raw)
         except:
+            # fallback con tips incluidos
             data = {
-                "mensaje": f"¡Hola {nombre}! Bienvenido a {nombre_local}. ¿Quieres que te muestre el menú?",
-                "intencion": "consulta_menu"
+                "mensaje": f"¡Hola {nombre}! Bienvenido a {nombre_local}. ¿Te muestro el menú o las promociones?",
+                "intencion": "consulta_menu",
+                "tips": [
+                    "Escribe mensajes claros y específicos",
+                    "Envía un mensaje a la vez",
+                    "Sigue los pasos que te comparta el bot",
+                    "Espera mi respuesta antes de enviar otro mensaje",
+                ]
             }
+
         log_message('Finalizando función <saludo_dynamic>.', 'INFO')
         return data
+
     except Exception as e:
         log_message(f'Error en función <saludo_dynamic>: {e}', 'ERROR')
         logging.error(f"Error en función <saludo_dynamic>: {e}")
         return {
-            "mensaje": f"¡Hola {nombre}! Bienvenido a {nombre_local}. ¿Quieres que te muestre el menú?",
-            "intencion": "consulta_menu"
+            "mensaje": f"¡Hola {nombre}! Bienvenido a {nombre_local}. ¿Quieres ver el menú?",
+            "intencion": "consulta_menu",
+            "tips": [
+                "Escribe mensajes claros y específicos",
+                "Envía un mensaje a la vez",
+                "Sigue los pasos que te comparta el bot",
+                "Espera mi respuesta antes de enviar otro mensaje",
+            ]
         }
     
 def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
@@ -1370,27 +1394,83 @@ Debe responder estrictamente un JSON con el campo:
             "mensaje": f"¡{nombre}, ese pedido está para antojar a cualquiera! 🤤 Tu orden ({codigo_unico}) en {nombre_local} quedó tremenda. ¿Qué medio de pago prefieres: efectivo, transferencia (Nequi/Daviplata/Bre-B), tarjeta débito o tarjeta crédito?"
         }
 
-def enviar_menu_digital(nombre: str, nombre_local: str, menu) -> dict:
+def enviar_menu_digital(nombre: str, nombre_local: str, menu, promociones_list: list | None) -> dict:
     try:
-        log_message('Iniciando función <solicitar_medio_pago>.', 'INFO')
-        PROMPT = f"""
-        Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
-        El cliente {nombre} pidió el menú digital.
-        Este es el menú que tienes disponible:
-        {json.dumps(menu, ensure_ascii=False)}
-        TAREA:
-        - Haz un comentario alegre, sabroso y un poquito divertido sobre el menú.
-        - Estilo: cálido, entusiasta, como “Listo para pedir", vamos a consentirnos hoy y así.
-        - No uses sarcasmo, groserías ni exageres demasiado.
-        - Máximo 1 o 2 frases.
-        - Después del comentario, recomienda que el cliente haga su pedido y 2 opciones del menu (hamburguesas o malteadas).
-        - Menciona el local: {nombre_local}
-        FORMATO DE RESPUESTA (OBLIGATORIO):
-        {{
-            "mensaje": "texto aquí"
-        }}
-        Nada fuera del JSON.
-        """
+        log_message('Iniciando función <enviar_menu_digital>.', 'INFO')
+        if promociones_list:
+            hoy = date.today()
+            promociones_con_vigencia = []
+            for p in promociones_list:
+                try:
+                    fecha_fin_raw = p.get("fecha_fin")
+                    if isinstance(fecha_fin_raw, str):
+                        fecha_fin = datetime.fromisoformat(fecha_fin_raw).date()
+                    elif isinstance(fecha_fin_raw, datetime):
+                        fecha_fin = fecha_fin_raw.date()
+                    else:
+                        fecha_fin = fecha_fin_raw  # por si ya es date
+                    dias_restantes = (fecha_fin - hoy).days
+                    if dias_restantes == 0:
+                        vence_texto = "La promo vence **hoy**."
+                    elif dias_restantes == 1:
+                        vence_texto = "La promo vence **mañana**."
+                    elif dias_restantes > 1:
+                        vence_texto = f"Vence en {dias_restantes} días."
+                    else:
+                        vence_texto = "La promo ya no está vigente."
+                    p_mod = p.copy()
+                    p_mod["vence_en"] = dias_restantes
+                    p_mod["vence_texto"] = vence_texto
+                    promociones_con_vigencia.append(p_mod)
+                except Exception:
+                    p_mod = p.copy()
+                    p_mod["vence_texto"] = "No se pudo calcular la vigencia."
+                    promociones_con_vigencia.append(p_mod)
+            promociones_json = json.dumps(promociones_con_vigencia, ensure_ascii=False)
+            PROMPT = f"""
+            Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
+            El cliente {nombre} pidió ver las promociones activas.
+
+            Estas son las promociones disponibles (JSON):
+            {promociones_json}
+
+            Cada promoción incluye un campo "vence_texto" que indica si la promo termina hoy, mañana o en cuántos días.
+
+            TAREA:
+            - Haz un mensaje alegre, sabroso y persuasivo resaltando las promociones.
+            - En el mensaje, menciona la urgencia según "vence_texto".
+            - Recomienda 1 o 2 promociones específicas.
+            - Estilo: cálido, entusiasta, sin sarcasmo ni groserías.
+            - Máximo 1 o 2 frases.
+
+            FORMATO DE RESPUESTA (OBLIGATORIO):
+            {{
+                "mensaje": "texto aquí"
+            }}
+            Nada fuera del JSON.
+            """
+        else:
+            menu_json = json.dumps(menu, ensure_ascii=False)
+            PROMPT = f"""
+            Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
+            El cliente {nombre} pidió el menú digital.
+
+            Este es el menú disponible:
+            {menu_json}
+
+            TAREA:
+            - Haz un comentario alegre y sabroso.
+            - Recomienda 2 opciones del menú.
+            - Estilo cálido y entusiasta.
+            - Máximo 1 o 2 frases.
+            - Menciona el local: {nombre_local}
+
+            FORMATO DE RESPUESTA (OBLIGATORIO):
+            {{
+                "mensaje": "texto aquí"
+            }}
+            Nada fuera del JSON.
+            """
         client = OpenAI()
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -1404,17 +1484,17 @@ def enviar_menu_digital(nombre: str, nombre_local: str, menu) -> dict:
         raw = response.choices[0].message.content.strip()
         try:
             data = json.loads(raw)
-        except:
+        except Exception:
             data = {
-                "mensaje": f"¡{nombre}, el menú de {nombre_local} está para chuparse los dedos! 🤤 ¿Qué esperas para pedir una de nuestras deliciosas hamburguesas como 'La Insaciable' o una refrescante malteada de 'Chocolate y avellanas'?"
+                "mensaje": f"¡{nombre}, tenemos promociones activas en {nombre_local}! 😋 ¡Aprovecha y pide ya!"
             }
-        log_message('Finalizando función <solicitar_medio_pago>.', 'INFO')
+        log_message('Finalizando función <enviar_menu_digital>.', 'INFO')
         return data
     except Exception as e:
-        log_message(f'Error en función <solicitar_medio_pago>: {e}', 'ERROR')
-        logging.error(f"Error en función <solicitar_medio_pago>: {e}")
+        log_message(f'Error en función <enviar_menu_digital>: {e}', 'ERROR')
+        logging.error(f"Error en función <enviar_menu_digital>: {e}")
         return {
-            "mensaje": f"¡{nombre}, ¿qué esperas para pedir del delicioso menú de {nombre_local}? ¡Anímate y cuéntame qué se te antoja hoy!"
+            "mensaje": f"¡{nombre}, ¿qué esperas para pedir en {nombre_local}? ¡Cuéntame qué se te antoja hoy!"
         }
 
 def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: dict, pregunta_usuario: str) -> dict:
@@ -1574,7 +1654,6 @@ def responder_sobre_promociones(nombre: str, nombre_local: str, promociones_info
             "mensaje": f"{nombre}, tuve un problema procesando las promociones, pero si quieres puedo mostrarte el menú o las promos disponibles.",
             "futura_intencion": "continuacion_promocion"
         }
-
 
 def interpretar_eleccion_promocion(pregunta_usuario: str, info_promociones_str: str, respuesta_previa_promocion: str, pedido_dict: dict) -> dict:
     """
