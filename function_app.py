@@ -37,7 +37,6 @@ def wpp(req: func.HttpRequest) -> func.HttpResponse:
     if req.method == "POST":
         return _process_message(req)
     return func.HttpResponse("Método no permitido", status_code=405)
-
 def verify_hour_atettion(sender: str) -> bool:
     """Verifica si el mensaje fue enviado dentro del horario de atención."""
     hora_inicio = 11
@@ -49,7 +48,6 @@ def verify_hour_atettion(sender: str) -> bool:
     else:
         send_text_response(sender, "Nuestro horario de atención es de 11 AM a 10 PM")
         return False
-    
 def _verify_webhook(req: func.HttpRequest) -> func.HttpResponse:
     """Maneja la verificación inicial del webhook de Meta."""
     mode: Optional[str] = req.params.get("hub.mode")
@@ -158,7 +156,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 if not text:
                     logging.warning("⚠️ Mensaje recibido sin texto.")
                     return func.HttpResponse("Mensaje vacío", status_code=200)
-                elif message["type"] == "audio":
+            elif message["type"] == "audio":
                     log_message(f"Llega mensaje de audio", "INFO")
                     audio_id = message["audio"]["id"]
                     mime_type = message["audio"]["mime_type"]
@@ -181,16 +179,18 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     text = transcript.text
                     logging.info(f"Transcripción recibida: {text}")
                     log_message(f"Mensaje transcrito {text}", "INFO")
-                elif tipo_general == "location":
+            elif tipo_general == "location":
                     latitude_temp = message["location"]["latitude"]
                     longitude_temp = message["location"]["longitude"]
                     log_message(f"Ubicación recibida: lat {latitude_temp}, lon {longitude_temp}", "INFO")
                     orquestador_ubicacion_exacta(sender, latitude_temp, longitude_temp, ID_RESTAURANTE, nombre_cliente)
-                else:
+            else:
                     logging.warning(f"⚠️ Tipo de mensaje no soportado: {tipo_general}")
                     send_text_response(sender, "Por el momento solo puedo procesar mensajes de texto.")
                     return func.HttpResponse("Tipo de mensaje no soportado", status_code=200)
                 # Clasificación con modelo OpenAI
+            log_message(f"Empieza a clasificar con text {text}", "INFO")    
+            if text:
                 classification: str
                 type_text: str
                 entities_text: Dict[str, Any]
