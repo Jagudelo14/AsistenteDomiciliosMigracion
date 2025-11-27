@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 import os
 import json
-from utils import obtener_intencion_futura_observaciones, send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta
+from utils import obtener_intencion_futura_observaciones, send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta,verify_hour_atettion
 from utils_chatgpt import get_classifier, get_openai_key
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta
@@ -21,6 +21,7 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 VERIFY_TOKEN: str = os.environ["META_VERIFY_TOKEN"] 
 ACCESS_TOKEN: str = os.environ["WABA_TOKEN"]
 ID_RESTAURANTE: str = os.environ.get("ID_RESTAURANTE", "5")
+
 #PHONE_ID:str = os.environ["PHONE_NUMBER_ID"] 
 
 @app.function_name(name="wpp_webhook")
@@ -37,17 +38,7 @@ def wpp(req: func.HttpRequest) -> func.HttpResponse:
     if req.method == "POST":
         return _process_message(req)
     return func.HttpResponse("Método no permitido", status_code=405)
-def verify_hour_atettion(sender: str) -> bool:
-    """Verifica si el mensaje fue enviado dentro del horario de atención."""
-    hora_inicio = 11
-    hora_fin = 22
-    ahora = datetime.utcnow()
-    hora_actual = ahora.hour
-    if hora_inicio <= hora_actual < hora_fin:
-        return True
-    else:
-        send_text_response(sender, "Nuestro horario de atención es de 11 AM a 10 PM")
-        return False
+    
 def _verify_webhook(req: func.HttpRequest) -> func.HttpResponse:
     """Maneja la verificación inicial del webhook de Meta."""
     mode: Optional[str] = req.params.get("hub.mode")

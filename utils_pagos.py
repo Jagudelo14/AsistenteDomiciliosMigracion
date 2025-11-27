@@ -1,10 +1,11 @@
 import requests
 import json
 import uuid
+import os
 
 def generar_link_pago():
-    userName = "DACASIGNAVNP33-api"
-    password = "SierraNevada2025*"
+    userName = os.environ.get("userCrediBanco")
+    password = os.environ.get("ClaveCredibanco")
 
     order_number = str(uuid.uuid4()).replace("-", "")[:12]
 

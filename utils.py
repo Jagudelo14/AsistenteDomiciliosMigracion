@@ -18,6 +18,7 @@ import json
 import requests
 import unidecode
 import difflib
+import timedelta
 
 REPLACE_PHRASES = [
     "cambia todo", "borra lo que había", "solo quiero esto", "quita lo anterior",
@@ -1531,4 +1532,28 @@ def obtener_promociones_activas() -> list:
         return promociones_info
     except Exception as e:
         log_message(f"Error al obtener promociones activas {e}", "ERROR")
-        return None
+        return 
+
+def verify_hour_atettion(sender: str, ID_RESTAURANTE: str) -> bool:
+    """Verifica si el mensaje fue enviado dentro del horario de atención."""
+    try:
+        query="""
+            SELECT hora_apertura, hora_cierre
+            FROM public.clientes
+            WHERE idcliente = %s;
+        """
+        params=(ID_RESTAURANTE,)
+        res= execute_query(query, params, fetchone=True)
+        log_message("Iniciando verificación de horario de atención", "INFO")
+        hora_inicio = res[0] if not res or not res[0] else 11
+        hora_fin = res[1] if not res or not res[1] else 22
+        ahora = datetime.utcnow() - timedelta(hours=5)  # Hora Colombia
+        hora_actual = ahora.hour
+        if hora_inicio <= hora_actual < hora_fin:
+            return True
+        else:
+            send_text_response(sender, "Nuestro horario de atención es de 11 AM a 10 PM")
+            return False
+    except Exception as e:
+        log_message(f"Error al verificar horario de atención: {e}", "ERROR")
+        return True
