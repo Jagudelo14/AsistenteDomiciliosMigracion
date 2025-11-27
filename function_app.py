@@ -84,6 +84,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         sender: str = message["from"]
         nombre_cliente: str
         respuesta_bot : str
+        if not verify_hour_atettion(sender):
+            return func.HttpResponse("Fuera de horario de atención", status_code=200)
         if not get_client_database(sender, ID_RESTAURANTE):
             dict_vacio: dict = {}
             nombre_temp: str = handle_create_client(sender, dict_vacio, ID_RESTAURANTE, True)
