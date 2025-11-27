@@ -38,6 +38,18 @@ def wpp(req: func.HttpRequest) -> func.HttpResponse:
         return _process_message(req)
     return func.HttpResponse("Método no permitido", status_code=405)
 
+def verify_hour_atettion(sender: str) -> bool:
+    """Verifica si el mensaje fue enviado dentro del horario de atención."""
+    hora_inicio = 11
+    hora_fin = 22
+    ahora = datetime.utcnow()
+    hora_actual = ahora.hour
+    if hora_inicio <= hora_actual < hora_fin:
+        return True
+    else:
+        send_text_response(sender, "Nuestro horario de atención es de 11 AM a 10 PM")
+        return False
+    
 def _verify_webhook(req: func.HttpRequest) -> func.HttpResponse:
     """Maneja la verificación inicial del webhook de Meta."""
     mode: Optional[str] = req.params.get("hub.mode")
