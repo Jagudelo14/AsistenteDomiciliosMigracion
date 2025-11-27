@@ -1552,7 +1552,7 @@ def verify_hour_atettion(sender: str, ID_RESTAURANTE: str) -> bool:
         if hora_inicio <= hora_actual < hora_fin:
             return True
         else:
-            send_text_response(sender, "Nuestro horario de atención es de 11 AM a 10 PM")
+            send_text_response(sender, f"¡Hola! 👋✨Por ahora estamos fuera de horario 🕐, pero abrimos de nuevo a las {hora_inicio} AM ⏰¡Te esperamos pronto para que vivas una experiencia deliciosa con nosotros! 😋🔥")
             return False
     except Exception as e:
         log_message(f"Error al verificar horario de atención: {e}", "ERROR")

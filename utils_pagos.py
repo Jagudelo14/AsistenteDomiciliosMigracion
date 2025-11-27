@@ -2,12 +2,14 @@ import requests
 import json
 import uuid
 import os
+from utils import log_message
+from utils_database import execute_query
 
 def generar_link_pago():
     userName = os.environ.get("userCrediBanco")
     password = os.environ.get("ClaveCredibanco")
 
-    order_number = str(uuid.uuid4()).replace("-", "")[:12]
+    order_number = str(uuid.uuid4()).replace("-", "")[:12] #se puede hcaer la generación del número de orden como se desee
 
     # Endpoint UAT Credibanco
     url = "https://ecouat.credibanco.com/payment/rest/register.do"
@@ -29,24 +31,17 @@ def generar_link_pago():
     response = requests.post(url, data=payload)
     data = response.json()
 
-    # Si hubo error
     if data.get("errorCode") != 0:
         print("❌ Error al generar el link de pago:")
         print(data)
         return None
 
-    # Link para redirigir al usuario
     form_url = data.get("formUrl")
     order_id = data.get("orderId")
 
-    print("✔️ Link generado correctamente:")
-    print("OrderId:", order_id)
-    print("Link de pago:", form_url)
+    return form_url, order_id
 
-    return form_url
-#generar_link_pago()
-
-def validar_pago(order_id):
+def validar_pago(order_id: str):
     url = "https://ecouat.credibanco.com/payment/rest/getOrderStatusExtended.do"
 
     payload = {
@@ -89,4 +84,17 @@ def validar_pago(order_id):
     print("📬 Resultado de la validación:", info)
     return info
 
-validar_pago("2a5a8511-4032-7cbd-bb45-0ce200c265f7")
+def guardar_id_pago_en_db(order_id: str, codigo_unico: str) -> bool:
+    try:
+        query="""
+            UPDATE public.pedidos
+            SET id_pago = '%s'
+            WHERE codigo_unico = '%s';
+        """
+        params=(order_id, codigo_unico)
+        execute_query(query % params)
+        log_message(f"Pago guardado en la base de datos: {order_id})", "INFO")
+        return True
+    except Exception as e:
+        log_message(f"Error guardando el pago en la base de datos:{e}", "ERROR")
+        return False
