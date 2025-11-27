@@ -693,7 +693,7 @@ No incluyas texto adicional fuera del JSON.
         )
         
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-5.1",
             messages=[
                 {"role": "system", "content": "Eres un generador de saludos que adapta su tono al del cliente."},
                 {"role": "user", "content": prompt}
