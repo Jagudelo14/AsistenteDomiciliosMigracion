@@ -698,7 +698,7 @@ No incluyas texto adicional fuera del JSON.
                 {"role": "system", "content": "Eres un generador de saludos que adapta su tono al del cliente."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=350,
+#            max_tokens=350,
             temperature=0.85
         )
 
