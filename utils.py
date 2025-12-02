@@ -11,14 +11,12 @@ import ast
 from utils_database import execute_query, execute_query_columns
 import inspect
 import traceback
-from typing import Tuple, Dict, Any, List
+from typing import Dict, Any, List
 from datetime import datetime, date, time
 from zoneinfo import ZoneInfo
 import json
 import requests
-import unidecode
 import difflib
-import timedelta
 
 REPLACE_PHRASES = [
     "cambia todo", "borra lo que había", "solo quiero esto", "quita lo anterior",
@@ -1065,7 +1063,7 @@ def actualizar_total_productos(sender: str, codigo_unico: str, nuevo_total: floa
             RETURNING idpedido, total_productos, id_promocion;
         """
         params = (nuevo_total, codigo_unico, sender)
-        res_promo = execute_query(query, params, fetchone=True)
+        #res_promo = execute_query(query, params, fetchone=True)
         query = """
             UPDATE pedidos
             SET total_productos = %s,
@@ -1138,7 +1136,7 @@ def actualizar_medio_pago(sender: str, codigo_unico: str, metodo_pago: str) -> d
         return {"actualizado": False, "error": str(e)}
 
 def obtener_pedido_por_codigo(codigo_unico: str) -> dict:
-    q = "SELECT idpedido, producto, total_productos, fecha, hora, id_whatsapp, es_temporal FROM pedidos WHERE codigo_unico = %s"
+    q = "SELECT idpedido, producto, total_productos, fecha, hora, id_whatsapp, es_temporal,total_final FROM pedidos WHERE codigo_unico = %s"
     res = execute_query(q, (codigo_unico,), fetchone=True)
     if not res:
         return {}
@@ -1149,7 +1147,9 @@ def obtener_pedido_por_codigo(codigo_unico: str) -> dict:
         "fecha": res[3],
         "hora": res[4],
         "id_whatsapp": res[5],
-        "es_temporal": res[6]
+        "es_temporal": res[6],
+        "es_promocion": res[7],
+        "total_final": float(res[8]) if res[8] is not None else 0.0
     }
 
 # Helper: obtener ordenes existentes por idpedido (cada fila representa un item)
@@ -1428,7 +1428,7 @@ def obtener_pedido_pendiente_reciente(sender: str) -> dict:
                 "existe": False,
                 "msg": "No hay pedidos pendientes recientes."
             }
-        log_message(f"Finaliza obtener pedido pendiente reciente sin lios", "INFO")
+        log_message("Finaliza obtener pedido pendiente reciente sin lios", "INFO")
         return {
             "existe": True,
             "idpedido": res[0],
@@ -1512,7 +1512,7 @@ def actualizar_costos_y_tiempos_pedido(
 
 def obtener_promociones_activas() -> list:
     try:
-        log_message(f"Inicia obtener promociones activas", "INFO")
+        log_message("Inicia obtener promociones activas", "INFO")
         promos_rows, promo_cols = execute_query_columns(
             """
             SELECT *
@@ -1547,7 +1547,7 @@ def verify_hour_atettion(sender: str, ID_RESTAURANTE: str) -> bool:
         log_message("Iniciando verificación de horario de atención", "INFO")
         hora_inicio = res[0] if not res or not res[0] else 11
         hora_fin = res[1] if not res or not res[1] else 22
-        ahora = datetime.utcnow() - timedelta(hours=5)  # Hora Colombia
+        ahora = datetime.now(ZoneInfo("America/Bogota"))  # Obtener hora de Bogotá de forma timezone-aware
         hora_actual = ahora.hour
         if hora_inicio <= hora_actual < hora_fin:
             return True

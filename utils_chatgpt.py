@@ -2347,6 +2347,7 @@ Instrucciones del mensaje:
 - No inventes información adicional.
 - Tono amable, profesional y cercano.
 - Siempre di el codigo del pedido, valor del domicilio y total del pedido
+- Di que estara en camino una vez se confirme el pago.
 """
         client = OpenAI()
         response = client.chat.completions.create(

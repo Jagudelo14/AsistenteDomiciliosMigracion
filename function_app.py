@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 import os
 import json
-from utils import obtener_intencion_futura_observaciones, send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta,verify_hour_atettion
+from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta,verify_hour_atettion
 from utils_chatgpt import get_classifier, get_openai_key
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta
@@ -75,7 +75,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         sender: str = message["from"]
         nombre_cliente: str
         respuesta_bot : str
-        if not verify_hour_atettion(sender):
+        if not verify_hour_atettion(sender, ID_RESTAURANTE):
             return func.HttpResponse("Fuera de horario de atención", status_code=200)
         if not get_client_database(sender, ID_RESTAURANTE):
             dict_vacio: dict = {}
@@ -89,7 +89,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 audio_id = message["audio"]["id"]
                 mime_type = message["audio"]["mime_type"]
                 logging.info(f"Audio recibido de {sender}: ID {audio_id}, Tipo {mime_type}")
-                log_message(f"Llega mensaje de audio", "INFO")
+                log_message("Llega mensaje de audio", "INFO")
                 headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
                 media_url = f"https://graph.facebook.com/v17.0/{audio_id}?fields=url"
                 response = requests.get(media_url, headers=headers)
@@ -111,7 +111,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             else:
                 send_text_response(sender,"¡Hola! Parece que eres un nuevo cliente. Por favor, envíame tu *nombre completo* para poder atenderte mejor.\nEjemplo: *Juan Pérez*")
                 return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
-            log_message(f"Empieza a clasificar cliente nuevo", "INFO")
+            log_message("Empieza a clasificar cliente nuevo", "INFO")
             if text:
                 # Clasificación con modelo OpenAI
                 classification: str
@@ -130,7 +130,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                         manejar_dialogo(
                             sender=sender,
                             clasificacion_mensaje=classification,
-                            nombre_cliente=nombre_cliente,
+                            nombre_cliente=nombre_temp,
                             entidades_text=entities_text,
                             pregunta_usuario=text,
                             bandera_externo=False,
@@ -150,7 +150,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     logging.warning("⚠️ Mensaje recibido sin texto.")
                     return func.HttpResponse("Mensaje vacío", status_code=200)
             elif message["type"] == "audio":
-                    log_message(f"Llega mensaje de audio", "INFO")
+                    log_message("Llega mensaje de audio", "INFO")
                     audio_id = message["audio"]["id"]
                     mime_type = message["audio"]["mime_type"]
                     logging.info(f"Audio recibido de {sender}: ID {audio_id}, Tipo {mime_type}")
@@ -173,14 +173,35 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     logging.info(f"Transcripción recibida: {text}")
                     log_message(f"Mensaje transcrito {text}", "INFO")
             elif tipo_general == "location":
-                    latitude_temp = message["location"]["latitude"]
-                    longitude_temp = message["location"]["longitude"]
-                    log_message(f"Ubicación recibida: lat {latitude_temp}, lon {longitude_temp}", "INFO")
-                    orquestador_ubicacion_exacta(sender, latitude_temp, longitude_temp, ID_RESTAURANTE, nombre_cliente)
+                latitude_temp = message["location"]["latitude"]
+                longitude_temp = message["location"]["longitude"]
+                log_message(f"Ubicación recibida: lat {latitude_temp}, lon {longitude_temp}", "INFO")
+                orquestador_ubicacion_exacta(sender, latitude_temp, longitude_temp, ID_RESTAURANTE, nombre_cliente)
+            elif tipo_general == "image":
+                # No procesamos el contenido de la imagen; la tratamos como comprobante
+                image_id = message["image"].get("id")
+                mime_type = message["image"].get("mime_type", "")
+                log_message(f"Imagen recibida de {sender}: ID {image_id}, Tipo {mime_type}", "INFO")
+                # Guardar un registro sencillo en la base y clasificar como "validacion_pago"
+                save_message_to_db(sender, "[imagen recibida]", "validacion_pago", "image", "{}", tipo_general, ID_RESTAURANTE)
+                guardar_clasificacion_intencion(sender, "validacion_pago", "sin_resolver", "usuario", "[imagen recibida]", "", "image", "{}")
+                # Llamar al manejador de diálogo como si el usuario pidiera validar pago
+                manejar_dialogo(
+                    sender=sender,
+                    clasificacion_mensaje="validacion_pago",
+                    nombre_cliente=nombre_cliente,
+                    entidades_text={},
+                    pregunta_usuario="[imagen_pago]",
+                    bandera_externo=False,
+                    id_ultima_intencion="",
+                    nombre_local="Sierra Nevada",
+                    type_text = "image"
+                )
+                return func.HttpResponse("EVENT_RECEIVED", status_code=200)
             else:
-                    logging.warning(f"⚠️ Tipo de mensaje no soportado: {tipo_general}")
-                    send_text_response(sender, "Por el momento solo puedo procesar mensajes de texto.")
-                    return func.HttpResponse("Tipo de mensaje no soportado", status_code=200)
+                logging.warning(f"⚠️ Tipo de mensaje no soportado: {tipo_general}")
+                send_text_response(sender, "Por el momento solo puedo procesar mensajes de texto.")
+                return func.HttpResponse("Tipo de mensaje no soportado", status_code=200)
                 # Clasificación con modelo OpenAI
             log_message(f"Empieza a clasificar con text {text}", "INFO")    
             if text:

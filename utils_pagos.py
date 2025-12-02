@@ -2,44 +2,68 @@ import requests
 import json
 import uuid
 import os
+import traceback
 from utils import log_message
 from utils_database import execute_query
 
-def generar_link_pago():
-    userName = os.environ.get("userCrediBanco")
-    password = os.environ.get("ClaveCredibanco")
+def generar_link_pago(amount: int):
+    try:
+        userName = os.environ.get("userCrediBanco")
+        password = os.environ.get("ClaveCredibanco")
+        if not userName or not password:
+            log_message("Credibanco: faltan credenciales en las variables de entorno", "ERROR")
+            return None
 
-    order_number = str(uuid.uuid4()).replace("-", "")[:12] #se puede hcaer la generación del número de orden como se desee
+        order_number = str(uuid.uuid4()).replace("-", "")[:12]
+        url = "https://ecouat.credibanco.com/payment/rest/register.do"
+        payload = {
+            "userName": userName,
+            "password": password,
+            "orderNumber": order_number,
+            "amount": amount,
+            "returnUrl": "https://tu-sitio.com/pago-exitoso",
+            "failUrl": "https://tu-sitio.com/pago-fallido",
+            "currency": 170,
+            "jsonParams": json.dumps({
+                "installments": "1",
+                "IVA.amount": "0"
+            })
+        }
+        # Log payload salvo datos sensibles (no imprimir password)
+        safe_payload = dict(payload)
+        if "password" in safe_payload:
+            safe_payload["password"] = "****"
+        log_message(f"[GenerarLinkPago] Llamando endpoint Credibanco. url={url} payload={json.dumps(safe_payload)}", "INFO")
 
-    # Endpoint UAT Credibanco
-    url = "https://ecouat.credibanco.com/payment/rest/register.do"
+        response = requests.post(url, data=payload, timeout=15)
+        log_message(f"[GenerarLinkPago] status_code={getattr(response, 'status_code', 'no-status')}", "INFO")
+        try:
+            data = response.json()
+            log_message(f"[GenerarLinkPago] response_json={json.dumps(data)}", "INFO")
+        except Exception:
+            log_message(f"[GenerarLinkPago] No se pudo parsear JSON de la respuesta. text={response.text}", "ERROR")
+            return None
 
-    payload = {
-        "userName": userName,
-        "password": password,
-        "orderNumber": order_number,
-        "amount": 10000,  # en centavos (100.00 COP)
-        "returnUrl": "https://tu-sitio.com/pago-exitoso", #urls a donde retorna
-        "failUrl": "https://tu-sitio.com/pago-fallido",
-        "currency": 170,  # 170 = COP
-        "jsonParams": json.dumps({
-            "installments": "1",
-            "IVA.amount": "0"
-        })
-    }
+        if str(data.get("errorCode", "")) not in ["0", ""]:
+            log_message(f"[GenerarLinkPago] Credibanco devolvió error. errorCode={data.get('errorCode')} detalle={data}", "ERROR")
+            return None
 
-    response = requests.post(url, data=payload)
-    data = response.json()
+        form_url = data.get("formUrl")
+        order_id = data.get("orderId")
+        if not form_url or not order_id:
+            log_message(f"[GenerarLinkPago] Respuesta incompleta de Credibanco. data={data}", "ERROR")
+            return None
 
-    if data.get("errorCode") != 0:
-        print("❌ Error al generar el link de pago:")
-        print(data)
+        log_message(f"[GenerarLinkPago] Link generado correctamente. order_id={order_id} form_url_len={len(form_url)}", "INFO")
+        return form_url, order_id
+    except requests.exceptions.RequestException as re:
+        log_message(f"[GenerarLinkPago] RequestException: {re}", "ERROR")
+        log_message(traceback.format_exc(), "ERROR")
         return None
-
-    form_url = data.get("formUrl")
-    order_id = data.get("orderId")
-
-    return form_url, order_id
+    except Exception as e:
+        log_message(f"[GenerarLinkPago] Excepción generando link: {e}", "ERROR")
+        log_message(traceback.format_exc(), "ERROR")
+        return None
 
 def validar_pago(order_id: str):
     url = "https://ecouat.credibanco.com/payment/rest/getOrderStatusExtended.do"
@@ -86,15 +110,16 @@ def validar_pago(order_id: str):
 
 def guardar_id_pago_en_db(order_id: str, codigo_unico: str) -> bool:
     try:
-        query="""
+        query = """
             UPDATE public.pedidos
-            SET id_pago = '%s'
-            WHERE codigo_unico = '%s';
+            SET id_pago = %s
+            WHERE codigo_unico = %s;
         """
-        params=(order_id, codigo_unico)
-        execute_query(query % params)
-        log_message(f"Pago guardado en la base de datos: {order_id})", "INFO")
+        params = (order_id, codigo_unico)
+        execute_query(query, params)
+        log_message(f"Pago guardado en la base de datos: {order_id}", "INFO")
         return True
     except Exception as e:
         log_message(f"Error guardando el pago en la base de datos:{e}", "ERROR")
+        log_message(traceback.format_exc(), "ERROR")
         return False
