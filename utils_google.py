@@ -3,7 +3,7 @@
 
 import logging
 import googlemaps
-import math
+from googlemaps.exceptions import ApiError
 from utils import borrar_intencion_futura, guardar_intencion_futura, log_message, obtener_intencion_futura_observaciones, obtener_pedido_pendiente_reciente, point_in_polygon, send_text_response
 from utils_chatgpt import solicitar_confirmacion_direccion
 from utils_database import execute_query
@@ -18,7 +18,7 @@ def obtener_cliente_google_maps() -> googlemaps:
     try:
         """Crea el cliente de google maps"""
         gmaps: googlemaps = googlemaps.Client(key=API_KEY_GOOGLE_MAPS)
-        log_message(f"Crea cliente gmaps sin problema", "INFO")
+        log_message("Crea cliente gmaps sin problema", "INFO")
         return gmaps
     except Exception as e:
         log_message(f"Ocurrió un error al crear cliente, {e}", "ERROR")
@@ -106,7 +106,6 @@ def calcular_tiempo_pedido(tiempo_domicilio: str, id_sede: str) -> int:
     try:
         """Se calcula el tiempo dependiendo la cantidad de pedidos con base al tiempo distancia entre cliente y sede"""
         log_message(f"Se inicia tiempo de pedido con tiempo de envio de {tiempo_domicilio}", "INFO")
-        pedidos: int = 3 # ---> implementar función de traer cantidad de pedidos en cola por sede
         tiempo_domicilio = tiempo_domicilio.lower()
         minutos_totales: int = 0
         if "hora" in tiempo_domicilio:
@@ -231,12 +230,21 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
 
         logging.info(f"destinos {destinos}")
 
-        resultado = gmaps.distance_matrix(
-            origins=[origen],
-            destinations=destinos,
-            mode="driving",
-            language="es"
-        )
+        try:
+            resultado = gmaps.distance_matrix(
+                origins=[origen],
+                destinations=destinos,
+                mode="driving",
+                language="es"
+            )
+        except ApiError as ae:
+            log_message(f"Google Maps ApiError al calcular distancia para sedes: {ae}", "ERROR")
+            logging.error(f"Google Maps ApiError: {ae}")
+            return None
+        except Exception as ex:
+            log_message(f"Error llamando Google Maps distance_matrix para sedes: {ex}", "ERROR")
+            logging.error(f"Error calling distance_matrix: {ex}")
+            return None
 
         # Direcciones humanas devueltas por Google
         direccion_origen = resultado.get("origin_addresses", [""])[0]
@@ -288,7 +296,7 @@ def set_sede_cliente(id_sede: str, numero_cliente, id_restaurante: str) -> bool:
             SET id_sede = %s
             WHERE telefono = %s AND id_restaurante = %s;
         """, (id_sede, numero_cliente, id_restaurante))
-        log_message(f"Sede asignada correctamente.", "INFO")
+        log_message("Sede asignada correctamente.", "INFO")
         return True
     except Exception as e:
         log_message(f"Error al asignar sede al cliente: {e}", "ERROR")
@@ -303,7 +311,7 @@ def set_lat_lon(numero_cliente: str, latitud_client: float, longitud_client: flo
             SET latitud = %s, longitud = %s
             WHERE telefono = %s AND id_restaurante = %s;
         """, (latitud_client, longitud_client, numero_cliente, id_restaurante))
-        log_message(f"Sede asignada correctamente.", "INFO")
+        log_message("Sede asignada correctamente.", "INFO")
         return True
     except Exception as e:
         log_message(f"Error al asignar sede al cliente: {e}", "ERROR")
@@ -318,7 +326,7 @@ def set_direccion_cliente(numero_cliente: str, direccion: str, id_restaurante: s
             SET direccion_google = %s
             WHERE telefono = %s AND id_restaurante = %s;
         """, (direccion, numero_cliente, id_restaurante))
-        log_message(f"Dirección actualizada correctamente.", "INFO")
+        log_message("Dirección actualizada correctamente.", "INFO")
         return True
     except Exception as e:
         log_message(f"Error al actualizar dirección del cliente: {e}", "ERROR")
@@ -338,10 +346,21 @@ def calcular_distancia_y_tiempo(origen: tuple, destino: tuple, numero_telefono: 
         """"""
         log_message(f"Calculando distancia entre {origen} y {destino}", "INFO")
         gmaps = obtener_cliente_google_maps()
-        resultado = gmaps.distance_matrix(origins=[origen],
-                                   destinations=[destino],
-                                   mode='driving',
-                                   language='es')
+        try:
+            resultado = gmaps.distance_matrix(origins=[origen],
+                                       destinations=[destino],
+                                       mode='driving',
+                                       language='es')
+        except ApiError as ae:
+            # Errores de autorización/servicio de Google Maps (REQUEST_DENIED, etc.)
+            log_message(f"Google Maps ApiError al calcular distancia: {ae}", "ERROR")
+            logging.error(f"Google Maps ApiError: {ae}")
+            return None
+        except Exception as ex:
+            # Otros errores de red/cliente
+            log_message(f"Error llamando Google Maps distance_matrix: {ex}", "ERROR")
+            logging.error(f"Error calling distance_matrix: {ex}")
+            return None
         duracion = resultado['rows'][0]['elements'][0]['duration']['text']
         direccion_envio = resultado['destination_addresses'][0]
         if not set_direccion_cliente(numero_telefono, direccion_envio, id_restaurante):
@@ -351,7 +370,7 @@ def calcular_distancia_y_tiempo(origen: tuple, destino: tuple, numero_telefono: 
         duracion = calcular_tiempo_pedido(duracion, id_sede)
         tiempo_pedido: str = formatear_tiempo_entrega(duracion)
         valor = calcular_valor(distancia_metros)
-        log_message(f"Termina de calcular distancia y tiempo", "INFO")
+        log_message("Termina de calcular distancia y tiempo", "INFO")
         return valor, tiempo_pedido, float(distancia_metros), direccion_envio
     except Exception as e:
         log_message(f"Error en la funcion calcular distancia y tiempo {e}", "ERROR")
@@ -360,7 +379,7 @@ def calcular_distancia_y_tiempo(origen: tuple, destino: tuple, numero_telefono: 
 
 def obtener_valores_sede(id_sede: str) -> tuple:
     try:
-        log_message(f"Empieza obtener valores sede", "INFO")
+        log_message("Empieza obtener valores sede", "INFO")
         sede_info = execute_query("""
                 SELECT latitud, longitud
                 FROM sedes
@@ -372,7 +391,7 @@ def obtener_valores_sede(id_sede: str) -> tuple:
         lat_sede, lon_sede = sede_info
         return lat_sede, lon_sede
     except Exception as e:
-        log_message(f"Error en obtener valores sede", "ERROR")
+        log_message("Error en obtener valores sede", "ERROR")
         raise e
 
 def orquestador_ubicacion_exacta(sender: str, latitud_cliente: float, longitud_cliente: float, id_restaurante: str, nombre_cliente: str):
@@ -416,6 +435,10 @@ def orquestador_tiempo_y_valor_envio(latitud_cliente: float, longitud_cliente: f
             id_restaurante=id_restaurante,
             id_sede=id_sede
         )
+        if not resultado:
+            log_message(f"No se pudo calcular distancia/tiempo entre sede {id_sede} y cliente ({latitud_cliente},{longitud_cliente}). Devolviendo valores por defecto.", "WARN")
+            # Devolver valores por defecto para evitar que los subflujos fallen al desestructurar
+            return 0, "0 min", 0.0, ""
         return resultado
     except Exception as e:
         log_message(f"Ocurrió un error en orquestador tiempo y valor envio: {e}", "ERROR")

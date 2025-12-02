@@ -7,6 +7,8 @@ import os
 import random
 import logging
 from typing import Any, Dict
+import re
+
 
 # --- IMPORTS INTERNOS --- #
 from utils import (
@@ -46,6 +48,7 @@ from utils import (
 from utils_chatgpt import actualizar_pedido_con_mensaje, actualizar_pedido_con_mensaje_modificacion, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_confirmacion_pedido, generar_mensaje_invitar_pago, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_modo_pago, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida
 from utils_database import execute_query, execute_query_columns
 from utils_google import calcular_tiempo_pedido, formatear_tiempo_entrega, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
+from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
 respuestas_no_relacionadas = [
@@ -120,6 +123,35 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
         if not bandera_revision:
             entidades_text = normalizar_entities_items(entidades_text)
             pedido_dict = mapear_pedido_al_menu(entidades_text, items_menu)
+
+        # --- Intento rápido: si el usuario respondió con "cantidad + producto"
+        # y el pedido sigue incompleto, intentar un match directo para no quedar en loop.
+        if not pedido_dict.get("order_complete", False):
+            try:
+                m = re.match(r'^\s*(\d+)\s+(.+)$', pregunta_usuario.strip(), flags=re.I)
+                if m:
+                    qty = int(m.group(1))
+                    prod_text = m.group(2).strip()
+                    # usar match_item_to_menu para localizar producto
+                    match = match_item_to_menu(prod_text, items_menu)
+                    if match.get("found"):
+                        # construir pedido mínimo aceptable
+                        single_item = {
+                            "requested": {"producto": prod_text},
+                            "status": "found",
+                            "matched": {"name": match["name"], "price": match["price"], "id": None},
+                            "candidates": [],
+                            "modifiers_applied": [],
+                        }
+                        pedido_dict = {
+                            "order_complete": True,
+                            "items": [{**single_item, "cantidad": qty}],
+                            "total_price": round(match["price"] * qty, 2)
+                        }
+                        log_message(f"[SubflujoSolicitudPedido] Quick-match aplicado: {qty}x {match['name']} -> pedido auto-completado", "INFO")
+            except Exception:
+                logging.exception("Quick-match fallo; continúa flujo normal")
+        
         if not pedido_dict.get("order_complete", False):
             no_completo: dict = pedido_incompleto_dynamic(pregunta_usuario, items_menu, str(pedido_dict))
             send_text_response(sender, no_completo.get("mensaje"))
@@ -335,10 +367,10 @@ def subflujo_confirmacion_pedido(sender: str, nombre_cliente: str) -> Dict[str, 
         if total_pedido > 200000:
             numero_admin: str = os.getenv("NUMERO_ADMIN")
             send_text_response(numero_admin, f"Atención: Pedido grande confirmado por {nombre_cliente} ({sender}) por un total de {total_pedido}. Código único: {codigo_unico}.")
-            send_text_response(sender, f"Un asesor se comunicará contigo muy pronto.")
-        mensaje_medio_pago: dict = solicitar_medio_pago(nombre_cliente, codigo_unico, "Sierra Nevada", pedido_temp.get("producto", ""))
-        send_text_response(sender, mensaje_medio_pago.get("mensaje"))
-        guardar_intencion_futura(sender, "medio_pago", codigo_unico)
+            send_text_response(sender, "Un asesor se comunicará contigo muy pronto.")
+        mensaje_metodo_recogida: dict = solicitar_metodo_recogida(nombre_cliente, codigo_unico, "Sierra Nevada", pedido_temp.get("producto", ""))
+        send_text_response(sender, mensaje_metodo_recogida.get("mensaje"))
+        guardar_intencion_futura(sender, "metodo_recogida", codigo_unico)
         log_message(f'Pedido {confirmar_dict.get("codigo_unico")} confirmado correctamente para {sender}.', 'INFO')
     except Exception as e:
         log_message(f'Error en <SubflujoConfirmacionPedido>: {e}.', 'ERROR')
@@ -404,6 +436,64 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         codigo_unico: str = obtener_intencion_futura_observaciones(sender)
         medio_pago_real: str = mapear_modo_pago(respuesta_usuario)
         datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
+        try:
+            query = """
+                SELECT total_productos
+                FROM public.pedidos
+                WHERE codigo_unico = %s;"""
+            params = (codigo_unico,)
+            # Pedimos también las columnas para mapear filas a dicts si es necesario
+            result = execute_query_columns(query, params, fetchone=False, return_columns=True)
+            if isinstance(result, tuple) and len(result) == 2:
+                data, cols = result
+            else:
+                data = result
+                cols = None
+
+            if not data:
+                send_text_response(sender, "Lo siento nuestra plataforma de pagos esta fallando, por favor intenta más tarde o elige otro medio de pago.")
+                return
+
+            first_row = data[0]
+            if isinstance(first_row, dict):
+                monto_raw = first_row.get('total_productos')
+            elif cols:
+                row = dict(zip(cols, first_row))
+                monto_raw = row.get('total_productos')
+            else:
+                # fallback: tomar la primera columna
+                monto_raw = first_row[0] if isinstance(first_row, (list, tuple)) and len(first_row) > 0 else first_row
+
+            try:
+                monto = int(round(float(monto_raw))) if monto_raw is not None else 0
+            except Exception:
+                monto = 0
+
+            log_message(f"[SubflujoMedioPago] Generando link de pago para {sender} por monto {monto}.", "INFO")
+            monto = float(monto_raw)            # por ejemplo 31900.0
+            monto_cents = int(round(monto * 100))  # 3190000
+            pago = generar_link_pago(monto_cents)
+            if pago is None:
+                send_text_response(sender, "No fue posible generar el link de pago ahora mismo. Intenta más tarde o elige otro medio.")
+                return
+            form_url, order_id = pago
+            # Guardar referencia del pago en la BD (si falla, informar pero continuar)
+            try:
+                guardar_id_pago_en_db(order_id, codigo_unico)
+            except Exception as e:
+                log_message(f"Advertencia: no se pudo guardar id_pago en DB: {e}", "WARN")
+            # Enviar link al cliente con instrucciones claras
+            mensaje_pago = (
+                f"¡Perfecto {nombre_cliente}! Para completar tu pedido ({codigo_unico}) puedes pagar aquí:\n{form_url}\n\n"
+                "Una vez realices el pago, por favor envíame el comprobante o espera la confirmación automática."
+            )
+            send_text_response(sender, mensaje_pago)
+            guardar_intencion_futura(sender, "esperando_confirmacion_pago", codigo_unico)
+            return
+        except Exception as e:
+            log_message(f"Error generando/enviando link de pago: {e}", "ERROR")
+            send_text_response(sender, "Hubo un problema generando el link de pago. Puedes intentar pagar en el local o probar otro método.")
+            return
         mensaje_metodo_recogida: dict = solicitar_metodo_recogida(nombre_cliente, codigo_unico, "Sierra Nevada", datos_actualizados.get("producto", ""))
         send_text_response(sender, mensaje_metodo_recogida.get("mensaje"))
         guardar_intencion_futura(sender, "metodo_recogida", codigo_unico)
@@ -480,6 +570,39 @@ def subflujo_confirmar_direccion(sender: str, nombre_cliente: str) -> None:
             return
         mensaje_pagar = generar_mensaje_invitar_pago(nombre_cliente, valor, duracion, distancia, direccion_envio, codigo_unico, datos_actualizados.get("total_final"))
         send_text_response(sender, mensaje_pagar)
+
+        # Intentar generar link de pago inmediato usando total_final; si falla,
+        # caemos al comportamiento anterior (guardar intención para invitar a pagar).
+        total_final = datos_actualizados.get("total_final")
+        if total_final is None:
+            try:
+                pedido_tmp = obtener_pedido_por_codigo(sender, codigo_unico)
+                total_final = pedido_tmp.get("total_final") if isinstance(pedido_tmp, dict) else None
+            except Exception:
+                total_final = None
+
+        try:
+            monto_val = float(total_final) if total_final is not None else 0.0
+            monto_cents = int(round(monto_val * 100))
+            pago = generar_link_pago(monto_cents)
+            if pago:
+                form_url, order_id = pago
+                try:
+                    guardar_id_pago_en_db(order_id, codigo_unico)
+                except Exception as e:
+                    log_message(f"Advertencia: no se pudo guardar id_pago en DB: {e}", "WARN")
+                mensaje_link = (
+                    f"¡Perfecto {nombre_cliente}! Puedes completar tu pago aquí:\n{form_url}\n\n"
+                    "Una vez realices el pago, por favor envíame el comprobante o espera la confirmación automática."
+                )
+                send_text_response(sender, mensaje_link)
+                guardar_intencion_futura(sender, "esperando_confirmacion_pago", codigo_unico)
+                log_message(f'Valor y tiempo de envío calculados correctamente y link enviado a {sender}.', 'INFO')
+                return
+        except Exception as e:
+            log_message(f"Advertencia: no se pudo generar link de pago inmediato: {e}", "WARN")
+
+        # Si no se logró generar el link, mantener el flujo de invitación a pagar
         guardar_intencion_futura(sender, "pagar_pedido", codigo_unico)
         log_message(f'Valor y tiempo de envío calculados correctamente para {sender}.', 'INFO')
     except Exception as e:
@@ -488,7 +611,7 @@ def subflujo_confirmar_direccion(sender: str, nombre_cliente: str) -> None:
 
 def subflujo_recoger_restaurante(sender: str, nombre_cliente: str):
     try:
-        log_message(f"Empieza subflujo recoger restaurante", "INFO")
+        log_message("Empieza subflujo recoger restaurante", "INFO")
         mensaje_sede: str = generar_mensaje_seleccion_sede(nombre_cliente)
         send_text_response(sender, mensaje_sede)
         codigo_unico = obtener_intencion_futura_observaciones(sender)
@@ -499,7 +622,7 @@ def subflujo_recoger_restaurante(sender: str, nombre_cliente: str):
 
 def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
     try:
-        log_message(f"Empieza subflujo eleccion sede", "INFO")
+        log_message("Empieza subflujo eleccion sede", "INFO")
         codigo_unico: str = obtener_intencion_futura_observaciones(sender)
         datos_mapeo_sede: dict = mapear_sede_cliente(texto_cliente)
         if datos_mapeo_sede.get("error"):
@@ -518,7 +641,7 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
         tiempo_pedido: str = formatear_tiempo_entrega(duracion)
         datos_actualizados: dict = actualizar_costos_y_tiempos_pedido(sender, codigo_unico, 0, tiempo_pedido, 0)
         if not datos_actualizados.get("actualizado"):
-            send_text_response(sender, f"Lo siento, no pude confirmar tu pedido")
+            send_text_response(sender, "Lo siento, no pude confirmar tu pedido")
             return
         valor_ultimo = datos_actualizados.get("total_final")
         mensaje = generar_mensaje_recogida_invitar_pago(
@@ -530,9 +653,44 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
             codigo_pedido=codigo_unico
         )
         send_text_response(sender, mensaje)
-        log_message(f"Termina subflujo eleccion sede", "INFO")
+        log_message("Termina subflujo eleccion sede", "INFO")
     except Exception as e:
         log_message(f"Error en subflujo eleccion sede {e}", "ERROR")
+        raise e
+
+def subflujo_verificación_pago(sender: str, nombre_cliente: str, respuesta_usuario: str) -> None:
+    try:
+        log_message(f'Iniciando función <SubflujoVerificacionPago> para {sender}.', 'INFO')
+        codigo_unico: str = obtener_intencion_futura_observaciones(sender)
+        query="""
+            SELECT id_pago
+            FROM public.pedidos
+            WHERE codigo_unico = %s;"""
+        params=(codigo_unico,)
+        order_row = execute_query(query, params, fetchone=True)
+
+        # execute_query devuelve una tupla/row; extraer el valor si es necesario
+        order_id = None
+        if order_row is None:
+            order_id = None
+        elif isinstance(order_row, (list, tuple)):
+            order_id = order_row[0]
+        else:
+            order_id = order_row
+
+        if not order_id:
+            send_text_response(sender, f"Hola {nombre_cliente}, no encontramos un un pago asociado a tu pedido {codigo_unico}.")
+            return
+
+        resultado_validacion = validar_pago(order_id)
+        # `validar_pago` devuelve un dict con 'resultado' ('aprobado'|'pendiente'|'rechazado')
+        if isinstance(resultado_validacion, dict) and resultado_validacion.get("resultado") == "aprobado":
+            send_text_response(sender, f"¡Gracias {nombre_cliente}! Hemos confirmado el pago de tu pedido {codigo_unico}. Estamos preparando todo para ti.")
+            borrar_intencion_futura(sender)
+        else:
+            send_text_response(sender, f"Hola {nombre_cliente}, aún no hemos recibido la confirmación de tu pago para el pedido {codigo_unico}. Por favor, verifica tu pago o intenta nuevamente.")
+    except Exception as e:
+        log_message(f'Error en <SubflujoVerificacionPago>: {e}.', 'ERROR')
         raise e
 
 # --- ORQUESTADOR DE SUBFLUJOS --- #
@@ -577,8 +735,17 @@ def orquestador_subflujos(
             subflujo_confirmacion_pedido(sender, nombre_cliente)
         elif clasificacion_mensaje == "consulta_pedido":
             subflujo_consulta_pedido(sender, nombre_cliente, entidades_text, pregunta_usuario)
-        elif clasificacion_mensaje == "validacion_pago" and obtener_intencion_futura(sender) == "medio_pago":
-            subflujo_medio_pago(sender, nombre_cliente, pregunta_usuario)
+        elif clasificacion_mensaje == "validacion_pago":
+            intent_futura = obtener_intencion_futura(sender)
+            # Si estamos en el paso de elegir medio de pago, procesar selección
+            if intent_futura == "medio_pago":
+                subflujo_medio_pago(sender, nombre_cliente, pregunta_usuario)
+            # Si ya se generó un link y estamos esperando confirmación, verificar pago
+            elif intent_futura in ("esperando_confirmacion_pago", "pagar_pedido"):
+                subflujo_verificación_pago(sender, nombre_cliente, pregunta_usuario)
+            else:
+                # Fallback: intentar verificar el pago por si el usuario envió comprobante
+                subflujo_verificación_pago(sender, nombre_cliente, pregunta_usuario)
         elif (clasificacion_mensaje == "modificacion_pedido" or clasificacion_mensaje == "continuacion_pedido" or clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "solicitud_pedido") and obtener_intencion_futura(sender) == "confirmacion_modificacion_pedido":
             subflujo_modificacion_pedido(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "confirmacion_modificacion_pedido":
@@ -593,6 +760,10 @@ def orquestador_subflujos(
             subflujo_recoger_restaurante(sender, nombre_cliente)
         elif (clasificacion_mensaje == "direccion" or clasificacion_mensaje == "consulta_menu") and obtener_intencion_futura(sender) == "eleccion_sede":
             subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
+        elif clasificacion_mensaje == "esperando_confirmacion_pago":
+            subflujo_verificación_pago(sender, nombre_cliente, pregunta_usuario)
+        elif (clasificacion_mensaje == "direccion") and obtener_intencion_futura(sender) == "primera_direccion_domicilio":
+            subflujo_confirmar_direccion(sender, nombre_cliente)
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")
