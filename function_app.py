@@ -7,9 +7,10 @@ import logging
 import os
 import json
 from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta,verify_hour_atettion
-from utils_chatgpt import get_classifier, get_openai_key
+from utils_chatgpt import get_classifier, get_openai_key,extraer_info_personal
 from utils_subflujos import manejar_dialogo
-from utils_google import orquestador_ubicacion_exacta
+from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente
+from utils_registration import save_personal_data, update_datos_personales, update_dir_primera_vez, update_tratamiento_datos, validate_personal_data, validate_data_treatment, validate_direction_first_time, save_personal_data_partial, check_and_mark_datos_personales
 from typing import Any, Dict, Optional, List
 import requests
 from openai import OpenAI
@@ -77,6 +78,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         respuesta_bot : str
         if not verify_hour_atettion(sender, ID_RESTAURANTE):
             return func.HttpResponse("Fuera de horario de atención", status_code=200)
+        ####################################
+        ############ CLIENTE NUEVO  ############
+        ####################################
         if not get_client_database(sender, ID_RESTAURANTE):
             dict_vacio: dict = {}
             nombre_temp: str = handle_create_client(sender, dict_vacio, ID_RESTAURANTE, True)
@@ -123,6 +127,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     nombre_temp: str = handle_create_client(sender, entities_text, ID_RESTAURANTE, False)
                     respuesta_bot = f"¡Gracias por registrarte {nombre_temp}! Bienvenido a Sierra Nevada."
                     send_text_response(sender, respuesta_bot)
+                    respuesta_bot = "Por favor enviame tu ubicación actual o tu dirección para verificar si estás en nuestra área de cobertura."
+                    send_text_response(sender, respuesta_bot)
                     id_temp: str = guardar_clasificacion_intencion(sender, classification, "sin_resolver", "usuario", text, "", type_text, entities_text)
                     marcar_intencion_como_resuelta(id_temp)
                     data_temp = obtener_ultima_intencion_no_resuelta(sender)
@@ -142,6 +148,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     respuesta_bot = "¡Hola! Parece que eres un nuevo cliente. Por favor, envíame tu *nombre completo* para poder atenderte mejor.\nEjemplo: *Juan Pérez*"
                     guardar_clasificacion_intencion(sender, classification, "sin_resolver", "usuario", text, "", type_text, entities_text)
                     send_text_response(sender, respuesta_bot)
+        ####################################
+        ########### CLIENTE EXISTENTE ##########  
+        ####################################
         else:
             nombre_cliente = get_client_name_database(sender, ID_RESTAURANTE)
             if tipo_general == "text":
@@ -172,11 +181,21 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     text = transcript.text
                     logging.info(f"Transcripción recibida: {text}")
                     log_message(f"Mensaje transcrito {text}", "INFO")
+            #############
+            #validar ubicación primera vez
+            #############
+            elif tipo_general == "location" or text and validate_direction_first_time(sender, ID_RESTAURANTE) is False:
+                latitude_temp = message["location"]["latitude"]
+                longitude_temp = message["location"]["longitude"]
+                log_message(f"Ubicación recibida: lat {latitude_temp}, lon {longitude_temp}", "INFO")
+                calcular_distancia_entre_sede_y_cliente(sender, latitude_temp, longitude_temp, ID_RESTAURANTE, nombre_cliente)
+                update_dir_primera_vez(sender, ID_RESTAURANTE, True)
+                return func.HttpResponse("EVENT_RECEIVED", status_code=200)
             elif tipo_general == "location":
                 latitude_temp = message["location"]["latitude"]
                 longitude_temp = message["location"]["longitude"]
                 log_message(f"Ubicación recibida: lat {latitude_temp}, lon {longitude_temp}", "INFO")
-                orquestador_ubicacion_exacta(sender, latitude_temp, longitude_temp, ID_RESTAURANTE, nombre_cliente)
+                orquestador_ubicacion_exacta(sender, latitude_temp, longitude_temp, ID_RESTAURANTE, nombre_cliente)    
             elif tipo_general == "image":
                 # No procesamos el contenido de la imagen; la tratamos como comprobante
                 image_id = message["image"].get("id")
@@ -203,7 +222,63 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 send_text_response(sender, "Por el momento solo puedo procesar mensajes de texto.")
                 return func.HttpResponse("Tipo de mensaje no soportado", status_code=200)
                 # Clasificación con modelo OpenAI
-            log_message(f"Empieza a clasificar con text {text}", "INFO")    
+            log_message(f"Empieza a clasificar con text {text}", "INFO")
+            #######################################
+            # validación consentimiento de datos
+            # #######################################
+            if validate_data_treatment(sender, ID_RESTAURANTE) is False:
+                if "sí" in text.lower() or "si" in text.lower():
+                    update_tratamiento_datos(sender, ID_RESTAURANTE, True)
+                    send_text_response(sender, f"Gracias {nombre_cliente}, Por favor envia los siguientes datos:\nTipo de documento, Número de documento, Correo electrónico.\nEjemplo: C.C, 123456789, juan14@gmail.com")
+                    logging.info(f"Usuario {sender} aceptó el tratamiento de datos.")
+                    log_message(f"Usuario {sender} aceptó el tratamiento de datos.", "INFO")
+                    return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+                elif "no" in text.lower():
+                    update_tratamiento_datos(sender, ID_RESTAURANTE, False)
+                    update_datos_personales(sender, ID_RESTAURANTE, "", "", "")
+                    update_dir_primera_vez(sender, ID_RESTAURANTE, False)
+                    update_tratamiento_datos(sender, ID_RESTAURANTE, False)
+                    send_text_response(sender, f"Entendido {nombre_cliente}, no procesaremos tus datos personales. Si cambias de opinión, no dudes en contactarnos nuevamente.")
+                    logging.info(f"Usuario {sender} negó el tratamiento de datos.")
+                    log_message(f"Usuario {sender} negó el tratamiento de datos.", "INFO")
+                    return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+                else:
+                    send_text_response(sender, f"{nombre_cliente}, para continuar con tu pedido, requerimos tu autorización expresa para el tratamiento de tus datos personales (Ley 1581 de 2012).\nFinalidad: Procesar tu pago, gestionar tu pedido y validar si estas en nuestra area de cobertura.\nDerechos y Política Completa: Puedes consultar tus derechos y la legislación detallada aquí: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981\nAl responder SÍ, declaras conocer y aceptar la finalidad del tratamiento de tus datos. Si no estás de acuerdo, responde NO.")
+                    logging.info(f"Usuario {sender} no ha dado consentimiento para el tratamiento de datos.")
+                    log_message(f"Usuario {sender} no ha dado consentimiento para el tratamiento de datos.", "INFO")
+                    return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+            #######################################
+            #validación datos personales
+            #######################################
+            if validate_personal_data(sender, ID_RESTAURANTE) is False:
+                datos = extraer_info_personal(text)
+                # datos es dict con keys: tipo_documento, numero_documento, email
+                tipo_doc = datos.get("tipo_documento")
+                n_doc = datos.get("numero_documento")
+                email = datos.get("email")
+
+                # Guardar solo los campos que traigan información útil
+                try:
+                    save_personal_data_partial(sender, ID_RESTAURANTE, tipo_doc, n_doc, email)
+                except Exception as e:
+                    logging.error(f"Error guardando datos parciales: {e}")
+                    log_message(f"Error guardando datos parciales: {e}", "ERROR")
+                    send_text_response(sender, f"{nombre_cliente}, ocurrió un error al guardar tus datos. Intenta de nuevo.")
+                    return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+
+                # Verificar si ahora la fila tiene los 3 campos completos
+                missing = check_and_mark_datos_personales(sender, ID_RESTAURANTE)
+                if not missing:
+                    logging.info(f"Datos personales de {sender} completos y marcados.")
+                    log_message(f"Datos personales de {sender} completos y marcados.", "INFO")
+                    send_text_response(sender, f"Gracias {nombre_cliente}, tus datos han sido guardados correctamente. Ahora puedes continuar con tu pedido.")
+                    return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+                else:
+                    # mapear nombres amigables
+                    friendly = {"Tipo_Doc": "tipo de documento", "N_Doc": "número de documento", "email": "correo electrónico"}
+                    faltantes = ", ".join(friendly.get(m, m) for m in missing)
+                    send_text_response(sender, f"{nombre_cliente}, aún faltan los siguientes datos: {faltantes}. Por favor envíalos para continuar.")
+                    return func.HttpResponse("EVENT_RECEIVED", status_code=200)
             if text:
                 classification: str
                 type_text: str
