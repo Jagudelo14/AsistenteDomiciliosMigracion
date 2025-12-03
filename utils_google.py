@@ -247,7 +247,7 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
             return None
 
         # Direcciones humanas devueltas por Google
-        direccion_origen = resultado.get("origin_addresses", [""])[0]
+        #direccion_origen = resultado.get("origin_addresses", [""])[0]
         direcciones_destinos = resultado.get("destination_addresses", [])
 
         # ------------------------------------
@@ -365,7 +365,7 @@ def calcular_distancia_y_tiempo(origen: tuple, destino: tuple, numero_telefono: 
         direccion_envio = resultado['destination_addresses'][0]
         if not set_direccion_cliente(numero_telefono, direccion_envio, id_restaurante):
             log_message(f"No se pudo actualizar la dirección del cliente {numero_telefono}", "ERROR")
-        distancia = resultado['rows'][0]['elements'][0]['distance']['text']
+        #distancia = resultado['rows'][0]['elements'][0]['distance']['text']
         distancia_metros = resultado['rows'][0]['elements'][0]['distance']['value']
         duracion = calcular_tiempo_pedido(duracion, id_sede)
         tiempo_pedido: str = formatear_tiempo_entrega(duracion)
