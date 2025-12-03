@@ -2,7 +2,6 @@
 # Last modified: 2025-11-05 by Andrés Bermúdez
 
 import re
-from urllib import response
 from openai import OpenAI
 import logging
 from typing import Any, List, Optional, Tuple, Dict
