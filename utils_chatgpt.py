@@ -2,6 +2,7 @@
 # Last modified: 2025-11-05 by Andrés Bermúdez
 
 import re
+from urllib import response
 from openai import OpenAI
 import logging
 from typing import Any, List, Optional, Tuple, Dict
@@ -2535,3 +2536,86 @@ Instrucciones del mensaje:
     except Exception as e:
         log_message(f"Error en generar mensaje recogida invitar pago {e}", "ERROR")
         return f"Error al generar mensaje: {e}"
+    
+def extraer_info_personal(mensaje: str) -> dict:
+    """
+    Usa ChatGPT para extraer información personal del cliente
+    a partir de su mensaje en WhatsApp.
+    Devuelve un dict con campos tipo_documento, numero_documento, email.
+    Siempre retorna un dict con las 3 claves; si no se extrae, el valor será "No proporcionado".
+    """
+    try:
+        prompt = f"""
+Eres un asistente experto en extraer información personal de mensajes de clientes.
+Un cliente escribió el siguiente mensaje: "{mensaje}"
+Tu tarea: extraer la siguiente información si está disponible:
+- Tipo de documento (ej: CC, CE, TI, PA, NIT, PEP, PT, RC)
+Si te dicen Cedula de ciudadania, responde CC.
+Si te dicen Cedula de extranjeria, responde CE.
+Si te dicen NIT, responde NIT.
+Si te dicen Pasaporte, responde PA.
+- Número de documento
+- Email
+Devuélvelo SOLO en formato JSON EXACTO, sin texto adicional, por ejemplo:
+{{
+    "tipo_documento": "CC",
+    "numero_documento": "12345678",
+    "email": "correo@ejemplo.com"
+}}
+Si no encuentras un campo coloca exactamente "No proporcionado" como valor para ese campo.
+"""
+        client = OpenAI(api_key=get_openai_key())
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres PAKO, asistente experto en extracción de datos."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=200,
+            temperature=0
+        )
+        raw = response.choices[0].message.content.strip()
+
+        # Limpieza básica de bloques ```json``` o ``` alrededor
+        if raw.startswith("```"):
+            raw = raw.strip("`").strip()
+            if raw.lower().startswith("json"):
+                raw = raw[4:].lstrip()
+
+        # Intentar parsear JSON directo
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            # intentar extraer first JSON object with regex
+            import re
+            m = re.search(r'(\{[\s\S]*\})', raw)
+            if m:
+                try:
+                    parsed = json.loads(m.group(1))
+                except Exception:
+                    parsed = None
+            else:
+                parsed = None
+
+        # Normalizar salida garantizando llaves requeridas
+        resultado = {
+            "tipo_documento": "No proporcionado",
+            "numero_documento": "No proporcionado",
+            "email": "No proporcionado"
+        }
+        if isinstance(parsed, dict):
+            for k in ["tipo_documento", "numero_documento", "email"]:
+                val = parsed.get(k)
+                if val and isinstance(val, str) and val.strip():
+                    resultado[k] = val.strip()
+        log_message('Finalizando función <extraer_info_personal>.', 'INFO')
+        logging.info('Finalizando función <extraer_info_personal>.')
+        return resultado
+    except Exception as e:
+        log_message(f"Error en extraer_info_personal: {e}", "ERROR")
+        logging.error(f"Error en extraer_info_personal: {e}")
+        return {
+            "tipo_documento": "No proporcionado",
+            "numero_documento": "No proporcionado",
+            "email": "No proporcionado"
+        }

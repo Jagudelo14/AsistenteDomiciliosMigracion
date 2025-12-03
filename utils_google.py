@@ -394,6 +394,26 @@ def obtener_valores_sede(id_sede: str) -> tuple:
         log_message("Error en obtener valores sede", "ERROR")
         raise e
 
+def calcular_distancia_entre_sede_y_cliente(sender: str, latitud_cliente: float, longitud_cliente: float, id_restaurante: str, nombre_cliente: str):
+    try:
+        sede_cercana = buscar_sede_mas_cercana_dentro_area(latitud_cliente, longitud_cliente, id_restaurante)
+        if sede_cercana is None:
+            log_message("No se encontró sede cercana. Retornando None.", "WARNING")
+            send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos próximamente en tu barrio. 😊 - Sierra Nevada")
+            borrar_intencion_futura(sender)
+        if not set_sede_cliente(sede_cercana["id"], sender, id_restaurante) or not set_lat_lon(sender, latitud_cliente, longitud_cliente, id_restaurante) or not set_direccion_cliente(sender, sede_cercana["direccion_envio"], id_restaurante):
+            return None
+        mensaje_direccion: dict = solicitar_confirmacion_direccion(nombre_cliente, sede_cercana)
+        respuesta_bot = f"""{nombre_cliente}, para continuar con tu pedido, requerimos tu autorización expresa para el tratamiento de tus datos personales (Ley 1581 de 2012).\n
+                    Finalidad: Procesar tu pago, gestionar tu pedido y validar si estas en nuestra area de cobertura.\n
+                    Derechos y Política Completa: Puedes consultar tus derechos y la legislación detallada aquí: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981\n
+                    Al responder SÍ, declaras conocer y aceptar la finalidad del tratamiento de tus datos. Si no estás de acuerdo, responde NO."""
+        send_text_response(sender, respuesta_bot)
+        send_text_response(sender, mensaje_direccion.get("mensaje"))
+    except Exception as e:
+        log_message(f"Ocurrió un error con el orquestador, revisar {e}", "ERROR")
+        raise e
+
 def orquestador_ubicacion_exacta(sender: str, latitud_cliente: float, longitud_cliente: float, id_restaurante: str, nombre_cliente: str):
     try:
         log_message(f"Se inicia el orquestador con datos de longitud {longitud_cliente} y latitud {latitud_cliente}", "INFO")

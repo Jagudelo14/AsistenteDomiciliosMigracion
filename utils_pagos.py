@@ -6,7 +6,7 @@ import traceback
 from utils import log_message
 from utils_database import execute_query
 
-def generar_link_pago(amount: int):
+def generar_link_pago(amount: int, Address: str, City: str, docType: str, docValue: int, phone: str, email: str):
     try:
         userName = os.environ.get("userCrediBanco")
         password = os.environ.get("ClaveCredibanco")
@@ -26,7 +26,17 @@ def generar_link_pago(amount: int):
             "currency": 170,
             "jsonParams": json.dumps({
                 "installments": "1",
-                "IVA.amount": "0"
+                "IVA.amount": "0",
+                "postAddress": Address,
+                "payerCity": "Bogotá D.C.",
+                "payerCountry": "CO",
+                "payerPostalCode": "110111",
+                "payerState": "Bogotá D.C.",
+                "docType": docType,
+                "docValue": docValue,
+                "phone": phone,
+                "email": email,
+                "shippingAddress": Address
             })
         }
         # Log payload salvo datos sensibles (no imprimir password)
