@@ -16,11 +16,8 @@ from utils import (
     actualizar_medio_pago,
     actualizar_total_productos,
     eliminar_pedido,
-    eliminar_una_instancia_orden_por_nombre,
     guardar_intencion_futura,
-    guardar_ordenes,
     guardar_pedido_completo,
-    insertar_orden,
     log_message,
     marcar_intencion_como_resuelta,
     marcar_pedido_como_definitivo,
@@ -36,16 +33,12 @@ from utils import (
     obtener_pedido_por_codigo,
     obtener_pedido_por_codigo_orignal,
     obtener_promociones_activas,
-    obtener_ultima_intencion_no_resuelta,
-    recalcular_y_actualizar_pedido,
     send_pdf_response,
     send_text_response,
-    guardar_clasificacion_intencion,
     obtener_intencion_futura,
     borrar_intencion_futura,
-    to_json_safe
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, actualizar_pedido_con_mensaje_modificacion, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_confirmacion_pedido, generar_mensaje_invitar_pago, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_modo_pago, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida
+from utils_chatgpt import actualizar_pedido_con_mensaje, actualizar_pedido_con_mensaje_modificacion, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_invitar_pago, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_modo_pago, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_metodo_recogida
 from utils_database import execute_query, execute_query_columns
 from utils_google import calcular_tiempo_pedido, formatear_tiempo_entrega, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
@@ -162,7 +155,7 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
             log_message(f'No se pudo crear el pedido para {sender}. pedido_info={pedido_info}', 'ERROR')
             send_text_response(sender, "Lo siento, no pude guardar tu pedido. Por favor inténtalo de nuevo más tarde.")
             return
-        items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict, sender)
+        #items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict, sender)
         info_promociones = None
         eleccion_promocion = None
         if obtener_intencion_futura(sender) == "continuacion_promocion":
@@ -237,7 +230,7 @@ def subflujo_negacion_general(sender: str, respuesta_cliente: str, nombre_client
         if anterior_intencion == "confirmar_pedido":
             codigo_unico_temp: str = obtener_intencion_futura_observaciones(sender)
             dict_temp_cancelacion: dict = generar_mensaje_cancelacion(sender, codigo_unico_temp, nombre_cliente)
-            datos_eliminar: dict = eliminar_pedido(sender, codigo_unico_temp)
+            #datos_eliminar: dict = eliminar_pedido(sender, codigo_unico_temp)
             send_text_response(sender, dict_temp_cancelacion.get("mensaje"))
             borrar_intencion_futura(sender)
         elif anterior_intencion == "confirmacion_modificacion_pedido":
@@ -399,7 +392,7 @@ def subflujo_consulta_pedido(sender: str, nombre_cliente: str, entidades: str, p
         else:
             try:
                 entidades_dict = json.loads(entidades)
-            except:
+            except:  # noqa: E722
                 entidades_dict = ast.literal_eval(str(entidades))
         pedido_id: str = entidades_dict.get("pedido_id", "")
         pedido_info: dict = obtener_estado_pedido_por_codigo(sender, pedido_id)
@@ -523,7 +516,7 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
             log_message(f'No se pudo crear el pedido para {sender}. pedido_info={pedido_info}', 'ERROR')
             send_text_response(sender, "Lo siento, no pude guardar tu pedido. Por favor inténtalo de nuevo más tarde.")
             return
-        items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict, sender)
+        #items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict, sender)
         info_promociones = None
         eleccion_promocion = None
         if obtener_intencion_futura(sender) == "continuacion_promocion":

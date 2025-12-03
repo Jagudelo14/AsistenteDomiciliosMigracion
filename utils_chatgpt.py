@@ -706,7 +706,7 @@ No incluyas texto adicional fuera del JSON.
 
         try:
             data = json.loads(raw)
-        except:
+        except:  # noqa: E722
             # fallback con tips incluidos
             data = {
                 "mensaje": f"¡Hola {nombre}! Bienvenido a {nombre_local}. ¿Te muestro el menú o las promociones?",
@@ -807,7 +807,7 @@ def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) ->
         raw = response.choices[0].message.content.strip()
         try:
             data = json.loads(raw)
-        except:
+        except:  # noqa: E722
             data = {
                 "respuesta_cordial": f"{nombre}, gracias por escribirnos. Lamentamos que tu experiencia en {nombre_local} no haya sido perfecta; estamos aquí para ayudarte 😊",
                 "resumen_queja": "Queja leve del cliente sobre su experiencia.",
@@ -881,7 +881,7 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
         raw = response.choices[0].message.content.strip()
         try:
             data = json.loads(raw)
-        except:
+        except:  # noqa: E722
             data = {
                 "respuesta_cordial": f"{nombre}, ya reviso lo ocurrido con tu experiencia en {nombre_local} y activo el seguimiento de inmediato.",
                 "resumen_queja": "Queja grave del cliente sobre servicio o pedido.",
@@ -1560,7 +1560,7 @@ def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: dict, pr
         raw = response.choices[0].message.content.strip()
         try:
             data = json.loads(raw)
-        except:
+        except:  # noqa: E722
             data = {
                 "mensaje": f"{nombre}, aquí en {nombre_local} estoy para ayudarte con tu pedido. "
                            f"Si quieres, puedo mostrarte el menú o contarte nuestras promociones.",
@@ -1637,7 +1637,7 @@ def responder_sobre_promociones(nombre: str, nombre_local: str, promociones_info
 
         try:
             data = json.loads(raw)
-        except:
+        except:  # noqa: E722
             data = {
                 "mensaje": f"{nombre}, aquí en {nombre_local} tengo varias promociones buenísimas. "
                            f"Si quieres, puedo mostrarte más o llevarte al menú.",
@@ -2286,7 +2286,7 @@ def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> di
 
         try:
             data = json.loads(raw)
-        except:
+        except:  # noqa: E722
             # fallback seguro
             data = {
                 "mensaje": (

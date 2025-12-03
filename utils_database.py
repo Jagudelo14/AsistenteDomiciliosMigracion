@@ -25,7 +25,7 @@ def connect_database() -> connection:
         )
         cur: cursor = conn.cursor()
         cur.execute("SELECT current_database(), inet_server_addr(), inet_server_port();")
-        info = cur.fetchone()
+        #info = cur.fetchone()
         cur.close()
         return conn
     except Exception as e:

@@ -12,4 +12,3 @@ openai
 scikit-learn
 googlemaps
 unidecode
-timedelta

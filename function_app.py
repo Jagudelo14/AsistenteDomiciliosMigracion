@@ -10,7 +10,7 @@ from utils import send_text_response, validate_duplicated_message, log_message, 
 from utils_chatgpt import get_classifier, get_openai_key,extraer_info_personal
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente
-from utils_registration import save_personal_data, update_datos_personales, update_dir_primera_vez, update_tratamiento_datos, validate_personal_data, validate_data_treatment, validate_direction_first_time, save_personal_data_partial, check_and_mark_datos_personales
+from utils_registration import  update_datos_personales, update_dir_primera_vez, update_tratamiento_datos, validate_personal_data, validate_data_treatment, validate_direction_first_time, save_personal_data_partial, check_and_mark_datos_personales
 from typing import Any, Dict, Optional, List
 import requests
 from openai import OpenAI
