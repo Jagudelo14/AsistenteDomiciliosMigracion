@@ -2465,14 +2465,14 @@ Tu tarea: identificar cuál de las siguientes sedes quiso decir el cliente.
 Sedes disponibles (datos reales):
 {lista_sedes}
 
-Reglas:
-- Debes devolver el nombre EXACTO de la sede según está en la lista.
-- Si el cliente escribe con errores, corrige e interpreta.
-- Si escribe solo una palabra ("virrey", "galerias", "centro mayor"), mapea a la sede correcta.
-- Si no puedes identificar ninguna sede, responde "NINGUNA".
+        Reglas:
+        - Debes devolver el nombre EXACTO de la sede según está en la lista.
+        - Si el cliente escribe con errores, corrige e interpreta.
+        - Si escribe solo una palabra ("virrey", "galerias", "centro mayor"), mapea a la sede correcta.
+        - Si no puedes identificar ninguna sede, responde "NINGUNA".
 
-Devuelve SOLO el nombre EXACTO de la sede, sin explicaciones.
-"""
+        Devuelve SOLO el nombre EXACTO de la sede, sin explicaciones.
+        """
 
     # 3. Llamada a GPT-5.1
     completion = client.chat.completions.create(
@@ -2661,6 +2661,7 @@ Instrucciones del mensaje:
 - Confirma la dirección que tenemos guardada la cual se usará para el domicilio.
 - No inventar información adicional.
 """
+
         response = client.chat.completions.create(
         model="gpt-5.1",
         messages=[
@@ -2675,3 +2676,39 @@ Instrucciones del mensaje:
         log_message(f"<direccion_bd>Error en generar mensaje confirmación {e}", "ERROR")
         logging.error(f"<direccion_bd>Error en generar mensaje confirmación {e}")
         return f"Error al generar mensaje: {e}"
+
+def get_direction(text: str) -> str | None:
+    """
+    Extrae una dirección del texto del cliente usando el LLM.
+    Retorna la dirección como string (si se encontró) o None.
+    """
+    try:
+        if not text or not isinstance(text, str):
+            return None
+        client = OpenAI(api_key=get_openai_key())
+        prompt = f"""Eres un asistente experto en extraer direcciones de texto libre.
+Extrae SÓLO la dirección del siguiente texto y agrega "BOGOTA, COLOMBIA" al final si no está presente.
+Texto: "{text}"
+RESPONDE únicamente con la dirección, nada más."""
+        response = client.chat.completions.create(
+        model="gpt-5.1",
+            messages=[
+                {"role": "system", "content": "Eres un extractor preciso de direcciones."},
+                {"role": "user", "content": prompt}
+            ],
+ #           max_tokens=80,
+            temperature=0
+        )
+        raw = response.choices[0].message.content
+        # normalizar a string y limpiar backticks
+        if isinstance(raw, dict):
+            raw = json.dumps(raw, ensure_ascii=False)
+        addr = str(raw).strip().strip("`").strip()
+        if not addr:
+            return None
+        if "bogota" not in addr.lower():
+            addr = addr + " BOGOTA, COLOMBIA"
+        return addr
+    except Exception as e:
+        log_message(f"Error en get_direction: {e}", "ERROR")
+        return None

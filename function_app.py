@@ -1,15 +1,15 @@
 # function_app.py
 # Last modified: 2025-09-30 by Andrés Bermúdez
-#Cambios 11:49 4 diciembre
+#Cambios 12:50 5 diciembre
 import azure.functions as func
 from datetime import datetime
 import logging
 import os
 import json
-from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta,verify_hour_atettion
+from utils import obtener_intencion_futura_observaciones, send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta,verify_hour_atettion, guardar_intencion_futura
 from utils_chatgpt import get_classifier, get_openai_key,extraer_info_personal
 from utils_subflujos import manejar_dialogo, subflujo_confirmar_direccion
-from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente
+from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign,get_direction
 from utils_registration import  update_datos_personales, update_dir_primera_vez, update_tratamiento_datos, validate_personal_data, validate_data_treatment, validate_direction_first_time, save_personal_data_partial, check_and_mark_datos_personales
 from typing import Any, Dict, Optional, List
 import requests
@@ -130,6 +130,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     send_text_response(sender, respuesta_bot)
                     respuesta_bot = "Por favor enviame tu ubicación actual o tu dirección para verificar si estás en nuestra área de cobertura."
                     send_text_response(sender, respuesta_bot)
+                    codigo_unico: str = obtener_intencion_futura_observaciones(sender)
+                    guardar_intencion_futura(sender, "primera_direccion_domicilio", codigo_unico)
                     id_temp: str = guardar_clasificacion_intencion(sender, classification, "sin_resolver", "usuario", text, "", type_text, entities_text)
                     logging.info("un cliente nuevo ha sido registrado correctamente")
                     log_message("un cliente nuevo ha sido registrado correctamente", "INFO")
@@ -240,6 +242,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 classification, type_text, entities_text = get_classifier(text, sender)
                 # implementar guardado de intention
                 if classification == "direccion":
+                    direccion=get_direction(text)
+                    geocode_and_assign(sender, direccion, ID_RESTAURANTE)
                     subflujo_confirmar_direccion(sender, nombre_cliente)
                     logging.info(f"Usuario {sender} proporcionó una dirección.")
                     log_message(f"Usuario {sender} proporcionó una dirección.", "INFO")

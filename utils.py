@@ -1386,7 +1386,7 @@ def obtener_datos_cliente_por_telefono(telefono: str, id_restaurante: str):
         """
         
         resultado = execute_query(query, (telefono, id_restaurante), fetchone=True)
-
+        log_message(f"Datos del cliente obtenidos para {telefono}: {resultado}", "INFO")
         if not resultado:
             log_message(f"No se encontró cliente con teléfono {telefono}", "INFO")
             return None

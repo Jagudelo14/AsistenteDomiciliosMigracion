@@ -467,3 +467,59 @@ def orquestador_tiempo_y_valor_envio(latitud_cliente: float, longitud_cliente: f
     except Exception as e:
         log_message(f"Ocurrió un error en orquestador tiempo y valor envio: {e}", "ERROR")
         raise e
+
+def geocode_address(direccion: str) -> dict | None:
+    """
+    Geocodifica una dirección de texto usando Google Maps Geocoding API.
+    Retorna {'lat': float, 'lon': float, 'formatted_address': str} o None si no hay resultado.
+    """
+    try:
+        log_message(f"geocode_address: geocodificando dirección '{direccion}'", "INFO")
+        if not direccion or not isinstance(direccion, str):
+            log_message("geocode_address: dirección inválida", "WARN")
+            return None
+        gmaps = obtener_cliente_google_maps()
+        resultados = gmaps.geocode(direccion, language="es")
+        if not resultados:
+            log_message(f"geocode_address: no se encontró resultado para '{direccion}'", "INFO")
+            return None
+        first = resultados[0]
+        loc = first.get("geometry", {}).get("location", {})
+        lat = loc.get("lat")
+        lon = loc.get("lng")
+        formatted = first.get("formatted_address", "") or direccion
+        if lat is None or lon is None:
+            log_message(f"geocode_address: resultado incompleto para '{direccion}'", "WARN")
+            return None
+        return {"lat": float(lat), "lon": float(lon), "formatted_address": formatted}
+    except ApiError as ae:
+        log_message(f"geocode_address: Google Maps ApiError para '{direccion}': {ae}", "ERROR")
+        return None
+    except Exception as e:
+        log_message(f"geocode_address: error al geocodificar '{direccion}': {e}", "ERROR")
+        return None
+
+def geocode_and_assign(numero_cliente: str, direccion: str, id_restaurante: str) -> dict | None:
+    """
+    Geocodifica la dirección y, si hay resultado, guarda lat/lon y dirección formateada
+    en la tabla clientes_whatsapp (usa set_lat_lon y set_direccion_cliente).
+    Retorna el mismo dict que geocode_address o None si falla.
+    """
+    try:
+        res = geocode_address(direccion)
+        if not res:
+            return None
+        lat = res["lat"]
+        lon = res["lon"]
+        formatted = res["formatted_address"]
+        # Persistir coordenadas y dirección (los helpers devuelven True/False)
+        try:
+            set_lat_lon(numero_cliente, lat, lon, id_restaurante)
+            set_direccion_cliente(numero_cliente, formatted, id_restaurante)
+        except Exception as e:
+            log_message(f"geocode_and_assign: fallo al guardar coords/dirección: {e}", "ERROR")
+        return res
+    except Exception as e:
+        log_message(f"geocode_and_assign: excepción general: {e}", "ERROR")
+        return None
+

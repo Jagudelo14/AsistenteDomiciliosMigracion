@@ -14,7 +14,6 @@ from utils_registration import validate_direction_first_time
 from utils import (
     obtener_direccion,
     actualizar_costos_y_tiempos_pedido,
-    actualizar_medio_pago,
     actualizar_total_productos,
     eliminar_pedido,
     guardar_intencion_futura,
@@ -39,7 +38,7 @@ from utils import (
     obtener_intencion_futura,
     borrar_intencion_futura,
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, actualizar_pedido_con_mensaje_modificacion, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_invitar_pago, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_modo_pago, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_metodo_recogida,direccion_bd
+from utils_chatgpt import actualizar_pedido_con_mensaje, actualizar_pedido_con_mensaje_modificacion, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_invitar_pago, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_metodo_recogida,direccion_bd
 from utils_database import execute_query, execute_query_columns
 from utils_google import calcular_tiempo_pedido, formatear_tiempo_entrega, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
@@ -446,8 +445,8 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         """Maneja la selección del modo de pago por parte del usuario."""
         log_message(f'Iniciando función <SubflujoMedioPago> para {sender}.', 'INFO')
         codigo_unico: str = obtener_intencion_futura_observaciones(sender)
-        medio_pago_real: str = mapear_modo_pago(respuesta_usuario)
-        datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
+        #medio_pago_real: str = mapear_modo_pago(respuesta_usuario)
+        #datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
         try:
             query = """
                 SELECT total_productos
@@ -506,16 +505,6 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
             log_message(f"Error generando/enviando link de pago: {e}", "ERROR")
             send_text_response(sender, "Hubo un problema generando el link de pago. Puedes intentar pagar en el local o probar otro método.")
             return
-        mensaje_metodo_recogida: dict = solicitar_metodo_recogida(nombre_cliente, codigo_unico, "Sierra Nevada", datos_actualizados.get("producto", ""))
-        # Normalizar respuesta: aceptar dict {"mensaje": "..."} o str
-        if isinstance(mensaje_metodo_recogida, dict):
-            texto_a_enviar = mensaje_metodo_recogida.get("mensaje") or ""
-        elif isinstance(mensaje_metodo_recogida, str):
-            texto_a_enviar = mensaje_metodo_recogida
-        else:
-            log_message(f"subflujo_medio_pago: respuesta inesperada de solicitar_metodo_recogida: {type(mensaje_metodo_recogida)}", "WARN")
-            texto_a_enviar = f"{nombre_cliente}, tu pedido ({codigo_unico}) quedó delicioso! ¿Domicilio o recoges en el local?"
-        send_text_response(sender, texto_a_enviar)
     except Exception as e:
         log_message(f'Error en <SubflujoMedioPago>: {e}.', 'ERROR')
         raise e
