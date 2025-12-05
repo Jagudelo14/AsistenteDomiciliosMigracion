@@ -6,8 +6,13 @@ import traceback
 from utils import log_message
 from utils_database import execute_query
 
-def generar_link_pago(amount: int, Address: str, City: str, docType: str, docValue: int, phone: str, email: str):
+def generar_link_pago(amount: int, sender: str):
     try:
+        cliente_datos = obtener_datos_cliente_para_pago(sender)
+        if not cliente_datos:
+            log_message(f"[GenerarLinkPago] No se pudieron obtener los datos del cliente para el teléfono: {sender}", "ERROR")
+            return None
+        Address,docType, docValue, phone, email = cliente_datos
         userName = os.environ.get("userCrediBanco")
         password = os.environ.get("ClaveCredibanco")
         if not userName or not password:
@@ -28,13 +33,13 @@ def generar_link_pago(amount: int, Address: str, City: str, docType: str, docVal
                 "installments": "1",
                 "IVA.amount": "0",
                 "postAddress": Address,
-                "payerCity": "Bogotá D.C.",
+                "payerCity": "Bogota",
                 "payerCountry": "CO",
                 "payerPostalCode": "110111",
-                "payerState": "Bogotá D.C.",
-                "docType": docType,
-                "docValue": docValue,
-                "phone": phone,
+                "payerState": "DC",
+                "docType": str(docType),
+                "docValue": str(docValue),
+                "phone": f"+{phone}",
                 "email": email,
                 "shippingAddress": Address
             })
@@ -79,12 +84,11 @@ def validar_pago(order_id: str):
     url = "https://ecouat.credibanco.com/payment/rest/getOrderStatusExtended.do"
 
     payload = {
-        "userName": "DACASIGNAVNP33-api",
-        "password": "SierraNevada2025*",
+        "userName": os.environ.get("userCrediBanco"),
+        "password": os.environ.get("ClaveCredibanco"),
         "orderId": order_id,
         "language": "es"
     }
-
     response = requests.post(url, data=payload)
     data = response.json()
 
@@ -97,7 +101,7 @@ def validar_pago(order_id: str):
     order_status = data.get("orderStatus")
     action_code = data.get("actionCode")
     descripcion = data.get("actionCodeDescription")
-
+    log_message(f"[ValidarPago] orderStatus={order_status}, actionCode={action_code}, descripcion={descripcion}", "INFO")
     if order_status == 2:
         resultado = "aprobado"
     elif order_status in [3, 6]:
@@ -106,7 +110,7 @@ def validar_pago(order_id: str):
         resultado = "pendiente"
     else:
         resultado = "desconocido"
-
+    log_message(f"[ValidarPago] Resultado final: {resultado}", "INFO")
     info = {
         "orderId": order_id,
         "resultado": resultado,
@@ -114,7 +118,7 @@ def validar_pago(order_id: str):
         "actionCode": action_code,
         "descripcion": descripcion
     }
-
+    log_message(f"[ValidarPago] Resultado de la validación: {info}", "INFO")
     print("📬 Resultado de la validación:", info)
     return info
 
@@ -133,3 +137,23 @@ def guardar_id_pago_en_db(order_id: str, codigo_unico: str) -> bool:
         log_message(f"Error guardando el pago en la base de datos:{e}", "ERROR")
         log_message(traceback.format_exc(), "ERROR")
         return False
+
+def obtener_datos_cliente_para_pago(sender: str):
+    try:
+        query = """
+            SELECT direccion_google,  "Tipo_Doc", "N_Doc", telefono, email 
+            FROM public.clientes_whatsapp 
+            WHERE telefono = %s;
+        """
+        params = (sender,)
+        result = execute_query(query, params)
+        if result and len(result) > 0:
+            direccion,  tipo_documento, numero_documento, telefono, email = result[0]
+            return direccion,  tipo_documento, numero_documento, telefono, email
+        else:
+            log_message(f"No se encontraron datos del cliente para el teléfono: {sender}", "WARNING")
+            return None
+    except Exception as e:
+        log_message(f"Error obteniendo datos del cliente para pago: {e}", "ERROR")
+        log_message(traceback.format_exc(), "ERROR")
+        return None

@@ -1,6 +1,6 @@
 # function_app.py
 # Last modified: 2025-09-30 by Andrés Bermúdez
-
+#Cambios 11:49 4 diciembre
 import azure.functions as func
 from datetime import datetime
 import logging
@@ -8,7 +8,7 @@ import os
 import json
 from utils import send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta,verify_hour_atettion
 from utils_chatgpt import get_classifier, get_openai_key,extraer_info_personal
-from utils_subflujos import manejar_dialogo
+from utils_subflujos import manejar_dialogo, subflujo_confirmar_direccion
 from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente
 from utils_registration import  update_datos_personales, update_dir_primera_vez, update_tratamiento_datos, validate_personal_data, validate_data_treatment, validate_direction_first_time, save_personal_data_partial, check_and_mark_datos_personales
 from typing import Any, Dict, Optional, List
@@ -82,6 +82,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         ############ CLIENTE NUEVO  ############
         ####################################
         if not get_client_database(sender, ID_RESTAURANTE):
+            log_message("Cliente nuevo detectado", "INFO")
             dict_vacio: dict = {}
             nombre_temp: str = handle_create_client(sender, dict_vacio, ID_RESTAURANTE, True)
             if tipo_general == "text":
@@ -130,7 +131,13 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     respuesta_bot = "Por favor enviame tu ubicación actual o tu dirección para verificar si estás en nuestra área de cobertura."
                     send_text_response(sender, respuesta_bot)
                     id_temp: str = guardar_clasificacion_intencion(sender, classification, "sin_resolver", "usuario", text, "", type_text, entities_text)
-                    marcar_intencion_como_resuelta(id_temp)
+                    logging.info("un cliente nuevo ha sido registrado correctamente")
+                    log_message("un cliente nuevo ha sido registrado correctamente", "INFO")
+                    if id_temp is None:
+                        log_message(f"No hay intención previa para marcar como resuelta para {sender}.", "INFO")
+                    else:
+                        log_message(f"Marcar intención como resuelta {id_temp}.", "INFO")
+                        marcar_intencion_como_resuelta(id_temp)
                     data_temp = obtener_ultima_intencion_no_resuelta(sender)
                     if data_temp:
                         manejar_dialogo(
@@ -184,14 +191,14 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             #############
             #validar ubicación primera vez
             #############
-            elif tipo_general == "location" or text and validate_direction_first_time(sender, ID_RESTAURANTE) is False:
+            elif tipo_general == "location" and validate_direction_first_time(sender, ID_RESTAURANTE) is False:
                 latitude_temp = message["location"]["latitude"]
                 longitude_temp = message["location"]["longitude"]
                 log_message(f"Ubicación recibida: lat {latitude_temp}, lon {longitude_temp}", "INFO")
                 calcular_distancia_entre_sede_y_cliente(sender, latitude_temp, longitude_temp, ID_RESTAURANTE, nombre_cliente)
                 update_dir_primera_vez(sender, ID_RESTAURANTE, True)
                 return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-            elif tipo_general == "location":
+            elif tipo_general == "location" and validate_direction_first_time(sender, ID_RESTAURANTE) is True:
                 latitude_temp = message["location"]["latitude"]
                 longitude_temp = message["location"]["longitude"]
                 log_message(f"Ubicación recibida: lat {latitude_temp}, lon {longitude_temp}", "INFO")
@@ -226,6 +233,23 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             #######################################
             # validación consentimiento de datos
             # #######################################
+            if validate_direction_first_time(sender, ID_RESTAURANTE) is False:
+                classification: str
+                type_text: str
+                entities_text: str
+                classification, type_text, entities_text = get_classifier(text, sender)
+                # implementar guardado de intention
+                if classification == "direccion":
+                    subflujo_confirmar_direccion(sender, nombre_cliente)
+                    logging.info(f"Usuario {sender} proporcionó una dirección.")
+                    log_message(f"Usuario {sender} proporcionó una dirección.", "INFO")
+                    update_dir_primera_vez(sender, ID_RESTAURANTE, True)
+                    return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+                else:
+                    send_text_response(sender, f"{nombre_cliente}, para continuar con tu pedido, por favor envíanos tu ubicación actual o tu dirección.")
+                    logging.info(f"Usuario {sender} no proporcionó una dirección válida.")
+                    log_message(f"Usuario {sender} no proporcionó una dirección válida.", "INFO")
+                return func.HttpResponse("EVENT_RECEIVED", status_code=200)
             if validate_data_treatment(sender, ID_RESTAURANTE) is False:
                 if "sí" in text.lower() or "si" in text.lower():
                     update_tratamiento_datos(sender, ID_RESTAURANTE, True)
@@ -235,9 +259,10 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     return func.HttpResponse("EVENT_RECEIVED", status_code=200)
                 elif "no" in text.lower():
                     update_tratamiento_datos(sender, ID_RESTAURANTE, False)
-                    update_datos_personales(sender, ID_RESTAURANTE, "", "", "")
-                    update_dir_primera_vez(sender, ID_RESTAURANTE, False)
+                    update_datos_personales(sender, ID_RESTAURANTE,  False)
+                    update_dir_primera_vez(sender, ID_RESTAURANTE, True)
                     update_tratamiento_datos(sender, ID_RESTAURANTE, False)
+                    save_personal_data_partial(sender, ID_RESTAURANTE, None, None, None)
                     send_text_response(sender, f"Entendido {nombre_cliente}, no procesaremos tus datos personales. Si cambias de opinión, no dudes en contactarnos nuevamente.")
                     logging.info(f"Usuario {sender} negó el tratamiento de datos.")
                     log_message(f"Usuario {sender} negó el tratamiento de datos.", "INFO")

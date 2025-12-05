@@ -8,11 +8,12 @@ from utils import borrar_intencion_futura, guardar_intencion_futura, log_message
 from utils_chatgpt import solicitar_confirmacion_direccion
 from utils_database import execute_query
 import json
+import os
 
 CANTIDAD_TIEMPO_PEDIDO: int = 5 # Cantidad de tiempo por pedido en cola en minutos
 TIEMPO_TOLERANCIA: int = 10 # Cantidad de minutos de tolerancia para tiempo total de domicilio
 UMBRAL_TIEMPO: int = 150 # Cantidad de minutos de umbral máximo para un domicilio (2 horas y 30 minutos)
-API_KEY_GOOGLE_MAPS: str = 'AIzaSyCFsdUvOlE_iMJPbSXrbCoCdWJIqebZHKc'
+API_KEY_GOOGLE_MAPS: str = os.environ.get("API_KEY_GOOGLE_MAPS", "")
 
 def obtener_cliente_google_maps() -> googlemaps:
     try:
@@ -401,15 +402,17 @@ def calcular_distancia_entre_sede_y_cliente(sender: str, latitud_cliente: float,
             log_message("No se encontró sede cercana. Retornando None.", "WARNING")
             send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos próximamente en tu barrio. 😊 - Sierra Nevada")
             borrar_intencion_futura(sender)
+            return None
+
         if not set_sede_cliente(sede_cercana["id"], sender, id_restaurante) or not set_lat_lon(sender, latitud_cliente, longitud_cliente, id_restaurante) or not set_direccion_cliente(sender, sede_cercana["direccion_envio"], id_restaurante):
             return None
-        mensaje_direccion: dict = solicitar_confirmacion_direccion(nombre_cliente, sede_cercana)
-        respuesta_bot = f"""{nombre_cliente}, para continuar con tu pedido, requerimos tu autorización expresa para el tratamiento de tus datos personales (Ley 1581 de 2012).\n
-                    Finalidad: Procesar tu pago, gestionar tu pedido y validar si estas en nuestra area de cobertura.\n
-                    Derechos y Política Completa: Puedes consultar tus derechos y la legislación detallada aquí: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981\n
-                    Al responder SÍ, declaras conocer y aceptar la finalidad del tratamiento de tus datos. Si no estás de acuerdo, responde NO."""
+
+
+        respuesta_bot = f"""Excelente {nombre_cliente} podemos atenderte, para continuar con tu pedido, requerimos tu autorización expresa para el tratamiento de tus datos personales (Ley 1581 de 2012).
+Finalidad: Procesar tu pago, gestionar tu pedido y validar si estas en nuestra area de cobertura.
+Derechos y Política Completa: Puedes consultar tus derechos y la legislación detallada aquí: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981
+Al responder SÍ, declaras conocer y aceptar la finalidad del tratamiento de tus datos. Si no estás de acuerdo, responde NO."""
         send_text_response(sender, respuesta_bot)
-        send_text_response(sender, mensaje_direccion.get("mensaje"))
     except Exception as e:
         log_message(f"Ocurrió un error con el orquestador, revisar {e}", "ERROR")
         raise e
@@ -427,6 +430,7 @@ def orquestador_ubicacion_exacta(sender: str, latitud_cliente: float, longitud_c
             log_message("No se encontró sede cercana. Retornando None.", "WARNING")
             send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos próximamente en tu barrio. 😊 - Sierra Nevada")
             borrar_intencion_futura(sender)
+            return None
         if not set_sede_cliente(sede_cercana["id"], sender, id_restaurante) or not set_lat_lon(sender, latitud_cliente, longitud_cliente, id_restaurante) or not set_direccion_cliente(sender, sede_cercana["direccion_envio"], id_restaurante):
             return None
         mensaje_direccion: dict = solicitar_confirmacion_direccion(nombre_cliente, sede_cercana)
