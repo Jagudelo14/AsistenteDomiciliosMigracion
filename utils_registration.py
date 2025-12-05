@@ -7,7 +7,7 @@ def update_tratamiento_datos(sender: str, id_restaurante: str, valor: bool) -> N
         query = """
             UPDATE public.clientes_whatsapp
             SET tratamiento_datos = %s
-            WHERE sender = %s AND id_restaurante = %s;
+            WHERE telefono = %s AND id_restaurante = %s;
         """
         params = (valor, sender, id_restaurante)
         execute_query(query, params)
@@ -21,7 +21,7 @@ def update_dir_primera_vez(sender: str, id_restaurante: str, valor: bool) -> Non
         query = """
             UPDATE public.clientes_whatsapp
             SET dir_primera_vez = %s
-            WHERE sender = %s AND id_restaurante = %s;
+            WHERE telefono = %s AND id_restaurante = %s;
         """
         params = (valor, sender, id_restaurante)
         execute_query(query, params)
@@ -35,7 +35,7 @@ def update_datos_personales(sender: str, id_restaurante: str, valor: bool) -> No
         query = """
             UPDATE public.clientes_whatsapp
             SET datos_personales = %s
-            WHERE sender = %s AND id_restaurante = %s;
+            WHERE telefono = %s AND id_restaurante = %s;
         """
         params = (valor, sender, id_restaurante)
         execute_query(query, params)
@@ -49,7 +49,7 @@ def save_personal_data(sender: str, id_restaurante: str, tipo_doc: str, n_doc: s
         query = """
             UPDATE public.clientes_whatsapp
             SET "Tipo_Doc" = %s, "N_Doc" = %s, email = %s
-            WHERE sender = %s AND id_restaurante = %s;
+            WHERE telefono = %s AND id_restaurante = %s;
         """
         params = (tipo_doc or None, n_doc or None, email or None, sender, id_restaurante)
         execute_query(query, params)
@@ -82,7 +82,7 @@ def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, 
         query = f"""
             UPDATE public.clientes_whatsapp
             SET {', '.join(sets)}
-            WHERE sender = %s AND id_restaurante = %s;
+            WHERE telefono = %s AND id_restaurante = %s;
         """
         params.extend([sender, id_restaurante])
         execute_query(query, tuple(params))
@@ -101,7 +101,7 @@ def check_and_mark_datos_personales(sender: str, id_restaurante: str) -> list:
         query = """
             SELECT "Tipo_Doc", "N_Doc", email
             FROM public.clientes_whatsapp
-            WHERE sender = %s AND id_restaurante = %s;
+            WHERE telefono = %s AND id_restaurante = %s;
         """
         params = (sender, id_restaurante)
         result = execute_query(query, params)
@@ -119,7 +119,7 @@ def check_and_mark_datos_personales(sender: str, id_restaurante: str) -> list:
             update_query = """
                 UPDATE public.clientes_whatsapp
                 SET datos_personales = TRUE
-                WHERE sender = %s AND id_restaurante = %s;
+                WHERE telefono = %s AND id_restaurante = %s;
             """
             execute_query(update_query, (sender, id_restaurante))
         return missing
@@ -129,13 +129,12 @@ def check_and_mark_datos_personales(sender: str, id_restaurante: str) -> list:
         # En caso de error asumimos que faltan datos para evitar marcar completo por error
         return ["Tipo_Doc", "N_Doc", "email"]
 
-# Ajustes: asegurar que las funciones de validación retornan False en excepción
 def validate_personal_data(sender: str, id_restaurante: str) -> bool:
     try:
         query = """
             SELECT datos_personales
             FROM public.clientes_whatsapp
-            WHERE sender = %s AND id_restaurante = %s;
+            WHERE telefono = %s AND id_restaurante = %s;
         """
         params = (sender, id_restaurante)
         result = execute_query(query, params)
@@ -153,7 +152,7 @@ def validate_direction_first_time(sender: str, id_restaurante: str) -> bool:
         query = """
             SELECT dir_primera_vez
             FROM public.clientes_whatsapp
-            WHERE sender = %s AND id_restaurante = %s;
+            WHERE telefono = %s AND id_restaurante = %s;
         """
         params = (sender, id_restaurante)
         result = execute_query(query, params)
@@ -171,7 +170,7 @@ def validate_data_treatment(sender: str, id_restaurante: str) -> bool:
         query = """
             SELECT tratamiento_datos
             FROM public.clientes_whatsapp
-            WHERE sender = %s AND id_restaurante = %s;
+            WHERE telefono = %s AND id_restaurante = %s;
         """
         params = (sender, id_restaurante)
         result = execute_query(query, params)

@@ -9,6 +9,5 @@ numpy
 pgvector
 heyoo
 openai
-scikit-learn
 googlemaps
 unidecode

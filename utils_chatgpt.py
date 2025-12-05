@@ -102,7 +102,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - quejas (quejas de menor nivel)
             - saludo
             - sin_intencion
-            - solicitud_pedido (pedidos de comida o bebida)
+            - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) cosas similares a estos pedidos clasificalas como solicitud pedido
             - transferencia (quejas de mayor nivel)
             - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo)
             - recoger_restaurante   (NUEVA intención: cuando el usuario dice que pasará a recoger, irá al restaurante o lo recoge en tienda)
@@ -137,6 +137,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
         logging.info(f"Respuesta del clasificador: {result}")
         logging.info(f"Intent: {intent}, Type: {type_}, Entities: {entities}")
         log_message('Finalizando función <GetClassifier>.', 'INFO')
+        log_message(f'Respuesta del clasificador: {result}', 'INFO')
         return intent, type_, entities
     except Exception as e:
         log_message(f'Error al hacer uso de función <GetClassifier>: {e}.', 'ERROR')
@@ -400,7 +401,7 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
             "order_complete": true|false,
             "items": [
                 {{
-                    "requested": {{ "producto": "...", "modalidad": "...", "especificaciones": [ ... ] }},
+                    "requested": {{ "producto": "...",  "especificaciones": [ ... ] }},
                     "status": "found" | "not_found" | "multiple_matches",
                     "matched": {{ "name": "...", "id": "...", "price": number }},
                     "candidates": [ {{ "name":"...", "id":"...", "price": number }}, ... ],
@@ -511,6 +512,8 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - Si un ítem es not_found → order_complete = false.
         - total_price = suma de precios.
         - Respuesta SIEMPRE debe ser solamente el JSON.
+        - Unicamente devuelves order complete: false cuando algun producto resulta en NOT_FOUND si todos los productos tienen estado Found order complete: True ESTA REGLA ES ABSOLUTA
+        - Una Limonada no se refiere a productos de limon sino a las bebidas de limonada en el menú.
 
         MENÚ COMPLETO:
         {json.dumps(menu_items, ensure_ascii=False)}
@@ -518,11 +521,12 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         CLASIFICADOR:
         {json.dumps(contenido_clasificador, ensure_ascii=False)}
 
-        DEVUELVE SOLO EL JSON.
+        DEVUELVE SOLO EL JSON. 
+        SIEMPRE DEVUELVE ORDER_COMPLETE: TRUE A MENOS QUE ALGUN PRODUCTO SEA NOT_FOUND.
         """
     try:
         log_message('Iniciando función <MapearPedidoAlMenu>.', 'INFO')
-
+        log_message(f'Prompt generado en <MapearPedidoAlMenu>: {prompt}', 'DEBUG')
         response = client.responses.create(
             model=model,
             input=prompt,
@@ -541,6 +545,7 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
 
         result = json.loads(clean)
 
+        log_message(f'Resultado parseado en <MapearPedidoAlMenu>: {result}', 'DEBUG')
         log_message('Finalizando función <MapearPedidoAlMenu>.', 'INFO')
         return result
 
@@ -995,7 +1000,7 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
         TEN EN CUENTA PUEDES USAR COINCIDENCIAS PARCIALES SOLO SI ES UNA VARIANTE CLARA PERO NO INVENTAR NI REEMPLAZAR SABORES.    
             """
         menu_str = "\n".join([f"- {item['nombre']}" for item in menu])
-
+        log_message(f'Prompt generado en <pedido_incompleto_dynamic>: {PROMPT_PEDIDO_INCOMPLETO}', 'DEBUG')
         prompt = PROMPT_PEDIDO_INCOMPLETO.format(
             mensaje_usuario=mensaje_usuario.lower(),
             menu_str=menu_str,
@@ -1138,6 +1143,7 @@ def actualizar_pedido_con_mensaje(
             result["debug_from_model"] = parsed.get("debug") or parsed.get("warnings")
         logging.info("Finalizando actualizar_pedido_con_mensaje.")
         log_message('Finalizando función <actualizar_pedido_con_mensaje>.', 'INFO')
+        log_message(f'Resultado de <actualizar_pedido_con_mensaje>: {result}', 'DEBUG')
         return result
     except Exception as e:
         logging.exception("Error en actualizar_pedido_con_mensaje")
@@ -1735,7 +1741,7 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
 
         Otras reglas:
         - Si el cliente pide algo que NO existe en el menú, indícalo y sugiere 1 a 3 opciones reales.
-        - Si pide algo muy general (ej: “una hamburguesa”), sugiere opciones específicas del menú.
+        - Si pide algo muy general (ej: “una hamburguesa”), sugiere opciones del menú.
         - SIEMPRE pedir que el cliente vuelva a escribir todo su pedido claramente,
           excepto cuando esté mezclando cosas fuera de la promoción (ver regla nueva).
 
@@ -1913,7 +1919,7 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
         log_message(f"Error mapeando método de pago: {e}", "ERROR")
         return "desconocido"
 
-def solicitar_metodo_recogida(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str) -> dict:
+def solicitar_metodo_recogida(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str) -> str:
     try:
         log_message('Iniciando función <solicitar_metodo_recogida>.', 'INFO')
 
@@ -1933,12 +1939,7 @@ Después:
 - Pregunta amablemente dónde quiere recibir su pedido.
 - Menciona el local: {nombre_local}.
 - Lista ambas opciones:
-  • Recoger en tienda:
-      Centro Mayor (Cc. Centro Mayor, local 3-019)
-      Galerías (Calle 53 # 27-16)
-      Centro Internacional (Calle 32 # 07-10)
-      Chicó 2.0 (Calle 100 # 9a - 45 local 7A)
-      Virrey (Carrera 15 # 88-67)
+  • Recoger en tienda
   • Envío a domicilio (depende de la zona y tiene costo adicional).
 Incluye el código único del pedido en el mensaje.
 FORMATO ESTRICTO:
@@ -1957,16 +1958,34 @@ FORMATO ESTRICTO:
             ],
         )
 
-        data = response.choices[0].message.parsed
+        raw = response.choices[0].message.content
+        # normalizar a str
+        if isinstance(raw, dict):
+            mensaje = raw.get("mensaje", "")
+        else:
+            raw_str = str(raw).strip()
+            try:
+                parsed = json.loads(raw_str)
+                if isinstance(parsed, dict):
+                    mensaje = parsed.get("mensaje", "")
+                else:
+                    mensaje = raw_str
+            except Exception:
+                mensaje = raw_str
+
+        mensaje = mensaje.strip() if isinstance(mensaje, str) else ""
+        if not mensaje:
+            # fallback seguro (texto por defecto)
+            mensaje = f"¡{nombre}, tu pedido ({codigo_unico}) quedó delicioso! ¿Vas a querer domicilio o prefieres recogerlo en el restaurante?"
+
         log_message('Finalizando función <solicitar_metodo_recogida>.', 'INFO')
-        return data
+        log_message(f'Respuesta de <solicitar_metodo_recogida> (mensaje): {mensaje[:300]}', 'DEBUG')
+        return mensaje
 
     except Exception as e:
         log_message(f'Error en función <solicitar_metodo_recogida>: {e}', 'ERROR')
-        return {
-            "mensaje": f"¡{nombre}, tu pedido ({codigo_unico}) quedó delicioso! ¿Vas a querer domicilio o prefieres recogerlo en el restaurante?"
-        }
-
+        return f"¡{nombre}, tu pedido ({codigo_unico}) quedó delicioso! ¿Vas a querer domicilio o prefieres recogerlo en el restaurante?"
+    
 def generar_mensaje_confirmacion_modificacion_pedido(
         pedido_json: dict,
         promocion: bool = False,
@@ -2140,8 +2159,8 @@ def actualizar_pedido_con_mensaje_modificacion(
         {json.dumps(pedido_para_modelo, ensure_ascii=False)}
         === MENÚ ===
         {json.dumps(items_menu, ensure_ascii=False)}
+        
         """
-
         client = OpenAI()
         response = client.responses.create(model=model, input=prompt, temperature=0)
 
@@ -2150,7 +2169,6 @@ def actualizar_pedido_con_mensaje_modificacion(
             raw = response.output[0].content[0].text.strip()
         except Exception:
             raw = ""
-
         clean = raw
         clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
         clean = re.sub(r'^```', '', clean).strip()
@@ -2618,3 +2636,42 @@ Si no encuentras un campo coloca exactamente "No proporcionado" como valor para 
             "numero_documento": "No proporcionado",
             "email": "No proporcionado"
         }
+    
+def direccion_bd(nombre_cliente: str, direccion_google: str):
+    """
+    Genera un mensaje amable para confirmar la dirección guardada
+    """
+    try:
+        client = OpenAI()
+        prompt = f"""
+Eres PAKO, la voz oficial de Sierra Nevada, La Cima del Sabor.
+
+Tu tarea:
+Generar un mensaje cálido, claro y corto para un cliente que confirmara la dirección que tenemos guardada en la base de datos
+
+Datos:
+- Nombre del cliente: {nombre_cliente}
+- Dirección del cliente: {direccion_google}
+
+Instrucciones del mensaje:
+- Si la ciudad se repite simplificalo a una vez
+- No saludes al cliente probablemente este en mitad de la conversacion
+- Habla con tono amable y profesional.
+- Di el nombre del cliente.
+- Confirma la dirección que tenemos guardada la cual se usará para el domicilio.
+- No inventar información adicional.
+"""
+        response = client.chat.completions.create(
+        model="gpt-5.1",
+        messages=[
+            {"role": "system", "content": "Eres un asistente experto redactando mensajes cordiales y personalizados para clientes."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.4
+    )
+
+        return response.choices[0].message.content
+    except Exception as e:
+        log_message(f"<direccion_bd>Error en generar mensaje confirmación {e}", "ERROR")
+        logging.error(f"<direccion_bd>Error en generar mensaje confirmación {e}")
+        return f"Error al generar mensaje: {e}"

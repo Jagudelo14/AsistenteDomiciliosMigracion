@@ -155,11 +155,13 @@ def get_client_database(numero_celular: str, id_restaurante: str) -> bool:
             FROM clientes_whatsapp
             WHERE telefono = %s
               AND id_restaurante = %s
-              AND (es_temporal = FALSE OR es_temporal IS NULL)
+              AND (es_temporal = FALSE)
             LIMIT 1;
         """
+        log_message(f'Consulta SQL: {query} con parámetros ({numero_celular}, {id_restaurante})', 'INFO')
         resultado = execute_query(query, (numero_celular, id_restaurante))
         logging.info(f"Resultado de la consulta: {resultado}")
+        log_message(f"Resultado de la consulta: {resultado}", "INFO")
         log_message('Finalizando función <get_client_database>.', 'INFO')
         return len(resultado) > 0
     except Exception as e:
@@ -387,13 +389,23 @@ def marcar_intencion_como_resuelta(id_intencion: int) -> bool:
     Retorna True si la actualización fue exitosa, False si falló.
     """
     try:
+        # Validar entrada
+        if id_intencion is None or str(id_intencion).strip() == "":
+            log_message(f"marcar_intencion_como_resuelta: id_intencion inválido: {id_intencion!r}", "ERROR")
+            return False
+        try:
+            id_int = int(id_intencion)
+        except (ValueError, TypeError):
+            log_message(f"marcar_intencion_como_resuelta: no se pudo convertir id a int: {id_intencion!r}", "ERROR")
+            return False
+
         query = """
             UPDATE public.clasificacion_intenciones
             SET estado = 'resuelta'
             WHERE id = %s;
         """
-        execute_query(query, (id_intencion,))
-        log_message(f"Intención {id_intencion} marcada como resuelta.", "INFO")
+        execute_query(query, (id_int,))
+        log_message(f"Intención {id_int} marcada como resuelta.", "INFO")
         return True
     except Exception as e:
         log_message(f"Error al actualizar la intención {id_intencion} a 'resuelta': {e}", "ERROR")
@@ -527,6 +539,7 @@ def normalizar_entities_items(entities: dict) -> dict:
                     "especificaciones": list(especificaciones),
                     "cantidad": cantidad }
         entities["items"] = list(resultado.values())
+        log_message(f'Entities normalizadas: {entities}', 'INFO')
         log_message('Finalizando función <NormalizarEntitiesItems>.', 'INFO')
         return entities
     except Exception as e:
@@ -1534,26 +1547,59 @@ def obtener_promociones_activas() -> list:
         log_message(f"Error al obtener promociones activas {e}", "ERROR")
         return 
 
-def verify_hour_atettion(sender: str, ID_RESTAURANTE: str) -> bool:
+def verify_hour_atettion(sender: str, ID_RESTAURANTE: int) -> bool:
     """Verifica si el mensaje fue enviado dentro del horario de atención."""
     try:
-        query="""
+        query = """
             SELECT hora_apertura, hora_cierre
             FROM public.clientes
             WHERE idcliente = %s;
         """
-        params=(ID_RESTAURANTE,)
-        res= execute_query(query, params, fetchone=True)
+        params = (ID_RESTAURANTE,)
+        res = execute_query(query, params, fetchone=True)
         log_message("Iniciando verificación de horario de atención", "INFO")
-        hora_inicio = res[0] if not res or not res[0] else 11
-        hora_fin = res[1] if not res or not res[1] else 22
-        ahora = datetime.now(ZoneInfo("America/Bogota"))  # Obtener hora de Bogotá de forma timezone-aware
+
+        # corregir la lógica y usar valores por defecto si vienen como NULL
+        hora_inicio = int(res[0]) if res and res[0] is not None else 11
+        hora_fin = int(res[1]) if res and res[1] is not None else 22
+
+        ahora = datetime.now(ZoneInfo("America/Bogota"))
         hora_actual = ahora.hour
-        if hora_inicio <= hora_actual < hora_fin:
+
+        # soportar horario que no cruza medianoche (ej: 11-22) y que sí lo cruza (ej: 22-6)
+        if hora_inicio <= hora_fin:
+            dentro = (hora_inicio <= hora_actual < hora_fin)
+        else:
+            # abre por la tarde/noche y cierra al día siguiente
+            dentro = (hora_actual >= hora_inicio) or (hora_actual < hora_fin)
+
+        if dentro:
             return True
         else:
-            send_text_response(sender, f"¡Hola! 👋✨Por ahora estamos fuera de horario 🕐, pero abrimos de nuevo a las {hora_inicio} AM ⏰¡Te esperamos pronto para que vivas una experiencia deliciosa con nosotros! 😋🔥")
+            send_text_response(
+                sender,
+                f"¡Hola! 👋✨Por ahora estamos fuera de horario 🕐, pero abrimos de nuevo a las {hora_inicio} AM ⏰¡Te esperamos pronto!"
+            )
             return False
     except Exception as e:
         log_message(f"Error al verificar horario de atención: {e}", "ERROR")
         return True
+
+
+def obtener_direccion(sender: str, id_restaurante: str) -> bool:
+    try:
+        query = """
+            SELECT direccion_google
+            FROM public.clientes_whatsapp
+            WHERE telefono = %s AND id_restaurante = %s;
+        """
+        params = (sender, id_restaurante)
+        result = execute_query(query, params)
+        if result and result[0]:
+            direccion_google = result[0][0]
+            return direccion_google
+        return False
+    except Exception as e:
+        log_message(f"validate_personal_data error: {e}", "ERROR")
+        logging.error(f"validate_personal_data error: {e}")
+        return False
