@@ -400,7 +400,7 @@ def calcular_distancia_entre_sede_y_cliente(sender: str, latitud_cliente: float,
         sede_cercana = buscar_sede_mas_cercana_dentro_area(latitud_cliente, longitud_cliente, id_restaurante)
         if sede_cercana is None:
             log_message("No se encontró sede cercana. Retornando None.", "WARNING")
-            send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos próximamente en tu barrio. 😊 - Sierra Nevada")
+            send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos próximamente en tu barrio.😊,si aun deseas continuar porque tienes alguna pregunta o deseas hacer tu pedido a otra dirección requerimos tu autorización expresa para el tratamiento de tus datos personales (Ley 1581 de 2012). Finalidad: Procesar tu pago, gestionar tu pedido y validar si estas en nuestra area de cobertura. Derechos y Política Completa: Puedes consultar tus derechos y la legislación detallada aquí: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981Al responder SÍ, declaras conocer y aceptar la finalidad del tratamiento de tus datos. Si no estás de acuerdo, responde NO.")
             borrar_intencion_futura(sender)
             return None
 
@@ -413,9 +413,11 @@ Finalidad: Procesar tu pago, gestionar tu pedido y validar si estas en nuestra a
 Derechos y Política Completa: Puedes consultar tus derechos y la legislación detallada aquí: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981
 Al responder SÍ, declaras conocer y aceptar la finalidad del tratamiento de tus datos. Si no estás de acuerdo, responde NO."""
         send_text_response(sender, respuesta_bot)
+        return True
     except Exception as e:
         log_message(f"Ocurrió un error con el orquestador, revisar {e}", "ERROR")
         raise e
+
 
 def orquestador_ubicacion_exacta(sender: str, latitud_cliente: float, longitud_cliente: float, id_restaurante: str, nombre_cliente: str):
     try:
