@@ -556,7 +556,6 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
             "bandera_promocion": bandera_promocion
         }
         guardar_intencion_futura(sender, "confirmacion_modificacion_pedido", pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario, datos_promocion)
-        send_text_response(sender, f"Pedido actualizado: {str(pedido_dict)}")
     except Exception as e:
         log_message(f'Error en <SubflujoModificacionPedido>: {e}.', 'ERROR')
         raise e
@@ -571,7 +570,11 @@ def subflujo_confirmar_direccion(sender: str, nombre_cliente: str) -> None:
         longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
         id_sede: str = datos_cliente_temp.get("id_sede", "")
         codigo_unico: str = obtener_intencion_futura_observaciones(sender)
-        valor, duracion, distancia, direccion_envio = orquestador_tiempo_y_valor_envio(latitud_cliente, longitud_cliente, id_sede, sender, id_restaurante)
+        resultado = orquestador_tiempo_y_valor_envio(latitud_cliente, longitud_cliente, id_sede, sender, id_restaurante)
+        if not resultado:
+            send_text_response(sender, f"Puedes volver a enviar tu dirección {nombre_cliente}, no pude calcular el valor y tiempo de envío para tu dirección. ¿Podrías verificarla o enviarme otra?")
+            return
+        valor, duracion, distancia, direccion_envio = resultado
         datos_actualizados: dict = actualizar_costos_y_tiempos_pedido(sender, codigo_unico, valor, duracion, distancia)
         if not datos_actualizados.get("actualizado"):
             send_text_response(sender, f"Lo siento, no pude confirmar tu dirección {direccion_envio}")

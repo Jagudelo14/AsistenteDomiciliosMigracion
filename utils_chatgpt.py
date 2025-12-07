@@ -91,7 +91,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - consulta_menu
             - consulta_pedido
             - consulta_promociones
-            - continuacion_pedido (puede ser en otros idiomas: yes, oui, ja, etc.)
+            - continuacion_pedido (cuando incluye una aclaracion sobre un prodcuto como : es tal producto o era tal bebida se puede considerar como la continuacion de un pedido)
             - direccion
             - info_personal
             - mas_datos_direccion
@@ -2153,6 +2153,9 @@ def actualizar_pedido_con_mensaje_modificacion(
         Eres un asistente experto actualizando pedidos de comida.
         TIENES QUE PROCESAR TODOS los productos/acciones que el cliente menciona en 'NUEVOS ELEMENTOS'.
         Devuelve un JSON solo con la estructura: {{ "order_complete": bool, "items":[...], "total_price": number }}
+        EN CASO DEL QUE PRODUCTO ANTERIOR SEA UNA VERSIÓN DEL MISMO PRODUCTO SOLO DEJA LA VERSIÓN MÁS RECIENTE.
+        EJEMPLO: Si el pedido anterior tiene una hamburguesa "Sierra Picante" y en 'NUEVOS ELEMENTOS' el cliente pide "cambiar a Sierra Clasica", en el resultado final SOLO DEBE APARECER "Sierra Clasica".
+        EJEMPLO: SI el cliente dice que el producto es en combo y el pedido anterior tiene el mismo producto sin combo, en el resultado final SOLO DEBE APARECER la versión en combo.
         === NUEVOS ELEMENTOS ===
         {nuevos_elementos}
         === PEDIDO ANTERIOR LIMPIO ===
@@ -2708,6 +2711,7 @@ RESPONDE únicamente con la dirección, nada más."""
             return None
         if "bogota" not in addr.lower():
             addr = addr + " BOGOTA, COLOMBIA"
+        log_message("Dirección extraída: " + addr, "INFO")
         return addr
     except Exception as e:
         log_message(f"Error en get_direction: {e}", "ERROR")

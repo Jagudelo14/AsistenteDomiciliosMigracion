@@ -1,0 +1,40 @@
+{
+  "object": "whatsapp_business_account",
+  "entry": [
+    {
+      "id": "WHATSAPP_BUSINESS_ACCOUNT_ID",
+      "changes": [
+        {
+          "value": {
+            "messaging_product": "whatsapp",
+            "metadata": {
+              "display_phone_number": "573142796747",
+              "phone_number_id": "1234567890"
+            },
+            "contacts": [
+              {
+                "profile": {
+                  "name": "Juan Perez"
+                },
+                "wa_id": "573026467575"
+              }
+            ],
+            "messages": [
+              {
+                "from": "573026467575",
+                "id": "wamid.HBgLMzE5MTU0GDQ1NTY2FQIAEhgUM0UxRjczQzVEMjE1NkJCMzZBRTMA",
+                "timestamp": "1731255555",
+                "type": "text",
+                "text": {
+                  "body": "si"
+                }
+              }
+            ]
+          },
+          "field": "messages"
+        }
+      ]
+    }
+  ]
+}
+ 

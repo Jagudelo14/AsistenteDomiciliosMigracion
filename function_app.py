@@ -1,16 +1,17 @@
 # function_app.py
 # Last modified: 2025-09-30 by Andrés Bermúdez
-#Cambios 12:50 5 diciembre
+#Cambios 8:20 PM 06/12/2025
 import azure.functions as func
 from datetime import datetime
 import logging
 import os
 import json
-from utils import obtener_intencion_futura_observaciones, send_text_response, validate_duplicated_message, log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta,verify_hour_atettion, guardar_intencion_futura
-from utils_chatgpt import get_classifier, get_openai_key,extraer_info_personal
-from utils_subflujos import manejar_dialogo, subflujo_confirmar_direccion
-from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign,get_direction
+from utils import obtener_datos_cliente_por_telefono, obtener_intencion_futura_observaciones, send_text_response,  log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta,verify_hour_atettion, guardar_intencion_futura,validate_duplicated_message
+from utils_chatgpt import get_classifier, get_openai_key,extraer_info_personal,get_direction
+from utils_subflujos import manejar_dialogo
+from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign
 from utils_registration import  update_datos_personales, update_dir_primera_vez, update_tratamiento_datos, validate_personal_data, validate_data_treatment, validate_direction_first_time, save_personal_data_partial, check_and_mark_datos_personales
+from utils_database import execute_query
 from typing import Any, Dict, Optional, List
 import requests
 from openai import OpenAI
@@ -69,10 +70,10 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         tipo_general = message["type"]
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
-        # Validación mensaje duplicado
-        if validate_duplicated_message(message_id):
-            logging.info(f"Mensaje duplicado: {message_id}")
-            return func.HttpResponse("Mensaje duplicado", status_code=200)
+        #Validación mensaje duplicado
+        #if validate_duplicated_message(message_id):
+        #    logging.info(f"Mensaje duplicado: {message_id}")
+        #    return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         nombre_cliente: str
         respuesta_bot : str
@@ -128,7 +129,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     nombre_temp: str = handle_create_client(sender, entities_text, ID_RESTAURANTE, False)
                     respuesta_bot = f"¡Gracias por registrarte {nombre_temp}! Bienvenido a Sierra Nevada."
                     send_text_response(sender, respuesta_bot)
-                    respuesta_bot = "Por favor enviame tu ubicación actual o tu dirección para verificar si estás en nuestra área de cobertura."
+                    respuesta_bot = "Por favor enviame tu ubicación con la opción de enviar ubicación actual de whatsapp o escribe tu dirección para verificar si estás en nuestra área de cobertura."
                     send_text_response(sender, respuesta_bot)
                     codigo_unico: str = obtener_intencion_futura_observaciones(sender)
                     guardar_intencion_futura(sender, "primera_direccion_domicilio", codigo_unico)
@@ -240,14 +241,27 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 type_text: str
                 entities_text: str
                 classification, type_text, entities_text = get_classifier(text, sender)
-                # implementar guardado de intention
+                # revision de si es direccion
                 if classification == "direccion":
+                    send_text_response(sender, f"Gracias {nombre_cliente}, voy a validar que estes en nuestra cobertura dame un par de minutos.")
                     direccion=get_direction(text)
+                    log_message("Dirección procesada: " + direccion, "INFO")
                     geocode_and_assign(sender, direccion, ID_RESTAURANTE)
-                    subflujo_confirmar_direccion(sender, nombre_cliente)
+                    datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, ID_RESTAURANTE)
+                    latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
+                    longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
+                    resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,ID_RESTAURANTE, nombre_cliente)
+                    update_dir_primera_vez(sender, ID_RESTAURANTE, True)
+                    if resultado is None:
+                        execute_query("""
+                                        UPDATE clientes_whatsapp
+                                        SET direccion_google = %s
+                                        WHERE telefono = %s AND id_restaurante = %s;
+                                        """, (None, sender, ID_RESTAURANTE))
+                        return func.HttpResponse("EVENT_RECEIVED", status_code=200)
                     logging.info(f"Usuario {sender} proporcionó una dirección.")
                     log_message(f"Usuario {sender} proporcionó una dirección.", "INFO")
-                    update_dir_primera_vez(sender, ID_RESTAURANTE, True)
+
                     return func.HttpResponse("EVENT_RECEIVED", status_code=200)
                 else:
                     send_text_response(sender, f"{nombre_cliente}, para continuar con tu pedido, por favor envíanos tu ubicación actual o tu dirección.")
@@ -300,7 +314,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 if not missing:
                     logging.info(f"Datos personales de {sender} completos y marcados.")
                     log_message(f"Datos personales de {sender} completos y marcados.", "INFO")
-                    send_text_response(sender, f"Gracias {nombre_cliente}, tus datos han sido guardados correctamente. Ahora puedes continuar con tu pedido.")
+                    send_text_response(sender, f"Gracias {nombre_cliente}. Ahora puedes continuar con tu pedido ¿en qué te puedo ayudar?")
                     return func.HttpResponse("EVENT_RECEIVED", status_code=200)
                 else:
                     # mapear nombres amigables
