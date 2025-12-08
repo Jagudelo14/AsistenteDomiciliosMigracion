@@ -554,6 +554,8 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
+        idsede = res_idw[11] if res_idw else 17
+        direccion = res_idw[5] if res_idw else None
         logging.info(f"[GuardarPedidoCompleto] id_whatsapp para {sender}: {id_whatsapp}")
         # ------------------------------- # 2. Determinar si es persona nueva # -------------------------------
         q_prev = "SELECT COUNT(*) FROM pedidos WHERE id_whatsapp = %s"
@@ -589,13 +591,13 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         fecha = now.strftime("%Y-%m-%d %H:%M:%S")
         hora = now.strftime("%H:%M")
         # ------------------------------- # 6. Campos fijos # ------------------------------- 
-        idcliente = 5
-        idsede = 15
+        idcliente = os.getenv("ID_RESTAURANTE", "5")
+        idsede = idsede
         estado = "pendiente"
         metodo_pago = "efectivo"
         # ------------------------------- # 7. Query con RETURNING # -------------------------------
-        query = """ INSERT INTO pedidos ( producto, total_productos, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING idpedido, codigo_unico """
-        params = ( productos_str, total_price, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal )
+        query = """ INSERT INTO pedidos ( producto, total_productos, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal,direccion ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING idpedido, codigo_unico """
+        params = ( productos_str, total_price, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal, direccion )
         # ------------------------------- # 8. Ejecutar y retornar el id # -------------------------------
         logging.info(f"[GuardarPedidoCompleto] Ejecutando INSERT pedidos. params={params}")
         res = execute_query(query, params, fetchone=True)
@@ -826,7 +828,49 @@ def _merge_items(base_items: List[Dict], new_items: List[Dict], replace_all: boo
         merged[key] = it
     return list(merged.values())
 
+def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
+    """Marca es_temporal = TRUE en el pedido del cliente."""
+    try:
+        log_message('Iniciando función <MarcarTrue>.', 'INFO')
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
+        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        id_whatsapp = res_idw[0] if res_idw else None
+
+        if id_whatsapp is None:
+            return {
+                "actualizado": False,
+                "msg": "No existe id_whatsapp para este número."
+            }
+        query = """
+            UPDATE pedidos
+            SET es_temporal = TRUE
+            WHERE codigo_unico = %s
+              AND id_whatsapp = %s
+            RETURNING idpedido;
+        """
+        params = (codigo_unico, id_whatsapp)
+        res = execute_query(query, params, fetchone=True)
+        
+        if res:
+            log_message(f'Pedido actualizado con código único {codigo_unico}', 'INFO')
+            return {
+                "actualizado": True,
+                "idpedido": res[0],
+                "codigo_unico": codigo_unico
+            }
+        else:
+            log_message(f'No se encontró un pedido temporal con código único {codigo_unico}', 'INFO')
+            return {
+                "actualizado": False,
+                "msg": "No se encontró un pedido temporal con ese código y ese id_whatsapp."
+            }
+    except Exception as e:
+        log_message(f'Error en <MarcarPedidoComoDefinitivo>: {e}', 'ERROR')
+        logging.error(f'Error en marcar_pedido_como_definitivo: {e}')
+        return {"actualizado": False, "error": str(e)}
+    
 def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
+    """MARCA UN PEDIDO COMO FALSE EN ES_TEMPORAL Y RETORNA INFO DEL PEDIDO ACTUALIZADO."""
     try:
         log_message('Iniciando función <MarcarPedidoComoDefinitivo>.', 'INFO')
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
@@ -840,7 +884,7 @@ def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
             }
         query = """
             UPDATE pedidos
-            SET es_temporal = FALSE
+            SET es_temporal = TRUE
             WHERE codigo_unico = %s
               AND id_whatsapp = %s
             RETURNING idpedido;
