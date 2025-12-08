@@ -1,6 +1,6 @@
 # function_app.py
 # Last modified: 2025-09-30 by Andrés Bermúdez
-#Cambios 8:20 PM 06/12/2025
+#Cambios 3 7 diciembre
 import azure.functions as func
 from datetime import datetime
 import logging

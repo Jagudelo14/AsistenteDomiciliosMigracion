@@ -92,9 +92,9 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - consulta_pedido
             - consulta_promociones
             - continuacion_pedido (cuando incluye una aclaracion sobre un prodcuto como : es tal producto o era tal bebida se puede considerar como la continuacion de un pedido)
-            - direccion
+            - direccion (Cuando unicamente contiene una direccion)
             - info_personal
-            - mas_datos_direccion
+            - mas_datos_direccion (Cuando la frase indica que esta agregando, modificando, quitando o corrigiendo una direccion por ejemplo "la direccion correcta es CL 123")
             - modificar_pedido (puede ser con palabras clave como cambiar, quitar, agregar, modificar, también, etc.)
             Ejemplo: "quiero agregar una malteada de vainilla", "quiero que la hamburguesa no traiga lechuga", "cambia mi pedido por favor por...", "quitar la malteada", "también quiero una gaseosa coca cola original", "dame también una malteada de chocolate", etc.
             - negacion_general (puede ser en otros idiomas: no, non, nein, etc.)
@@ -112,6 +112,8 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - No incluyas texto fuera del JSON.
             - No uses comentarios, explicaciones o saltos de línea innecesarios.
             - Si no puedes determinar la intención, usa "sin_intencion".
+            - TE ACLARO QUE UN PRODUCTO EN COMBO SE TRATA DIFERENTE A UN PRODUCTO SOLO POR EJEMPLO UNA SIERRA QUESO ES DIFERENTE DE UNA SIERRA QUESO EN COMBO
+            - SI TE DICEN UN PRODUCTO EN COMBO TRATALO COMO UN PRODUCTO DIFERENTE A SU HOMONIMO
             """
 
         messages = [
@@ -2313,7 +2315,7 @@ def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> di
                 "mensaje": (
                     f"¡Hola {cliente_nombre}! Qué alegría tenerte por aquí 🙌 "
                     f"Tenemos registrada la dirección: \"{sede_info.get('direccion_envio')}\". "
-                    "¿Nos confirmas si está correcta para enviarte tu pedido?"
+                    "¿es correcta? si no lo es envianos la correcta"
                 )
             }
 
@@ -2716,3 +2718,38 @@ RESPONDE únicamente con la dirección, nada más."""
     except Exception as e:
         log_message(f"Error en get_direction: {e}", "ERROR")
         return None
+
+def corregir_direccion(direccion_almacedada: str, mensaje_cliente: str) -> str:
+    """
+    Usa ChatGPT para corregir o mejorar la dirección almacenada
+    basándose en el mensaje del cliente.
+    Retorna la dirección corregida o la original si no se puede corregir.
+    """
+    try:
+        if not direccion_almacedada or not mensaje_cliente:
+            return direccion_almacedada
+
+        client = OpenAI(api_key=get_openai_key())
+        prompt = f"""eres un experto en direcciones tu trabajo es corregir completar y revisar direcciones, debes comparar la que tenemos almacenada en nuestra base con el comentario proporcionado por el cliente y revisar si debes completar la direccion si es la misma o si debes cambiarla totalmente por ejemplo tenemos esta calle 1 #45 sur "esa direccion esta mal, por favor a esta "calle 45 23" debes cambiarla toda si tenemos calle 123 #53 sur y el cliente dice " es calle 123 #53 norte" debes modificarla y si tenemos calle 45 y el cliente dice falta sur oriente la completas como calle 45 sur oriente UNICAMENTE DEVUELVE LA DIRECCIÓN COMO RESPUESTA NO DES EXPLICACIONES NI AGREGUES NADA APARTE DE LA DIRECCION
+Esta es la Direccion almacenada: {direccion_almacedada} y este es el mensaje del cliente {mensaje_cliente}"""
+
+        response = client.chat.completions.create(
+            model="gpt-5.1",
+            messages=[
+                {"role": "system", "content": "Eres un asistente experto en corrección de direcciones."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0
+        )
+        raw = response.choices[0].message.content
+        # normalizar a string y limpiar backticks
+        if isinstance(raw, dict):
+            raw = json.dumps(raw, ensure_ascii=False)
+        addr = str(raw).strip().strip("`").strip()
+        if not addr:
+            return None
+        log_message("Dirección extraída: " + addr, "INFO")
+        return addr
+    except Exception as e:
+        log_message(f"Error en corregir_direccion: {e}", "ERROR")
+        return direccion_almacedada
