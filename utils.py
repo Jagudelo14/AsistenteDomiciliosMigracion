@@ -551,8 +551,9 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         """ Guarda un pedido completo en la BD y retorna: { "idpedido": X, "codigo_unico": "P-00015" } """
         log_message('Iniciando función <GuardarPedidoCompleto>.', 'INFO')
         # ------------------------------- # 1. Obtener id_whatsapp # -------------------------------
-        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
+        q_idw = "SELECT * FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        log_message(f"[GuardarPedidoCompleto] Resultado consulta id_whatsapp: {res_idw}", "INFO")
         id_whatsapp = res_idw[0] if res_idw else None
         idsede = res_idw[11] if res_idw else 17
         direccion = res_idw[5] if res_idw else None

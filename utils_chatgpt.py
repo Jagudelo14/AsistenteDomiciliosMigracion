@@ -104,7 +104,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - sin_intencion
             - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) cosas similares a estos pedidos clasificalas como solicitud pedido
             - transferencia (quejas de mayor nivel)
-            - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo)
+            - validacion_pago ( tarjeta, efectivo)
             - recoger_restaurante   (NUEVA intención: cuando el usuario dice que pasará a recoger, irá al restaurante o lo recoge en tienda)
             - domicilio             (NUEVA intención: cuando el usuario pide entrega a domicilio, "tráelo", "envíamelo", "a mi casa", etc.)
 
@@ -114,6 +114,13 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - Si no puedes determinar la intención, usa "sin_intencion".
             - TE ACLARO QUE UN PRODUCTO EN COMBO SE TRATA DIFERENTE A UN PRODUCTO SOLO POR EJEMPLO UNA SIERRA QUESO ES DIFERENTE DE UNA SIERRA QUESO EN COMBO
             - SI TE DICEN UN PRODUCTO EN COMBO TRATALO COMO UN PRODUCTO DIFERENTE A SU HOMONIMO
+            - Cuando te hablan de combo analiza la frase completa y revisa que si hablan de una bebida lo mas probable es que se refiera a la bebida del combo
+            EJEMPLO: quiero una sierra melao en combo, la bebida quatro por faovr SE REFIERE A QUE LA BEBIDA DEL COMBO SEA UNA QUATRO
+            - Cuando te hablan de combo busca palabras que te indiquen explicitamente de una bebida extra a la del combo
+            EJEMPLO quiero una seirra queso en combo, la bebida del combo una coca cola por favor esta no lleva bebida adicional
+            EJEMPLO quiero una sierra clasica en combo y una gaseosa aparte, la gaseosa del combo una coca cola y la otra una quatro en este caso si te estan pidiendo una bebida adicional
+            - Si el usuario menciona detalles adicionales que modifican un producto ya mencionado (por ejemplo “que la bebida sea…”, “sin tomate”, “pero la salsa aparte”), debes agregar esas especificaciones al MISMO item.
+            - No debes crear un nuevo item cuando la frase solo aclara o modifica el producto anterior.
             """
 
         messages = [
@@ -127,6 +134,9 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             max_tokens=700,
             temperature=0
         )
+        tokens_used = _extract_total_tokens(respuesta)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] get_classifier tokens_used={tokens_used}", "DEBUG")
         raw_response: str = respuesta.choices[0].message.content.strip()
         logging.info(f"[Clasificador RAW] {raw_response!r}")
         json_str: str = limpiar_respuesta_json(raw_response)
@@ -201,6 +211,9 @@ def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, model: str = "gpt-3.
             temperature=0
         )
         text_output = response.output[0].content[0].text.strip()
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] clasificar_pregunta_menu_chatgpt tokens_used={tokens_used}", "DEBUG")
         result = json.loads(text_output)
         log_message('Finalizando función <ClasificarPreguntaMenuChatGPT>.', 'INFO')
         return result
@@ -295,12 +308,8 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
         Información del restaurante:
         🕐 Horario: Todos los días de 12:00 p.m. a 7:00 p.m.
         📍 Sedes:
-        - Galerías: Calle 53 #27-16
-        - Centro Mayor: CC Centro Mayor, local 3-019
-        - Centro Internacional: Calle 32 #07-10
-        - Chicó 2.0: Calle 100 #9A-45, local 7A
-        - Virrey: Carrera 15 #88-67
-        💳 Medios de pago: Nequi, Daviplata, tarjeta débito, crédito y efectivo.
+        - Cedritos Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca
+        💳 Medios de pago: tarjeta débito, crédito y efectivo.
 
         El cliente preguntó: "{pregunta_usuario}"
 
@@ -348,7 +357,9 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
             model=model,
             input=prompt
         )
-
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] responder_pregunta_menu_chatgpt tokens_used={tokens_used}", "DEBUG")
         raw_text = _extract_text_from_response(response)
         raw_text = _clean_model_output(raw_text)
         logging.info(f"[DEBUG] Texto crudo del modelo: {raw_text!r}")
@@ -377,7 +388,7 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
 
         result.setdefault("productos", [])
         result.setdefault("recomendacion", False)
-
+        log_message(f"Respuesta generada: {result}", "INFO")
         log_message('Finalizando función <ResponderPreguntaMenuChatGPT>.', 'INFO')
         return result
 
@@ -506,7 +517,57 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         G) Si 0 coinciden:
             → NOT_FOUND
             → sugerir máximo 3 alternativas de la misma categoría.
-
+        ======================================================
+        = COMPORTAMIENTO COMBOS =
+        ======================================================
+        - Un combo se trata como un producto independiente.
+        - Cuando el cliente pide un combo debes mapear la bebida del combo como el producto pero con el valor 0
+        Ejemplo: 
+        Si el clasificador te entrega esto {{'intent': 'solicitud_pedido', 'type': 'pedido', 'entities': {{'items': [{{'producto': 'sierra melao', 'especificaciones': [], 'modalidad': 'combo', 'bebida_combo': 'quatro'}}]}}}}
+        El resultado debe ser algo así: {{
+  "order_complete": true,
+  "items": [
+    {{
+      "requested": {{
+        "producto": "sierra melao en combo",
+        "especificaciones": [
+          "bebida: coca cola"
+        ]
+      }},
+      "status": "found",
+      "matched": {{
+        "name": "Sierra Melao en combo",
+        "id": "Sierra Melao en combo",
+        "price": 43700.0
+      }},
+      "candidates": [],
+      "modifiers_applied": [
+        "Bebida: Quatro 400 ml"
+      ],
+      "note": ""
+    }}
+  ],
+      {{
+      "requested": {{
+        "producto": "Quatro 400 ml",
+        "especificaciones": [
+          "bebida: Quatro 400 ml"
+        ]
+      }},
+      "status": "found",
+      "matched": {{
+        "name": "Quatro 400 ml",
+        "id": "Quatro 400 ml",
+        "price": 0
+      }},
+      "candidates": [],
+      "modifiers_applied": [
+        ""
+      ],
+      "note": ""
+    }}
+  "total_price": 43700.0
+}}
         ======================================================
         = REGLAS FINALES =
         ======================================================
@@ -516,7 +577,9 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - Respuesta SIEMPRE debe ser solamente el JSON.
         - Unicamente devuelves order complete: false cuando algun producto resulta en NOT_FOUND si todos los productos tienen estado Found order complete: True ESTA REGLA ES ABSOLUTA
         - Una Limonada no se refiere a productos de limon sino a las bebidas de limonada en el menú.
-
+        - En un combo la bebida debe tener precio 0 en matched.price pero debe sumarse al total del combo.
+        - Si el cliente pide un producto en combo debes mapear la bebida del combo como un producto adicional con precio 0 en matched.price
+        - Si la bebida no viene especificada la bebida predeterminada es COCA COLA ORIGINAL 400 ML
         MENÚ COMPLETO:
         {json.dumps(menu_items, ensure_ascii=False)}
 
@@ -537,6 +600,9 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         )
 
         text_output = response.output[0].content[0].text.strip()
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] mapear_pedido tokens_used={tokens_used}", "DEBUG")
         log_message(f'Output crudo de modelo en <MapearPedidoAlMenu>: {text_output}', 'DEBUG')
 
         clean = text_output.strip()
@@ -621,6 +687,9 @@ def sin_intencion_respuesta_variable(contenido_usuario: str, nombre_cliente: str
             temperature=0.9
         )
         mensaje = response.choices[0].message.content
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] sin_intencion tokens_used={tokens_used}", "DEBUG")
         log_message('Finalizando función <sin_intencion>.', 'INFO')
         return mensaje.strip()
     except Exception as e:
@@ -710,7 +779,9 @@ No incluyas texto adicional fuera del JSON.
         )
 
         raw = response.choices[0].message.content.strip()
-
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] saludo_dynamic tokens_used={tokens_used}", "DEBUG")
         try:
             data = json.loads(raw)
         except:  # noqa: E722
@@ -812,6 +883,9 @@ def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) ->
             temperature=0.6
         )
         raw = response.choices[0].message.content.strip()
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] respuesta_quejas tokens_used={tokens_used}", "DEBUG")
         try:
             data = json.loads(raw)
         except:  # noqa: E722
@@ -886,6 +960,9 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
             temperature=0.6
         )
         raw = response.choices[0].message.content.strip()
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] respuesta_quejas_graves_ia tokens_used={tokens_used}", "DEBUG")
         try:
             data = json.loads(raw)
         except:  # noqa: E722
@@ -1019,6 +1096,9 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             temperature=0.2
         )
         raw = response.choices[0].message.content
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] pedido_incompleto_dynamic tokens_used={tokens_used}", "DEBUG")
         try:
             data = json.loads(raw)
         except Exception:
@@ -1091,6 +1171,11 @@ def actualizar_pedido_con_mensaje(
         """
         client = OpenAI()
         response = client.responses.create(model=model, input=prompt, temperature=0)
+        
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] actualizar_pedido_con_mensaje tokens_used={tokens_used}", "DEBUG")
+
         raw = ""
         try:
             raw = response.output[0].content[0].text.strip()
@@ -1261,7 +1346,9 @@ def generar_mensaje_confirmacion_pedido(
         )
 
         raw = response.output[0].content[0].text.strip()
-
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] generar_mensaje_confirmacion_pedido tokens_used={tokens_used}", "DEBUG")
         # Limpieza de bloques ```json
         clean = raw
         clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
@@ -1364,7 +1451,6 @@ TAREA:
 - Menciona el local: {nombre_local}
 - Lista opciones disponibles:
   * Efectivo
-  * Transferencia (Nequi, Daviplata, Bre-B)
   * Tarjeta débito
   * Tarjeta crédito
 
@@ -1385,6 +1471,9 @@ Debe responder estrictamente un JSON con el campo:
         )
 
         raw_text = response.choices[0].message.content
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] solicitar_medio_pago tokens_used={tokens_used}", "DEBUG")
         try:
             data = json.loads(raw_text)
         except json.JSONDecodeError:
@@ -1490,6 +1579,9 @@ def enviar_menu_digital(nombre: str, nombre_local: str, menu, promociones_list: 
             temperature=0.95
         )
         raw = response.choices[0].message.content.strip()
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] enviar_menu_digital tokens_used={tokens_used}", "DEBUG")
         try:
             data = json.loads(raw)
         except Exception:
@@ -1566,7 +1658,11 @@ def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: dict, pr
             temperature=0.8
         )
         raw = response.choices[0].message.content.strip()
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] responder_sobre_pedido tokens_used={tokens_used}", "DEBUG")
         try:
+            log_message(f'Respuesta cruda de GPT en <ResponderSobrePedido>: {raw}', 'DEBUG')
             data = json.loads(raw)
         except:  # noqa: E722
             data = {
@@ -1642,7 +1738,9 @@ def responder_sobre_promociones(nombre: str, nombre_local: str, promociones_info
         )
 
         raw = response.choices[0].message.content.strip()
-
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] responder_sobre_promociones tokens_used={tokens_used}", "DEBUG")
         try:
             data = json.loads(raw)
         except:  # noqa: E722
@@ -1713,6 +1811,9 @@ def interpretar_eleccion_promocion(pregunta_usuario: str, info_promociones_str: 
     )
     try:
         raw = response.output_text   # ← ESTE ES EL CORRECTO
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] interpretar_eleccion_promocion tokens_used={tokens_used}", "DEBUG")
         data = json.loads(raw)
     except Exception as e:
         log_message(f"Error en <interpretar_eleccion_promocion>: {e}", "ERROR")
@@ -1848,6 +1949,9 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
             temperature=0.8
         )
         raw = response.choices[0].message.content.strip()
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] pedido_incompleto_dynamic_promocion tokens_used={tokens_used}", "DEBUG")
         try:
             data = json.loads(raw)
         except Exception:
@@ -1913,6 +2017,9 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
             temperature=0
         )
         raw = response.output_text
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] mapear_modo_pago tokens_used={tokens_used}", "DEBUG")
         data = json.loads(raw)
         metodo = data.get("metodo", "desconocido")
         log_message('Finalizando función <mapear_modo_pago>.', 'INFO')
@@ -1961,6 +2068,9 @@ FORMATO ESTRICTO:
         )
 
         raw = response.choices[0].message.content
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] solicitar_metodo_recogida tokens_used={tokens_used}", "DEBUG")
         # normalizar a str
         if isinstance(raw, dict):
             mensaje = raw.get("mensaje", "")
@@ -2089,7 +2199,9 @@ REGLAS:
         )
 
         raw = response.output[0].content[0].text.strip()
-
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] generar_mensaje_confirmacion_modificacion_pedido tokens_used={tokens_used}", "DEBUG")
         clean = raw
         clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
         clean = re.sub(r'^```', '', clean).strip()
@@ -2168,6 +2280,9 @@ def actualizar_pedido_con_mensaje_modificacion(
         """
         client = OpenAI()
         response = client.responses.create(model=model, input=prompt, temperature=0)
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] actualizar_pedido_con_mensaje_modificacion tokens_used={tokens_used}", "DEBUG")
 
         raw = ""
         try:
@@ -2306,7 +2421,9 @@ def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> di
         )
 
         raw = response.choices[0].message.content.strip()
-
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] solicitar_confirmacion_direccion tokens_used={tokens_used}", "DEBUG")
         try:
             data = json.loads(raw)
         except:  # noqa: E722
@@ -2382,6 +2499,9 @@ Instrucciones del mensaje:
             max_tokens=200,
             temperature=0.5
         )
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] generar_mensaje_invitar_pago tokens_used={tokens_used}", "DEBUG")
 
         return response.choices[0].message.content.strip()
 
@@ -2403,11 +2523,7 @@ El cliente se llama: {nombre_cliente}
 Genera un mensaje corto y amable invitándolo a escoger una de las siguientes sedes:
 
 📍 **Sedes disponibles**
-- Galerías: Calle 53 #27-16
-- Centro Mayor: CC Centro Mayor, local 3-019
-- Centro Internacional: Calle 32 #07-10
-- Chicó 2.0: Calle 100 #9A-45, local 7A
-- Virrey: Carrera 15 #88-67
+- Cedritos: Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca
 
 Instrucciones:
 - Habla como asistente conversacional (no en formato técnico).
@@ -2428,6 +2544,10 @@ Instrucciones:
             max_tokens=200,
             temperature=0.7
         )
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] generar_mensaje_seleccion_sede tokens_used={tokens_used}", "DEBUG")
+
         return response.choices[0].message.content.strip()
     except Exception as e:
         log_message(f"Error al generar mensae seleccion sede {e}", "ERROR")
@@ -2487,7 +2607,13 @@ Sedes disponibles (datos reales):
             {"role": "user", "content": prompt}
         ]
     )
+    # Registrar consumo de tokens
+
     nombre_predicho = completion.choices[0].message.content
+    tokens_used = _extract_total_tokens(nombre_predicho)
+    if tokens_used is not None:
+        log_message(f"[OpenAI] mapear_sede_cliente tokens_used={tokens_used}", "DEBUG")
+
     if nombre_predicho.upper() == "NINGUNA":
         return {"error": "No se pudo identificar la sede mencionada."}
 
@@ -2552,7 +2678,10 @@ Instrucciones del mensaje:
             ],
             temperature=0.4
         )
-
+        # Registrar consumo de tokens
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] generar_mensaje_recogida_invitar_pago tokens_used={tokens_used}", "DEBUG")
         return response.choices[0].message.content
 
     except Exception as e:
@@ -2597,7 +2726,10 @@ Si no encuentras un campo coloca exactamente "No proporcionado" como valor para 
             temperature=0
         )
         raw = response.choices[0].message.content.strip()
-
+        # Registrar consumo de tokens
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] extraer_info_personal tokens_used={tokens_used}", "DEBUG")
         # Limpieza básica de bloques ```json``` o ``` alrededor
         if raw.startswith("```"):
             raw = raw.strip("`").strip()
@@ -2675,7 +2807,10 @@ Instrucciones del mensaje:
         ],
         temperature=0.4
     )
-
+        # Registrar consumo de tokens
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] direccion_bd tokens_used={tokens_used}", "DEBUG")
         return response.choices[0].message.content
     except Exception as e:
         log_message(f"<direccion_bd>Error en generar mensaje confirmación {e}", "ERROR")
@@ -2705,6 +2840,10 @@ RESPONDE únicamente con la dirección, nada más."""
             temperature=0
         )
         raw = response.choices[0].message.content
+        # Registrar consumo de tokens
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] get_direction tokens_used={tokens_used}", "DEBUG")
         # normalizar a string y limpiar backticks
         if isinstance(raw, dict):
             raw = json.dumps(raw, ensure_ascii=False)
@@ -2742,6 +2881,10 @@ Esta es la Direccion almacenada: {direccion_almacedada} y este es el mensaje del
             temperature=0
         )
         raw = response.choices[0].message.content
+                # Registrar consumo de tokens
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] corregir_direccion tokens_used={tokens_used}", "DEBUG")
         # normalizar a string y limpiar backticks
         if isinstance(raw, dict):
             raw = json.dumps(raw, ensure_ascii=False)
@@ -2753,3 +2896,60 @@ Esta es la Direccion almacenada: {direccion_almacedada} y este es el mensaje del
     except Exception as e:
         log_message(f"Error en corregir_direccion: {e}", "ERROR")
         return direccion_almacedada
+
+
+# ...existing code...
+def _extract_total_tokens(resp) -> int | None:
+    """Extrae total_tokens de distintos formatos de respuesta OpenAI (robusto)."""
+    try:
+        # objeto con atributo usage (p. ej. chat.completions)
+        usage = getattr(resp, "usage", None)
+        if usage:
+            return int(getattr(usage, "total_tokens", usage.get("total_tokens") if isinstance(usage, dict) else None) or 0)
+        # dict-like respuesta
+        if isinstance(resp, dict):
+            return resp.get("usage", {}).get("total_tokens")
+        # algunos wrappers exponen output_text y usage como dict
+        return None
+    except Exception:
+        return None
+
+
+def clasificador_consulta_menu(pedido_resumen: str) -> str:
+    """
+    Usa ChatGPT para clasificar si es una pregunta solicitando el menu o aclaracion de prodcuto
+    """
+    try:
+        log_message('Iniciando función <clasificador_consulta_menu>.', 'INFO')
+
+        prompt = f"""
+Eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada, La Cima del Sabor.
+Tu tarea es determinar si el siguiente mensaje del cliente es una consulta sobre el menú o una aclaración sobre un producto.
+Mensaje del cliente: "{pedido_resumen}"
+Responde SOLO con una de las siguientes opciones:
+- consulta_menu si el cliente está preguntando por el menú.
+- aclaracion_producto si el cliente está preguntando algo sobre un producto específico.
+BAJO NINGUNA CIRCUSTANCIA PUEDES USAR ALGO DIFERENTE A ESTAS DOS RESPUESTAS Y NO DEBES AÑADIR NADA MAS.
+"""
+
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres PAKO, asistente experto en clasificación de mensajes."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0
+        )
+
+        raw = response.choices[0].message.content.strip()
+        # Registrar consumo de tokens
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] clasificador_consulta_menu tokens_used={tokens_used}", "DEBUG")
+        log_message('Finalizando función <clasificador_consulta_menu>.', 'INFO')
+        log_message(f'Respuesta de clasificación: {raw}', 'INFO')
+        return raw
+    except Exception as e:
+        log_message(f'Error en función <clasificador_consulta_menu>: {e}', 'ERROR')
+        return "error_clasificacion"
