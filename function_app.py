@@ -1,6 +1,6 @@
 # function_app.py
 # Last modified: 2025-09-30 by Andrés Bermúdez
-#Cambios 3 7 diciembre
+#CAMBIOS 9 DICIEMBRE 10:20 AM
 import azure.functions as func
 from datetime import datetime
 import logging
@@ -71,9 +71,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         #Validación mensaje duplicado
-        #if validate_duplicated_message(message_id):
-        #    logging.info(f"Mensaje duplicado: {message_id}")
-        #    return func.HttpResponse("Mensaje duplicado", status_code=200)
+        if validate_duplicated_message(message_id):
+            logging.info(f"Mensaje duplicado: {message_id}")
+            return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         nombre_cliente: str
         respuesta_bot : str
