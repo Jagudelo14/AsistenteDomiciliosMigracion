@@ -1,6 +1,6 @@
 # function_app.py
 # Last modified: 2025-09-30 by Andrés Bermúdez
-#CAMBIOS 9 DICIEMBRE 10:20 AM
+#CAMBIOS 9 DICIEMBRE 11:30 AM
 import azure.functions as func
 from datetime import datetime
 import logging
@@ -425,3 +425,4 @@ def health_check(req: func.HttpRequest) -> func.HttpResponse:
             status_code=500,
             mimetype="text/html"
         )
+

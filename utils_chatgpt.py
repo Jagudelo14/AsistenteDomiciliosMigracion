@@ -8,7 +8,7 @@ from typing import Any, List, Optional, Tuple, Dict
 import os
 import json
 import ast
-from utils import REPLACE_PHRASES, _apply_direct_selection_from_text, obtener_pedido_por_codigo, send_text_response, limpiar_respuesta_json, log_message, _safe_parse_order, _merge_items, _price_of_item, convert_decimals, to_json_safe
+from utils import REPLACE_PHRASES, _apply_direct_selection_from_text, obtener_pedido_por_codigo, send_text_response, limpiar_respuesta_json, log_message, _safe_parse_order, _merge_items, _price_of_item, convert_decimals, to_json_safe,corregir_total_price_en_result
 from utils_database import execute_query
 from datetime import datetime, date
 
@@ -59,26 +59,6 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
                 ]
             }
             }
-            EJEMPLO DE ENTRADA:
-            "me das una sierra picante con extra picante y una malteada de chocolate"
-
-            EJEMPLO DE SALIDA:
-            {
-            "intent": "solicitud_pedido",
-            "type": "pedido",
-            "entities": {
-                "items": [
-                {
-                    "producto": "sierra picante",
-                    "especificaciones": ["extra picante"]
-                },
-                {
-                    "producto": "malteada de chocolate",
-                    "especificaciones": []
-                }
-                ]
-            }
-            }
             Debes responder únicamente en formato JSON válido con la siguiente estructura:
             {
             "intent": "<una de las intenciones permitidas>",
@@ -104,7 +84,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - sin_intencion
             - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) cosas similares a estos pedidos clasificalas como solicitud pedido
             - transferencia (quejas de mayor nivel)
-            - validacion_pago ( tarjeta, efectivo)
+            - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo)
             - recoger_restaurante   (NUEVA intención: cuando el usuario dice que pasará a recoger, irá al restaurante o lo recoge en tienda)
             - domicilio             (NUEVA intención: cuando el usuario pide entrega a domicilio, "tráelo", "envíamelo", "a mi casa", etc.)
 
@@ -113,12 +93,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - No uses comentarios, explicaciones o saltos de línea innecesarios.
             - Si no puedes determinar la intención, usa "sin_intencion".
             - TE ACLARO QUE UN PRODUCTO EN COMBO SE TRATA DIFERENTE A UN PRODUCTO SOLO POR EJEMPLO UNA SIERRA QUESO ES DIFERENTE DE UNA SIERRA QUESO EN COMBO
-            - SI TE DICEN UN PRODUCTO EN COMBO TRATALO COMO UN PRODUCTO DIFERENTE A SU HOMONIMO
-            - Cuando te hablan de combo analiza la frase completa y revisa que si hablan de una bebida lo mas probable es que se refiera a la bebida del combo
-            EJEMPLO: quiero una sierra melao en combo, la bebida quatro por faovr SE REFIERE A QUE LA BEBIDA DEL COMBO SEA UNA QUATRO
-            - Cuando te hablan de combo busca palabras que te indiquen explicitamente de una bebida extra a la del combo
-            EJEMPLO quiero una seirra queso en combo, la bebida del combo una coca cola por favor esta no lleva bebida adicional
-            EJEMPLO quiero una sierra clasica en combo y una gaseosa aparte, la gaseosa del combo una coca cola y la otra una quatro en este caso si te estan pidiendo una bebida adicional
+            - SI TE DICEN UN PRODUCTO EN COMBO TRATALO COMO UN PRODUCTO DIFERENTE A SU HOMONIMO SOLO
             - Si el usuario menciona detalles adicionales que modifican un producto ya mencionado (por ejemplo “que la bebida sea…”, “sin tomate”, “pero la salsa aparte”), debes agregar esas especificaciones al MISMO item.
             - No debes crear un nuevo item cuando la frase solo aclara o modifica el producto anterior.
             """
@@ -523,7 +498,7 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - Un combo se trata como un producto independiente.
         - Cuando el cliente pide un combo debes mapear la bebida del combo como el producto pero con el valor 0
         Ejemplo: 
-        Si el clasificador te entrega esto {{'intent': 'solicitud_pedido', 'type': 'pedido', 'entities': {{'items': [{{'producto': 'sierra melao', 'especificaciones': [], 'modalidad': 'combo', 'bebida_combo': 'quatro'}}]}}}}
+        Si el clasificador te entrega esto {{'items': [{{'producto': 'sierra melao en combo', 'modalidad': '', 'especificaciones': ['bebida: coca cola'], 'cantidad': 1}}]}}
         El resultado debe ser algo así: {{
   "order_complete": true,
   "items": [
@@ -542,22 +517,22 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
       }},
       "candidates": [],
       "modifiers_applied": [
-        "Bebida: Quatro 400 ml"
+        "Bebida: Coca Cola Original 400 ml"
       ],
       "note": ""
     }}
   ],
       {{
       "requested": {{
-        "producto": "Quatro 400 ml",
+        "producto": "Coca Cola Original 400 ml",
         "especificaciones": [
-          "bebida: Quatro 400 ml"
+          "bebida: Coca Cola Original 400 ml"
         ]
       }},
       "status": "found",
       "matched": {{
-        "name": "Quatro 400 ml",
-        "id": "Quatro 400 ml",
+        "name": "Coca Cola Original 400 ml",
+        "id": "Coca Cola Original 400 ml",
         "price": 0
       }},
       "candidates": [],
@@ -579,7 +554,9 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - Una Limonada no se refiere a productos de limon sino a las bebidas de limonada en el menú.
         - En un combo la bebida debe tener precio 0 en matched.price pero debe sumarse al total del combo.
         - Si el cliente pide un producto en combo debes mapear la bebida del combo como un producto adicional con precio 0 en matched.price
-        - Si la bebida no viene especificada la bebida predeterminada es COCA COLA ORIGINAL 400 ML
+        - Si la bebida no viene especificada la bebida predeterminada es COCA COLA ORIGINAL 400 ML solo usarla cuando el combo no trae eleccion de bebida
+        - Si viene una bebida elegida se reemplaza la predeterminada
+        - Ten en cuenta que para el precio Total no debes tener en cuenta unicamente el producto sino tambien las unidades de cada uno
         MENÚ COMPLETO:
         {json.dumps(menu_items, ensure_ascii=False)}
 
@@ -604,7 +581,8 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         if tokens_used is not None:
             log_message(f"[OpenAI] mapear_pedido tokens_used={tokens_used}", "DEBUG")
         log_message(f'Output crudo de modelo en <MapearPedidoAlMenu>: {text_output}', 'DEBUG')
-
+        ##### Validacion costo
+    
         clean = text_output.strip()
         clean = re.sub(r'^```json', '', clean, flags=re.IGNORECASE).strip()
         clean = re.sub(r'^```', '', clean).strip()
@@ -615,6 +593,7 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
 
         log_message(f'Resultado parseado en <MapearPedidoAlMenu>: {result}', 'DEBUG')
         log_message('Finalizando función <MapearPedidoAlMenu>.', 'INFO')
+        result = corregir_total_price_en_result(result)
         return result
 
     except json.JSONDecodeError:
@@ -1002,7 +981,7 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
                 * Sugerir 1 a 3 opciones REALES y relacionadas del menú.
             - Si el cliente pide algo MUY GENERAL (ej: "una hamburguesa", "una bebida"), debes:
                 * Dar 1 a 3 recomendaciones REALES del menú que sí coincidan.
-            - SIEMPRE pedir que el cliente vuelva a escribir TODO su pedido claramente.
+            - Pedir que el cliente aclare el producto que falta
             -Si el cliente pide algo válido pero con nombre aproximado
                 * Acepta coincidencias parciales SOLO si es OBVIO que se refiere a un producto real.
                 * Nunca adivines si hay más de una opción posible.
@@ -1231,6 +1210,8 @@ def actualizar_pedido_con_mensaje(
         logging.info("Finalizando actualizar_pedido_con_mensaje.")
         log_message('Finalizando función <actualizar_pedido_con_mensaje>.', 'INFO')
         log_message(f'Resultado de <actualizar_pedido_con_mensaje>: {result}', 'DEBUG')
+        ##validacion costo
+        result= corregir_total_price_en_result(result)
         return result
     except Exception as e:
         logging.exception("Error en actualizar_pedido_con_mensaje")
@@ -2952,4 +2933,42 @@ BAJO NINGUNA CIRCUSTANCIA PUEDES USAR ALGO DIFERENTE A ESTAS DOS RESPUESTAS Y NO
         return raw
     except Exception as e:
         log_message(f'Error en función <clasificador_consulta_menu>: {e}', 'ERROR')
+        return "error_clasificacion"
+    
+def clasificar_modificacion_pedido(mensaje_cliente: str) -> dict:
+    """
+    Usa ChatGPT para clasificar si el mensaje del cliente indica si desea modificar el pedido o si desea tomarlo asi como está
+    """
+    try:
+        log_message('Iniciando función <generar_mensaje_confirmacion_modificacion_pedido>.', 'INFO')
+
+        prompt = f"""
+eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada, La Cima del Sabor.
+Tu tarea es determinar si el siguiente mensaje del cliente indica que desea modificar su pedido o si desea tomarlo tal como está.
+Mensaje del cliente: "{mensaje_cliente}"
+RESPONDE SOLO CON SOLO UNA DE LAS SIGUIENTES INTENCIONES
+MANTENER PEDIDO
+ACTUALIZAR PEDIDO
+Si el mensaje incluye un producto clasificalo como actualizar pedido"""
+        
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres PAKO, asistente experto en clasificación de mensajes."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0
+        )
+
+        raw = response.choices[0].message.content.strip()
+        # Registrar consumo de tokens
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] clasificador_consulta_menu tokens_used={tokens_used}", "DEBUG")
+        log_message('Finalizando función <clasificador_consulta_menu>.', 'INFO')
+        log_message(f'Respuesta de clasificación: {raw}', 'INFO')
+        return raw
+    except Exception as e:
+        log_message(f'Error en función <clasificar_modificacion_pedido>: {e}', 'ERROR')
         return "error_clasificacion"

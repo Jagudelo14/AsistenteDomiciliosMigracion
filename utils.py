@@ -1648,3 +1648,163 @@ def obtener_direccion(sender: str, id_restaurante: str) -> bool:
         log_message(f"validate_personal_data error: {e}", "ERROR")
         logging.error(f"validate_personal_data error: {e}")
         return False
+
+def actualizar_order_complete_en_observaciones(sender: str) -> dict:
+    """
+    Lee la columna `observaciones` (json/jsonb) de public.clasificacion_intenciones_futuras
+    para el telefono=sender, fuerza order_complete = True, recalcula total_price desde
+    los items y actualiza la fila en la base. Retorna dict con el resultado y la nueva observación.
+    """
+    try:
+        log_message("Iniciando <actualizar_order_complete_en_observaciones>", "INFO")
+        query_sel = """
+            SELECT observaciones
+            FROM public.clasificacion_intenciones_futuras
+            WHERE telefono = %s
+            LIMIT 1;
+        """
+        res = execute_query(query_sel, (sender,), fetchone=True)
+        if not res or res[0] is None:
+            log_message(f"No se encontró observaciones para {sender}", "INFO")
+            return {"success": False, "msg": "No existe registro o observaciones vacías."}
+
+        observaciones_raw = res[0]
+
+        # Normalizar a dict
+        if isinstance(observaciones_raw, str):
+            try:
+                observaciones = json.loads(observaciones_raw)
+            except Exception:
+                try:
+                    observaciones = ast.literal_eval(observaciones_raw)
+                except Exception:
+                    observaciones = {"order_complete": False, "items": [], "total_price": 0.0}
+        elif isinstance(observaciones_raw, dict):
+            observaciones = observaciones_raw
+        else:
+            # tipo inesperado -> intentar convertir a str then parse
+            try:
+                observaciones = json.loads(str(observaciones_raw))
+            except Exception:
+                observaciones = {"order_complete": False, "items": [], "total_price": 0.0}
+
+        # Usar estructura segura
+        pedido = _safe_parse_order(observaciones)
+
+        # Forzar order_complete True
+        pedido["order_complete"] = True
+
+        # Recalcular total_price sumando total_price de cada item o unit_price*cantidad
+        total = 0.0
+        for it in pedido.get("items", []) or []:
+            if not isinstance(it, dict):
+                continue
+            tp = None
+            # preferir total_price
+            if "total_price" in it and it.get("total_price") is not None:
+                try:
+                    tp = float(it.get("total_price"))
+                except Exception:
+                    tp = None
+            # si no, intentar unit_price * quantity
+            if tp is None:
+                qty = it.get("quantity") or it.get("cantidad") or it.get("qty") or 1
+                unit = it.get("unit_price") or it.get("price") or it.get("matched", {}).get("price") if isinstance(it.get("matched"), dict) else 0
+                try:
+                    tp = float(unit) * float(qty)
+                except Exception:
+                    tp = 0.0
+            try:
+                total += float(tp or 0.0)
+            except Exception:
+                continue
+
+        pedido["total_price"] = round(total, 2)
+
+        # Serializar y actualizar DB (usar jsonb cast)
+        observaciones_db = json.dumps(pedido, ensure_ascii=False)
+        query_upd = """
+            UPDATE public.clasificacion_intenciones_futuras
+            SET observaciones = %s::jsonb,
+                fecha_actualizacion = CURRENT_TIMESTAMP
+            WHERE telefono = %s
+            RETURNING telefono;
+        """
+        upd_res = execute_query(query_upd, (observaciones_db, sender), fetchone=True)
+        if not upd_res:
+            log_message(f"No se pudo actualizar observaciones para {sender}", "ERROR")
+            return {"success": False, "msg": "Fallo al actualizar la base de datos."}
+
+        log_message(f"Observaciones actualizadas para {sender}", "INFO")
+        return {"success": True, "telefono": sender, "observaciones": pedido}
+    except Exception as e:
+        log_message(f"Error en <actualizar_order_complete_en_observaciones>: {e}", "ERROR")
+        logging.error(f"Error actualizar_order_complete_en_observaciones: {e}")
+        return {"success": False, "error": str(e)}
+    
+
+def corregir_total_price_en_result(result: Dict) -> Dict:
+    """
+    Recalcula y corrige únicamente el campo 'total_price' en el dict `result`.
+    - No modifica ninguna otra clave ni estructura del JSON.
+    - Intenta usar _price_of_item (si existe) para respetar reglas internas.
+    - Si falla, hace fallback usando matched.price y buscando 'Cantidad: N' en note
+      o posibles campos de cantidad en requested.
+    - Retorna el mismo dict con result['total_price'] actualizado (float, 2 decimales).
+    """
+    log_message("Iniciando corregir_total_price_en_result", "INFO")
+    try:
+        if not isinstance(result, dict):
+            return result
+
+        items = result.get("items") or []
+        total = 0.0
+
+        for it in items:
+            # 1) intentar usar la función interna si está disponible y no lanza error
+            try:
+                price_item = _price_of_item(it)
+                total += float(price_item or 0)
+                continue
+            except Exception:
+                # si falla, caer al cálculo manual
+                pass
+
+            # 2) cálculo manual: precio unitario desde matched.price
+            matched = it.get("matched") or {}
+            unit_price = 0.0
+            try:
+                unit_price = float(matched.get("price") or 0)
+            except Exception:
+                unit_price = 0.0
+
+            # 3) detectar cantidad: prioridad note -> requested.cantidad / qty
+            qty = 1
+            note = str(it.get("note") or "")
+            m = re.search(r'cantidad\s*[:=]?\s*(\d+)', note, flags=re.I)
+            if m:
+                try:
+                    qty = int(m.group(1))
+                except Exception:
+                    qty = 1
+            else:
+                requested = it.get("requested") or {}
+                if isinstance(requested, dict):
+                    q = requested.get("cantidad") or requested.get("qty") or requested.get("cantidad_total")
+                    if isinstance(q, (int, float)) and q > 0:
+                        qty = int(q)
+                    elif isinstance(q, str) and q.isdigit():
+                        qty = int(q)
+
+            total += unit_price * qty
+
+        total = round(float(total), 2)
+        
+        # Actualizar únicamente el campo total_price
+        result["total_price"] = total
+        log_message(f"total_price corregido: {total}", "DEBUG")
+        return result
+
+    except Exception as e:
+        log_message(f"Error en corregir_total_price_en_result: {e}", "ERROR")
+        return result
