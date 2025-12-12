@@ -96,6 +96,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - SI TE DICEN UN PRODUCTO EN COMBO TRATALO COMO UN PRODUCTO DIFERENTE A SU HOMONIMO SOLO
             - Si el usuario menciona detalles adicionales que modifican un producto ya mencionado (por ejemplo “que la bebida sea…”, “sin tomate”, “pero la salsa aparte”), debes agregar esas especificaciones al MISMO item.
             - No debes crear un nuevo item cuando la frase solo aclara o modifica el producto anterior.
+            - SI EL CLIENTE TE PIDE UN PRODUCTO EN COMBO NUNCA DEBES AÑADIR SU VERSIÓN SOLO COMO PARTE DEL PEDIDO A MENOS QUE LO EXIJA EXPLICITAMENTE EL MENSAJE (POR EJEMPLO: "UNA SIERRA QUESO Y UNA SIERRA QUESO EN COMBO" SI DEBES AÑADIR AMBOS PRODUCTOS AL PEDIDO EJEMPLO 2: "UNA SIERRA QUESO EN COMBO" NO DEBES AÑADIR SIERRA QUESO SOLO)
             """
 
         messages = [
@@ -554,8 +555,6 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - Una Limonada no se refiere a productos de limon sino a las bebidas de limonada en el menú.
         - En un combo la bebida debe tener precio 0 en matched.price pero debe sumarse al total del combo.
         - Si el cliente pide un producto en combo debes mapear la bebida del combo como un producto adicional con precio 0 en matched.price
-        - Si la bebida no viene especificada la bebida predeterminada es COCA COLA ORIGINAL 400 ML solo usarla cuando el combo no trae eleccion de bebida
-        - Si viene una bebida elegida se reemplaza la predeterminada
         - Ten en cuenta que para el precio Total no debes tener en cuenta unicamente el producto sino tambien las unidades de cada uno
         MENÚ COMPLETO:
         {json.dumps(menu_items, ensure_ascii=False)}
