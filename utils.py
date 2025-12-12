@@ -167,26 +167,28 @@ def get_client_database(numero_celular: str, id_restaurante: str) -> bool:
     except Exception as e:
         log_message(f'Error al hacer uso de función <get_client_database>: {e}.', 'ERROR')
         logging.error(f'Error al hacer uso de función <get_client_database>: {e}.')
-        return False
+        return 
 
 def handle_create_client(sender: str, datos: dict, id_restaurante: str, es_temporal: bool) -> str:
     try:
         log_message('Iniciando función <handleCreateClient>.', 'INFO')
         logging.info('Iniciando función <handleCreateClient>.')
         nombre = "Desconocido"
+        id_sede = 21
         if isinstance(datos, dict):
             nombre = datos.get("nombre", "Desconocido")
         logging.info(f'Nombre del cliente: {nombre}')
         logging.info(f'Teléfono (sender): {sender}')
         execute_query("""
-            INSERT INTO clientes_whatsapp (nombre, telefono, id_restaurante, es_temporal)
-            VALUES (%s, %s, %s, %s)
+            INSERT INTO clientes_whatsapp (nombre, telefono, id_restaurante, es_temporal,id_sede)
+            VALUES (%s, %s, %s, %s, %s)
             ON CONFLICT (telefono)
             DO UPDATE SET 
                 nombre = EXCLUDED.nombre,
                 es_temporal = EXCLUDED.es_temporal,
-                id_restaurante = EXCLUDED.id_restaurante;
-        """, (nombre, sender, id_restaurante, es_temporal))
+                id_restaurante = EXCLUDED.id_restaurante,
+                id_sede = EXCLUDED.id_sede;
+        """, (nombre, sender, id_restaurante, es_temporal,id_sede))
 
         logging.info('Cliente creado o actualizado exitosamente.')
         log_message('Finalizando función <handleCreateClient>.', 'INFO')
