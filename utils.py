@@ -169,16 +169,19 @@ def get_client_database(numero_celular: str, id_restaurante: str) -> bool:
         logging.error(f'Error al hacer uso de función <get_client_database>: {e}.')
         return 
 
-def handle_create_client(sender: str, datos: dict, id_restaurante: str, es_temporal: bool) -> str:
+def handle_create_client(sender: str, datos: str, id_restaurante: str, es_temporal: bool) -> str:
     try:
         log_message('Iniciando función <handleCreateClient>.', 'INFO')
         logging.info('Iniciando función <handleCreateClient>.')
+        log_message(f'Datos recibidos para crear/actualizar cliente: {datos}', 'INFO')
         nombre = "Desconocido"
         id_sede = 21
-        if isinstance(datos, dict):
-            nombre = datos.get("nombre", "Desconocido")
+        if datos is not None:
+            nombre = datos
         logging.info(f'Nombre del cliente: {nombre}')
         logging.info(f'Teléfono (sender): {sender}')
+        log_message(f'Nombre del cliente: {nombre}', 'INFO')
+        log_message(f'Teléfono (sender): {sender}', 'INFO')
         execute_query("""
             INSERT INTO clientes_whatsapp (nombre, telefono, id_restaurante, es_temporal,id_sede)
             VALUES (%s, %s, %s, %s, %s)
@@ -192,6 +195,7 @@ def handle_create_client(sender: str, datos: dict, id_restaurante: str, es_tempo
 
         logging.info('Cliente creado o actualizado exitosamente.')
         log_message('Finalizando función <handleCreateClient>.', 'INFO')
+        log_message(f'Cliente creado o actualizado exitosamente.{nombre}', 'INFO')
         return nombre.split()[0]  # Retorna el primer nombre
     except Exception as e:
         log_message(f'Error al hacer uso de función <handleCreateClient>: {e}.', 'ERROR')

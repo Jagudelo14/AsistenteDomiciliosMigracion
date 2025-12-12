@@ -58,7 +58,7 @@ def save_personal_data(sender: str, id_restaurante: str, tipo_doc: str, n_doc: s
         logging.error(f"save_personal_data error: {e}")
         raise
 
-def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, n_doc: str, email: str) -> None:
+def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, n_doc: str, email: str, nombre: str) -> None:
     """
     Actualiza solo los campos que traigan valor útil (no None y != "No proporcionado").
     """
@@ -74,6 +74,9 @@ def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, 
         if email and email != "No proporcionado":
             sets.append('email = %s')
             params.append(email.strip())
+        if nombre and nombre != "No proporcionado":
+            sets.append('nombre = %s')
+            params.append(nombre.strip())
 
         if not sets:
             # nada que actualizar
@@ -93,13 +96,13 @@ def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, 
 
 def check_and_mark_datos_personales(sender: str, id_restaurante: str) -> list:
     """
-    Consulta los 3 campos (Tipo_Doc, N_Doc, email).
+    Consulta los 4 campos (Tipo_Doc, N_Doc, email).
     - Si todos están presentes y no vacíos marca datos_personales = True.
     - Devuelve lista de columnas faltantes (ej: ["Tipo_Doc","email"]) — vacía si ya está completo.
     """
     try:
         query = """
-            SELECT "Tipo_Doc", "N_Doc", email
+            SELECT "Tipo_Doc", "N_Doc", email , nombre
             FROM public.clientes_whatsapp
             WHERE telefono = %s AND id_restaurante = %s;
         """
@@ -113,6 +116,8 @@ def check_and_mark_datos_personales(sender: str, id_restaurante: str) -> list:
             missing.append("N_Doc")
         if not row[2] or str(row[2]).strip() == "":
             missing.append("email")
+        if not row[3] or str(row[3]).strip() == "":
+            missing.append("nombre")
 
         if not missing:
             # marcar como completos
