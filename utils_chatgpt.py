@@ -15,13 +15,11 @@ from datetime import datetime, date
 def get_openai_key() -> str:
     try:
         """Obtiene la clave API de OpenAI desde variables de entorno."""
-        log_message('Iniciando función <GetOpenAIKey>.', 'INFO')
         logging.info('Obteniendo clave de OpenAI')
         api_key: Optional[str] = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise ValueError("No se encontró la clave OPENAI_API_KEY en las variables de entorno.")
         logging.info('Clave de OpenAI obtenida')
-        log_message('Finalizando función <GetOpenAIKey>.', 'INFO')
         return api_key
     except Exception as e:
         log_message(f"Error al obtener la clave de OpenAI: {e}", 'ERROR')
@@ -2687,11 +2685,13 @@ Si te dicen NIT, responde NIT.
 Si te dicen Pasaporte, responde PA.
 - Número de documento
 - Email
+- Nombre de la persona
 Devuélvelo SOLO en formato JSON EXACTO, sin texto adicional, por ejemplo:
 {{
     "tipo_documento": "CC",
     "numero_documento": "12345678",
-    "email": "correo@ejemplo.com"
+    "email": "correo@ejemplo.com",
+    "nombre": "Juan Agudelo"
 }}
 Si no encuentras un campo coloca exactamente "No proporcionado" como valor para ese campo.
 """
@@ -2735,10 +2735,11 @@ Si no encuentras un campo coloca exactamente "No proporcionado" como valor para 
         resultado = {
             "tipo_documento": "No proporcionado",
             "numero_documento": "No proporcionado",
-            "email": "No proporcionado"
+            "email": "No proporcionado",
+            "nombre": "No proporcionado"
         }
         if isinstance(parsed, dict):
-            for k in ["tipo_documento", "numero_documento", "email"]:
+            for k in ["tipo_documento", "numero_documento", "email", "nombre"]:
                 val = parsed.get(k)
                 if val and isinstance(val, str) and val.strip():
                     resultado[k] = val.strip()
@@ -2751,7 +2752,8 @@ Si no encuentras un campo coloca exactamente "No proporcionado" como valor para 
         return {
             "tipo_documento": "No proporcionado",
             "numero_documento": "No proporcionado",
-            "email": "No proporcionado"
+            "email": "No proporcionado",
+            "nombre": "No proporcionado"
         }
     
 def direccion_bd(nombre_cliente: str, direccion_google: str):
@@ -2971,3 +2973,41 @@ Si el mensaje incluye un producto clasificalo como actualizar pedido"""
     except Exception as e:
         log_message(f'Error en función <clasificar_modificacion_pedido>: {e}', 'ERROR')
         return "error_clasificacion"
+    
+def Extraer_Nombre(mensaje: str) -> str:
+    """
+    Extrae el nombre de un nombre completo usando ChatGPT.
+    """
+    try:
+        log_message('Iniciando función <generar_mensaje_confirmacion_modificacion_pedido>.', 'INFO')
+
+        prompt = f"""
+eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada, La Cima del Sabor.
+Tu tarea es extraer el nombre del cliente del siguiente mensaje.
+Mensaje del cliente: "{mensaje}"
+RESPONDE SOLO CON EL NOMBRE DEL CLIENTE 
+No agregues explicaciones ni nada más
+como respuesta unicamente el nombre del cliente"""
+        
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres PAKO, asistente experto en clasificación de mensajes."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0
+        )
+
+        raw = response.choices[0].message.content.strip()
+        # Registrar consumo de tokens
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] Extraer_Nombre tokens_used={tokens_used}", "DEBUG")
+        log_message('Finalizando función <Extraer_Nombre>.', 'INFO')
+        log_message(f'Respuesta de clasificación: {raw}', 'INFO')
+        return raw
+    except Exception as e:
+        log_message(f'Error en <Extraer_Nombre>: {e}', 'ERROR')
+        logging.error(f'Error en Extraer_Nombre: {e}')
+        return ""

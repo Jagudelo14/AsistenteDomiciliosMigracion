@@ -148,7 +148,8 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
 
         if not sedes:
             return None
-
+        for s in sedes:
+            logging.info(f"Sede: {s}")  
         ids = [s[0] for s in sedes]
         areas_map = {}
 
@@ -162,10 +163,12 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
                 FROM sedes_areas
                 WHERE id_sede IN ({placeholders});
             """
+            log_message(f"Query areas: {query_areas}", "INFO")
             areas_rows = execute_query(query_areas, tuple(ids))
 
             if areas_rows:
                 for id_sede_row, valor in areas_rows:
+                    log_message(f"Valor raw: {valor}", "INFO")
                     parsed = None
                     logging.info(f"Valor: {valor}")
 
@@ -194,11 +197,12 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
         candidatos = []
 
         for s in sedes:
+            
             sede_id, nombre, ciudad, lat_sede, lon_sede = s
             polygons = areas_map.get(sede_id)
 
             logging.info(f"Polys {polygons}")
-
+            log_message(f"Verificando sede {sede_id} - {nombre} en ciudad {ciudad}", "INFO")
             if not polygons:
                 continue
 
@@ -206,10 +210,16 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
 
             for poly in polygons:
                 logging.info(f"Poly for in {poly}")
+                log_message(f"Verificando polígono: {poly}", "INFO")
                 try:
                     if point_in_polygon(latitud_cliente, longitud_cliente, poly):
+                        logging.info("Punto dentro del polígono")
+                        log_message("Punto dentro del polígono", "INFO")
                         encontrada = poly
                         break
+                    else:
+                        logging.info("Punto fuera del polígono")
+                        log_message("Punto fuera del polígono", "INFO")
                 except Exception as e:
                     logging.info(f"Error e {e}")
                     log_message(f"Error al verificar punto en polígono: {e}", "ERROR")
@@ -249,7 +259,7 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
 
         # Direcciones humanas devueltas por Google
         #direccion_origen = resultado.get("origin_addresses", [""])[0]
-        direcciones_destinos = resultado.get("destination_addresses", [])
+        direcciones_destinos = resultado.get("origin_addresses", [])
 
         # ------------------------------------
         # 5. Construir opciones válidas
@@ -322,12 +332,19 @@ def set_direccion_cliente(numero_cliente: str, direccion: str, id_restaurante: s
     try:
         """Actualiza la dirección del cliente en la base de datos."""
         log_message(f"Actualizando dirección para el cliente {numero_cliente}", "INFO")
-        execute_query("""
+        log_message(f"Dirección a actualizar: {direccion}", "INFO")
+        query = """
             UPDATE clientes_whatsapp
             SET direccion_google = %s
             WHERE telefono = %s AND id_restaurante = %s;
-        """, (direccion, numero_cliente, id_restaurante))
-        log_message("Dirección actualizada correctamente.", "INFO")
+        """
+        params = (direccion, numero_cliente, id_restaurante)
+        # Imprimir y loguear la query y sus parámetros antes de ejecutar
+        log_message(f"Executing SQL query: {query}", "DEBUG")
+        log_message(f"SQL params: {params}", "DEBUG")
+        execute_query(query, params)
+
+        log_message(f"Dirección actualizada a '{direccion}' para el cliente {numero_cliente}.", "INFO")
         return True
     except Exception as e:
         log_message(f"Error al actualizar dirección del cliente: {e}", "ERROR")
@@ -408,10 +425,7 @@ def calcular_distancia_entre_sede_y_cliente(sender: str, latitud_cliente: float,
             return None
 
 
-        respuesta_bot = f"""Excelente {nombre_cliente} podemos atenderte, para continuar con tu pedido, requerimos tu autorización expresa para el tratamiento de tus datos personales (Ley 1581 de 2012).
-Finalidad: Procesar tu pago, gestionar tu pedido y validar si estas en nuestra area de cobertura.
-Derechos y Política Completa: Puedes consultar tus derechos y la legislación detallada aquí: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981
-Al responder SÍ, declaras conocer y aceptar la finalidad del tratamiento de tus datos. Si no estás de acuerdo, responde NO."""
+        respuesta_bot = f"""Excelente {nombre_cliente} Dime que necesitas y con gusto te ayudaré 😊. ¿Tienes alguna pregunta? o talvez ¿Quieres ver el menu?"""
         send_text_response(sender, respuesta_bot)
         return True
     except Exception as e:
@@ -490,6 +504,7 @@ def geocode_address(direccion: str) -> dict | None:
         lat = loc.get("lat")
         lon = loc.get("lng")
         formatted = first.get("formatted_address", "") or direccion
+        log_message(f"geocode_address: resultado para '{direccion}': lat={lat}, lon={lon}, formatted_address={formatted}", "INFO")
         if lat is None or lon is None:
             log_message(f"geocode_address: resultado incompleto para '{direccion}'", "WARN")
             return None
