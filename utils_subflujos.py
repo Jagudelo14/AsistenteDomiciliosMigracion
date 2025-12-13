@@ -41,7 +41,7 @@ from utils import (
 )
 from utils_chatgpt import actualizar_pedido_con_mensaje, actualizar_pedido_con_mensaje_modificacion, clasificador_consulta_menu, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion
 from utils_database import execute_query, execute_query_columns
-from utils_google import calcular_tiempo_pedido, formatear_tiempo_entrega, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
+from utils_google import calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
@@ -359,7 +359,8 @@ def subflujo_transferencia(sender: str, nombre_cliente: str, contenido_usuario: 
         execute_query(query, params)
         send_text_response(sender, respuesta_grave.get("respuesta_cordial"))
         numero_admin: str = os.getenv("NUMERO_ADMIN")
-        send_text_response(numero_admin, f"Nuevo caso de queja grave de {nombre_cliente} ({sender}): {contenido_usuario}")
+        log_message(f"Notificando al administrador {numero_admin} sobre queja grave de {nombre_cliente} ({sender}).", "INFO")
+        send_text_response(numero_admin, f"Nuevo caso de solicitud de transferencia de {nombre_cliente} ({sender}): {contenido_usuario}")
         send_text_response(numero_admin, f"Resumen ejecutivo: {respuesta_grave.get('resumen_ejecutivo')}")
         log_message('Registro de queja grave guardado correctamente.', 'INFO')
     except Exception as e:
@@ -883,13 +884,9 @@ def orquestador_subflujos(
                 direccion = corregir_direccion(direccion,pregunta_usuario)
                 log_message(f"Dirección después de corrección: {direccion}", "INFO")
                 mensaje = direccion_bd(nombre_cliente, direccion)
+                geocode_and_assign(sender, direccion, os.environ.get("ID_RESTAURANTE", "5"))
                 send_text_response(sender, mensaje)
                 guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
-                execute_query("""
-                            UPDATE clientes_whatsapp
-                            SET direccion_google = %s
-                            WHERE telefono = %s AND id_restaurante = %s;
-                                """, (direccion, sender, os.environ.get("ID_RESTAURANTE", "5")))
                 log_message(f"Dirección corregida guardada en BD para {sender}", "INFO")
             except Exception as e:
                 log_message(f"Error al corregir dirección: {e}", "ERROR")
