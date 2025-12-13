@@ -12,9 +12,7 @@ from utils_registration import validate_direction_first_time
 
 # --- IMPORTS INTERNOS --- #
 from utils import (
-    actualizar_order_complete_en_observaciones,
     marcar_estemporal_true_en_pedidos,
-    actualizar_medio_pago,
     obtener_direccion,
     actualizar_costos_y_tiempos_pedido,
     actualizar_total_productos,
@@ -41,7 +39,7 @@ from utils import (
     obtener_intencion_futura,
     borrar_intencion_futura,
 )
-from utils_chatgpt import clasificar_modificacion_pedido,actualizar_pedido_con_mensaje, actualizar_pedido_con_mensaje_modificacion, clasificador_consulta_menu, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_invitar_pago, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion
+from utils_chatgpt import actualizar_pedido_con_mensaje, actualizar_pedido_con_mensaje_modificacion, clasificador_consulta_menu, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion
 from utils_database import execute_query, execute_query_columns
 from utils_google import calcular_tiempo_pedido, formatear_tiempo_entrega, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
@@ -465,7 +463,7 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         log_message(f'Iniciando función <SubflujoMedioPago> para {sender}.', 'INFO')
         codigo_unico: str = obtener_intencion_futura_observaciones(sender)
         medio_pago_real: str = mapear_modo_pago(respuesta_usuario)
-        datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
+        #datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
         if medio_pago_real =="efectivo":
             mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, ten el monto exacto listo para facilitar la transacción. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
