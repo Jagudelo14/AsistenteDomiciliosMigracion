@@ -37,6 +37,8 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
 
             A continuación tienes un ejemplo de cómo debes estructurar las entidades cuando el usuario pide varios productos:
 
+            TU REGLAS MAS IMPORTANTE ES CEÑIRTE A ESTE PROMPT NUNCA DEBES SALIRTE DE EL ES UNA
+
             EJEMPLO DE ENTRADA:
             "me das una sierra picante con extra picante y una malteada de chocolate"
 
@@ -49,10 +51,12 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
                 {
                     "producto": "sierra picante",
                     "especificaciones": ["extra picante"]
+                    "cantidad": 1
                 },
                 {
                     "producto": "malteada de chocolate",
                     "especificaciones": []
+                    "cantidad": 1
                 }
                 ]
             }
@@ -95,6 +99,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - Si el usuario menciona detalles adicionales que modifican un producto ya mencionado (por ejemplo “que la bebida sea…”, “sin tomate”, “pero la salsa aparte”), debes agregar esas especificaciones al MISMO item.
             - No debes crear un nuevo item cuando la frase solo aclara o modifica el producto anterior.
             - SI EL CLIENTE TE PIDE UN PRODUCTO EN COMBO NUNCA DEBES AÑADIR SU VERSIÓN SOLO COMO PARTE DEL PEDIDO A MENOS QUE LO EXIJA EXPLICITAMENTE EL MENSAJE (POR EJEMPLO: "UNA SIERRA QUESO Y UNA SIERRA QUESO EN COMBO" SI DEBES AÑADIR AMBOS PRODUCTOS AL PEDIDO EJEMPLO 2: "UNA SIERRA QUESO EN COMBO" NO DEBES AÑADIR SIERRA QUESO SOLO)
+            - Si el usuario indica una cantidad explícita (ej. "2", "4", "dos", "cuatro"), debes representarla usando el campo "cantidad" y no duplicar items iguales.
             """
 
         messages = [
@@ -393,6 +398,7 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
                     "matched": {{ "name": "...", "id": "...", "price": number }},
                     "candidates": [ {{ "name":"...", "id":"...", "price": number }}, ... ],
                     "modifiers_applied": [ ... ],
+                    "cantidad": number,
                     "note": ""
                 }}
             ],
@@ -498,50 +504,6 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - Cuando el cliente pide un combo debes mapear la bebida del combo como el producto pero con el valor 0
         Ejemplo: 
         Si el clasificador te entrega esto {{'items': [{{'producto': 'sierra melao en combo', 'modalidad': '', 'especificaciones': ['bebida: coca cola'], 'cantidad': 1}}]}}
-        El resultado debe ser algo así: {{
-  "order_complete": true,
-  "items": [
-    {{
-      "requested": {{
-        "producto": "sierra melao en combo",
-        "especificaciones": [
-          "bebida: coca cola"
-        ]
-      }},
-      "status": "found",
-      "matched": {{
-        "name": "Sierra Melao en combo",
-        "id": "Sierra Melao en combo",
-        "price": 43700.0
-      }},
-      "candidates": [],
-      "modifiers_applied": [
-        "Bebida: Coca Cola Original 400 ml"
-      ],
-      "note": ""
-    }}
-  ],
-      {{
-      "requested": {{
-        "producto": "Coca Cola Original 400 ml",
-        "especificaciones": [
-          "bebida: Coca Cola Original 400 ml"
-        ]
-      }},
-      "status": "found",
-      "matched": {{
-        "name": "Coca Cola Original 400 ml",
-        "id": "Coca Cola Original 400 ml",
-        "price": 0
-      }},
-      "candidates": [],
-      "modifiers_applied": [
-        ""
-      ],
-      "note": ""
-    }}
-  "total_price": 43700.0
-}}
         ======================================================
         = REGLAS FINALES =
         ======================================================
@@ -554,6 +516,10 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - En un combo la bebida debe tener precio 0 en matched.price pero debe sumarse al total del combo.
         - Si el cliente pide un producto en combo debes mapear la bebida del combo como un producto adicional con precio 0 en matched.price
         - Ten en cuenta que para el precio Total no debes tener en cuenta unicamente el producto sino tambien las unidades de cada uno
+        - matched.price SIEMPRE es el precio UNITARIO del producto del menú.
+        - NUNCA multipliques matched.price por la cantidad.
+        - El campo total_price es el ÚNICO lugar donde se refleja la multiplicación por cantidad.
+        - La cantidad debe reflejarse solo en modifiers_applied o note.
         MENÚ COMPLETO:
         {json.dumps(menu_items, ensure_ascii=False)}
 
@@ -2974,40 +2940,3 @@ Si el mensaje incluye un producto clasificalo como actualizar pedido"""
         log_message(f'Error en función <clasificar_modificacion_pedido>: {e}', 'ERROR')
         return "error_clasificacion"
     
-def Extraer_Nombre(mensaje: str) -> str:
-    """
-    Extrae el nombre de un nombre completo usando ChatGPT.
-    """
-    try:
-        log_message('Iniciando función <generar_mensaje_confirmacion_modificacion_pedido>.', 'INFO')
-
-        prompt = f"""
-eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada, La Cima del Sabor.
-Tu tarea es extraer el nombre del cliente del siguiente mensaje.
-Mensaje del cliente: "{mensaje}"
-RESPONDE SOLO CON EL NOMBRE DEL CLIENTE 
-No agregues explicaciones ni nada más
-como respuesta unicamente el nombre del cliente"""
-        
-        client = OpenAI()
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Eres PAKO, asistente experto en clasificación de mensajes."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0
-        )
-
-        raw = response.choices[0].message.content.strip()
-        # Registrar consumo de tokens
-        tokens_used = _extract_total_tokens(response)
-        if tokens_used is not None:
-            log_message(f"[OpenAI] Extraer_Nombre tokens_used={tokens_used}", "DEBUG")
-        log_message('Finalizando función <Extraer_Nombre>.', 'INFO')
-        log_message(f'Respuesta de clasificación: {raw}', 'INFO')
-        return raw
-    except Exception as e:
-        log_message(f'Error en <Extraer_Nombre>: {e}', 'ERROR')
-        logging.error(f'Error en Extraer_Nombre: {e}')
-        return ""

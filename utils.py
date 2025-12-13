@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import json
 import requests
 import difflib
+from utils_contexto import get_sender
 
 REPLACE_PHRASES = [
     "cambia todo", "borra lo que había", "solo quiero esto", "quita lo anterior",
@@ -28,10 +29,11 @@ def register_log(mensaje: str, tipo: str, ambiente: str = "Whatsapp", idusuario:
     try:
         """Registra un log en la base de datos."""
         query: str = """
-        INSERT INTO logs (ambiente, tipo, mensaje, fecha, idusuario, "archivoPy", function, "lineNumber")
-        VALUES (%s, %s, %s, (NOW() AT TIME ZONE 'America/Bogota'), %s, %s, %s, %s)
+        INSERT INTO logs (ambiente, tipo, mensaje, fecha, idusuario, "archivoPy", function, "lineNumber", telefono)
+        VALUES (%s, %s, %s, (NOW() AT TIME ZONE 'America/Bogota'), %s, %s, %s, %s, %s)
         """
-        params: tuple = (ambiente, tipo, mensaje, idusuario, archivoPy, function_name, line_number)
+        telefono = get_sender()
+        params: tuple = (ambiente, tipo, mensaje, idusuario, archivoPy, function_name, line_number, telefono)
         execute_query(query, params)
     except Exception as e:
         logging.error(f'Error al hacer uso de función <RegisterLog>: {e}.')
@@ -53,7 +55,6 @@ def log_message(message: str, tipo: str) -> None:
 def api_whatsapp() -> str:
     try:
         """Obtiene el token de la API de WhatsApp desde variables de entorno."""
-        log_message('Iniciando función <ApiWhatsApp>.', 'INFO')
         logging.info('Obteniendo token de WhatsApp')
         token: str = os.getenv("WABA_TOKEN", "")
         if not token:
@@ -155,7 +156,6 @@ def get_client_database(numero_celular: str, id_restaurante: str) -> bool:
             FROM clientes_whatsapp
             WHERE telefono = %s
               AND id_restaurante = %s
-              AND (es_temporal = FALSE)
             LIMIT 1;
         """
         log_message(f'Consulta SQL: {query} con parámetros ({numero_celular}, {id_restaurante})', 'INFO')
@@ -163,11 +163,14 @@ def get_client_database(numero_celular: str, id_restaurante: str) -> bool:
         logging.info(f"Resultado de la consulta: {resultado}")
         log_message(f"Resultado de la consulta: {resultado}", "INFO")
         log_message('Finalizando función <get_client_database>.', 'INFO')
-        return len(resultado) > 0
+
+        # Devolver booleano seguro (maneja None y colecciones vacías)
+        return bool(resultado) and len(resultado) > 0
+
     except Exception as e:
         log_message(f'Error al hacer uso de función <get_client_database>: {e}.', 'ERROR')
         logging.error(f'Error al hacer uso de función <get_client_database>: {e}.')
-        return 
+        return False
 
 def handle_create_client(sender: str, datos: str, id_restaurante: str, es_temporal: bool) -> str:
     try:
@@ -579,18 +582,34 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
             new_num = 1
         codigo_unico = f"P-{new_num:05d}" 
         # ------------------------------- # 4. Preparar productos y total # ------------------------------- 
+# ...existing code...
         productos = []
         for item in pedido_dict.get("items", []):
-            matched = item.get("matched")
+            matched = item.get("matched") or {}
+            nombre = matched.get("name")
 
-            if matched and matched.get("name"):
-                productos.append(matched["name"])
+            # determinar cantidad: prioridad campos explícitos -> note -> fallback 1
+            cantidad = item.get("cantidad") or item.get("quantity") or item.get("qty")
+            if cantidad is None:
+                note = str(item.get("note") or "")
+                m = re.search(r'(?:cantidad|cant)\s*[:=]?\s*(\d+)', note, flags=re.I)
+                if m:
+                    try:
+                        cantidad = int(m.group(1))
+                    except Exception:
+                        cantidad = 1
+            try:
+                cantidad = int(cantidad) if cantidad is not None else 1
+            except Exception:
+                cantidad = 1
+            if nombre:
+                # añadir el nombre repetido según la cantidad
+                for _ in range(max(1, cantidad)):
+                    productos.append(nombre)
             else:
-                # Registrar el ítem que llegó sin match
                 log_message(f"[WARN] Item sin matched en <GuardarPedidoCompleto>: {item}", "WARN")
-
-                # Evitas romper la función, pero registras algo legible
-                productos.append("SIN_MATCH")
+                for _ in range(max(1, cantidad)):
+                    productos.append("SIN_MATCH")
         productos_str = " | ".join(productos)
         total_price = float(pedido_dict.get("total_price", 0))
         # ------------------------------- # 5. Hora y fecha Bogotá # -------------------------------

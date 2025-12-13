@@ -1,13 +1,13 @@
 # function_app.py
 # Last modified: 2025-09-30 by Andrés Bermúdez
-#CAMBIOS 10 DICIEMBRE 2:00 AM
+#CAMBIOS 13 DICIEMBRE 11:30 AM
 import azure.functions as func
 from datetime import datetime
 import logging
 import os
 import json
-from utils import obtener_datos_cliente_por_telefono, obtener_intencion_futura_observaciones, send_text_response,  log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion, obtener_ultima_intencion_no_resuelta, marcar_intencion_como_resuelta,verify_hour_atettion, guardar_intencion_futura,validate_duplicated_message
-from utils_chatgpt import get_classifier, get_openai_key,extraer_info_personal,get_direction,Extraer_Nombre
+from utils import obtener_datos_cliente_por_telefono, send_text_response,  log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion,verify_hour_atettion,validate_duplicated_message
+from utils_chatgpt import get_classifier, get_openai_key,extraer_info_personal,get_direction
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign
 from utils_registration import  update_datos_personales, update_dir_primera_vez, update_tratamiento_datos, validate_personal_data, validate_data_treatment, validate_direction_first_time, save_personal_data_partial, check_and_mark_datos_personales
@@ -17,8 +17,9 @@ import requests
 from openai import OpenAI
 import io
 import re
-
+from utils_contexto import set_sender
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
+
 
 # Constantes desde variables de entorno
 VERIFY_TOKEN: str = os.environ["META_VERIFY_TOKEN"] 
@@ -74,12 +75,12 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         #Validación mensaje duplicado
-        #if validate_duplicated_message(message_id):
-        #    logging.info(f"Mensaje duplicado: {message_id}")
-        #    return func.HttpResponse("Mensaje duplicado", status_code=200)
+        if validate_duplicated_message(message_id):
+            logging.info(f"Mensaje duplicado: {message_id}")
+            return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
+        set_sender(sender)
         nombre_cliente: str
-        respuesta_bot : str
         if not verify_hour_atettion(sender, ID_RESTAURANTE):
             return func.HttpResponse("Fuera de horario de atención", status_code=200)
         ####################################
@@ -211,7 +212,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     save_personal_data_partial(sender, ID_RESTAURANTE, None, None, None)
                     send_text_response(sender, f"Entendido {nombre_cliente}, no procesaremos tus datos personales. Si cambias de opinión, no dudes en contactarnos nuevamente.")
                     logging.info(f"Usuario {sender} negó el tratamiento de datos.")
-                    log_message(f"Usuario {sender} negó el tratamiento de datos.", "INFO")
+                    log_message("Usuario negó el tratamiento de datos", "INFO")
                     return func.HttpResponse("EVENT_RECEIVED", status_code=200)
                 else:
                     log_message("Usuario aceptó el tratamiento de datos", "INFO")
@@ -272,8 +273,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 # Verificar si ahora la fila tiene los 4 campos completos
                 missing = check_and_mark_datos_personales(sender, ID_RESTAURANTE)
                 if not missing:
-                    logging.info(f"Datos personales de {sender} completos y marcados.")
-                    log_message(f"Datos personales de {sender} completos y marcados.", "INFO")
+                    logging.info("Datos personales completos y marcados.")
+                    log_message("Datos personales completos y marcados.", "INFO")
                     send_text_response(sender, "Gracias. Ahora por ultimo ¿puedes proporcionarme tu dirección para validar que estes en nuestra area de cobertura?")
                     return func.HttpResponse("EVENT_RECEIVED", status_code=200)
                 else:
@@ -292,7 +293,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 classification, type_text, entities_text = get_classifier(text, sender)
                 # revision de si es direccion
                 if classification == "direccion" or classification =="mas_datos_direccion":
-                    send_text_response(sender, "Gracias, voy a validar que estes en nuestra cobertura dame un par de minutos.")
+                    send_text_response(sender, "Gracias , voy a validar que estes en nuestra cobertura dame un par de minutos.")
                     direccion=get_direction(text)
                     geocode_and_assign(sender, direccion, ID_RESTAURANTE)
                     datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, ID_RESTAURANTE)
