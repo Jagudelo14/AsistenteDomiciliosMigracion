@@ -35,12 +35,20 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             Eres un clasificador de mensajes para un asistente de WhatsApp de un restaurante.
             Tu tarea es identificar la **intención (intent)**, el **tipo de mensaje (type)** y cualquier **entidad relevante (entities)**.
 
+            Recibirás un JSON con un arreglo de mensajes que representan el historial de la conversación.
+
             A continuación tienes un ejemplo de cómo debes estructurar las entidades cuando el usuario pide varios productos:
 
             TU REGLAS MAS IMPORTANTE ES CEÑIRTE A ESTE PROMPT NUNCA DEBES SALIRTE DE EL ES UNA
 
             EJEMPLO DE ENTRADA:
             "me das una sierra picante con extra picante y una malteada de chocolate"
+
+            EJEMPLO DE ENTRADA:
+
+            { "rol": "usuario", "texto": "Buenas tardes" },
+            { "rol": "asistente", "texto": "Aceptas tratamiento de datos..." },
+            { "rol": "usuario", "texto": "Quiero una sierra picante con extra picante y una malteada de chocolate" }
 
             EJEMPLO DE SALIDA:
             {
@@ -100,6 +108,11 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - No debes crear un nuevo item cuando la frase solo aclara o modifica el producto anterior.
             - SI EL CLIENTE TE PIDE UN PRODUCTO EN COMBO NUNCA DEBES AÑADIR SU VERSIÓN SOLO COMO PARTE DEL PEDIDO A MENOS QUE LO EXIJA EXPLICITAMENTE EL MENSAJE (POR EJEMPLO: "UNA SIERRA QUESO Y UNA SIERRA QUESO EN COMBO" SI DEBES AÑADIR AMBOS PRODUCTOS AL PEDIDO EJEMPLO 2: "UNA SIERRA QUESO EN COMBO" NO DEBES AÑADIR SIERRA QUESO SOLO)
             - Si el usuario indica una cantidad explícita (ej. "2", "4", "dos", "cuatro"), debes representarla usando el campo "cantidad" y no duplicar items iguales.
+
+            Reglas IMPORTANTES:
+            - DEBES analizar y clasificar ÚNICAMENTE el ÚLTIMO mensaje enviado por el USUARIO.
+            -Todos los mensajes anteriores son SOLO CONTEXTO y NO deben usarse para inferir intención, pedido o entidades.
+            -Nunca clasifiques mensajes del asistente.
             """
 
         messages = [
@@ -108,7 +121,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
         ]
         client: OpenAI = OpenAI(api_key=get_openai_key())
         respuesta: Any = client.chat.completions.create(
-            model="ft:gpt-3.5-turbo-0125:net-applications:domicilios:CaSlaPnG",
+            model="gpt-4.1-mini",
             messages=messages,
             max_tokens=700,
             temperature=0

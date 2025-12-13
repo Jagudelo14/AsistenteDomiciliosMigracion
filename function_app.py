@@ -17,7 +17,7 @@ import requests
 from openai import OpenAI
 import io
 import re
-from utils_contexto import set_sender
+from utils_contexto import set_sender,crear_conversacion, actualizar_conversacion,obtener_contexto_conversacion
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 
@@ -75,9 +75,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         #Validación mensaje duplicado
-        if validate_duplicated_message(message_id):
-            logging.info(f"Mensaje duplicado: {message_id}")
-            return func.HttpResponse("Mensaje duplicado", status_code=200)
+        # if validate_duplicated_message(message_id):
+        #     logging.info(f"Mensaje duplicado: {message_id}")
+        #     return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
@@ -93,6 +93,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             log_message(f"Cliente creado en base de datos: {nombre_temp}", "INFO")
             if tipo_general == "text":
                 text: str = message.get("text", {}).get("body", "")
+                conversacion = crear_conversacion(text)
+                log_message(f"Conversación iniciada: {conversacion}", "INFO")  
                 if not text:
                     logging.warning("⚠️ Mensaje recibido sin texto.")
                     return func.HttpResponse("Mensaje vacío", status_code=200)
@@ -119,6 +121,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 text = transcript.text
                 logging.info(f"Transcripción recibida: {text}")
                 log_message(f"Mensaje transcrito {text}", "INFO")
+                conversacion = crear_conversacion(text)
+                log_message(f"Conversación iniciada: {conversacion}", "INFO")          
             send_text_response(sender,"¡Hola! necesitamos tu aprobación para el tratamiento de tus datos personales según la Ley 1581 de 2012.Por favor, responde NO para rechazar, si continuas la conversación entendemos que aceptas el tratamiento de tus datos. ")
             send_text_response(sender, "Entoces para continuar ,Por favor envia los siguientes datos:\nNombre, Tipo de documento, Número de documento, Correo electrónico.\nEjemplo:Juan Perez, C.C, 123456789, juan14@gmail.com")
             log_message("Empieza a clasificar cliente nuevo", "INFO")
@@ -131,6 +135,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             nombre_cliente = get_client_name_database(sender, ID_RESTAURANTE)
             if tipo_general == "text":
                 text: str = message.get("text", {}).get("body", "")
+                conversacion = actualizar_conversacion(text,sender,"usuario")
                 if not text:
                     logging.warning("⚠️ Mensaje recibido sin texto.")
                     return func.HttpResponse("Mensaje vacío", status_code=200)
@@ -155,6 +160,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                         file=files["file"]
                     )
                     text = transcript.text
+                    conversacion = actualizar_conversacion(text,sender,"usuario")
                     logging.info(f"Transcripción recibida: {text}")
                     log_message(f"Mensaje transcrito {text}", "INFO")
             #############
@@ -319,6 +325,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 return func.HttpResponse("EVENT_RECEIVED", status_code=200)
 
             if text:
+                text = obtener_contexto_conversacion(sender)
+                log_message(f"Contexto de conversación obtenido: {text}", "INFO")
                 classification: str
                 type_text: str
                 entities_text: Dict[str, Any]

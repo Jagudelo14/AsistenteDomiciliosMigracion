@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 import json
 import requests
 import difflib
-from utils_contexto import get_sender
+from utils_contexto import get_sender,actualizar_conversacion
 
 REPLACE_PHRASES = [
     "cambia todo", "borra lo que había", "solo quiero esto", "quita lo anterior",
@@ -69,6 +69,8 @@ def api_whatsapp() -> str:
 
 def send_text_response(to: str, message: str) -> str:
     try:
+        conversacion = actualizar_conversacion(message,to,"asistente")
+        log_message(f"Conversación actualizada: {conversacion}", "INFO")
         """Envía un mensaje de texto por WhatsApp Business API."""
         log_message('Iniciando función <SendTextResponse>.', 'INFO')
         logging.info('Enviando respuesta a WhatsApp')
@@ -178,7 +180,7 @@ def handle_create_client(sender: str, datos: str, id_restaurante: str, es_tempor
         logging.info('Iniciando función <handleCreateClient>.')
         log_message(f'Datos recibidos para crear/actualizar cliente: {datos}', 'INFO')
         nombre = "Desconocido"
-        id_sede = 21
+        id_sede = 20
         if datos is not None:
             nombre = datos
         logging.info(f'Nombre del cliente: {nombre}')
