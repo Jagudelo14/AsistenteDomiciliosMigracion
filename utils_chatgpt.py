@@ -675,7 +675,7 @@ REGLAS DE ESTILO SIERRA NEVADA:
 - Evita expresiones barriales, sarcasmo o exageraciones.
 - Mantén un lenguaje cotidiano y respetuoso.
 - No inventes productos ni detalles.
-- Puedes mencionar solamente: “menú”, “promociones”, “burgers”, “recomendaciones”.
+- Puedes mencionar solamente: “menú”, “promociones”, “Hamburguesas”, “recomendaciones”.
 - Incluye siempre el nombre del cliente: {nombre}
 - Incluye siempre el nombre del local: {nombre_local}
 - Responde en máximo 1 o 2 frases.
@@ -861,6 +861,9 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
             - Preparar un resumen ejecutivo para un administrador humano.
             - NO escalar directamente en el mensaje al cliente (solo en el resumen interno).
             - Máximo 2 frases, tono cálido, humano, cercano, estilo Sierra Nevada, colombiano neutro.
+            - La respuesta_cordial DEBE incluir explícitamente la frase:
+            "Ya escalé el caso con un administrador y se comunicará contigo muy pronto."
+            - Si la frase no aparece, la respuesta es inválida.
             ***DEBES ENTREGAR ESTOS CAMPOS***
             1. "respuesta_cordial": Mensaje calmado, empático y con acción concreta 
             (ej: “reviso ya mismo con cocina y logística”, “activo seguimiento con el punto”).
