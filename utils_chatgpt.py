@@ -84,7 +84,6 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - continuacion_pedido (cuando incluye una aclaracion sobre un prodcuto como : es tal producto o era tal bebida se puede considerar como la continuacion de un pedido)
             - direccion (Cuando unicamente contiene una direccion)
             - info_personal
-            - mas_datos_direccion (Cuando la frase indica que esta agregando, modificando, quitando o corrigiendo una direccion por ejemplo "la direccion correcta es CL 123")
             - modificar_pedido (puede ser con palabras clave como cambiar, quitar, agregar, modificar, también, etc.)
             Ejemplo: "quiero agregar una malteada de vainilla", "quiero que la hamburguesa no traiga lechuga", "cambia mi pedido por favor por...", "quitar la malteada", "también quiero una gaseosa coca cola original", "dame también una malteada de chocolate", etc.
             - negacion_general (puede ser en otros idiomas: no, non, nein, etc.)
