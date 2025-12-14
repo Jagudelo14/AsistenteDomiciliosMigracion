@@ -50,15 +50,18 @@ def primera_regla_tiempo(id_sede: str, tiempo_base: int) -> int:
         log_message("Iniciando primera regla de tiempo.", "INFO")
 
         query = """
-            SELECT COUNT(*) 
-            FROM pedidos
-            WHERE estado = 'En preparación'
-              AND producto ILIKE %s
-              AND idsede = %s;
+            SELECT
+                p.idpedido,
+                COUNT(d.id_detalle) AS total_items
+            FROM pedidos p
+            LEFT JOIN detalle_pedido d
+                ON p.idpedido = d.id_pedido
+            where idsede = %s and p.estado = 'pendiente'
+            GROUP BY p.idpedido;
         """
 
         # Dos parámetros porque hay dos placeholders
-        resultado = execute_query(query, ("%sierra%", id_sede), fetchone=True)
+        resultado = execute_query(query, id_sede, fetchone=True)
 
         hamburguesas_en_preparacion = resultado[0] if resultado else 0
         log_message(f"Hamburguesas en preparación: {hamburguesas_en_preparacion}", "INFO")

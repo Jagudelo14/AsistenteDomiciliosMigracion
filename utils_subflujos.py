@@ -40,7 +40,7 @@ from utils import (
     obtener_intencion_futura,
     borrar_intencion_futura,
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, clasificador_consulta_menu, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion
+from utils_chatgpt import actualizar_pedido_con_mensaje, clasificador_consulta_menu,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion
 from utils_database import execute_query, execute_query_columns
 from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
@@ -884,7 +884,7 @@ def orquestador_subflujos(
                     guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
                 else:
                     # caso raro: flag indica primera vez pero no hay dirección en BD
-                    send_text_response(sender, "Gracias. Por favor, proporciona tu dirección completa para el domicilio.")
+                    send_text_response(sender, "Gracias. Te recuerdo que no estas en el area de cobertura, por favor envia una nueva direeccion donde te entregaremos este pedido.")
                     guardar_intencion_futura(sender, "primera_direccion_domicilio", obtener_intencion_futura_observaciones(sender))
             else:
                 # No tiene dirección: solicitarla al usuario
@@ -899,31 +899,31 @@ def orquestador_subflujos(
             subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "esperando_confirmacion_pago":
             subflujo_verificación_pago(sender, nombre_cliente, pregunta_usuario)
-        elif (clasificacion_mensaje == "direccion") and obtener_intencion_futura(sender) == "primera_direccion_domicilio":
-            subflujo_confirmar_direccion(sender, nombre_cliente)
+        # elif (clasificacion_mensaje == "direccion") and obtener_intencion_futura(sender) == "primera_direccion_domicilio":
+        #     subflujo_confirmar_direccion(sender, nombre_cliente)
         elif (clasificacion_mensaje == "continuacion_pedido") and obtener_intencion_futura(sender) == "eleccion_sede":
             subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
         elif (clasificacion_mensaje == "continuacion_pedido"):
             subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, id_ultima_intencion)
-        elif (clasificacion_mensaje == "direccion") and obtener_intencion_futura(sender) == "confirmar direccion":
-            try:
-                direccion = obtener_direccion(sender, os.environ.get("ID_RESTAURANTE", "5"))
-                log_message(f"Dirección antes de corrección: {direccion}", "INFO")
-                direccion = corregir_direccion(direccion,pregunta_usuario)
-                log_message(f"Dirección después de corrección: {direccion}", "INFO")
-                mensaje = direccion_bd(nombre_cliente, direccion)
-                send_text_response(sender, mensaje)
-                guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
-                execute_query("""
-                            UPDATE clientes_whatsapp
-                            SET direccion_google = %s
-                            WHERE telefono = %s AND id_restaurante = %s;
-                                """, (direccion, sender, os.environ.get("ID_RESTAURANTE", "5")))
-                log_message(f"Dirección corregida guardada en BD para {sender}", "INFO")
-            except Exception as e:
-                log_message(f"Error al corregir dirección: {e}", "ERROR")
-                send_text_response(sender, "Hubo un error al procesar tu dirección. Por favor, intenta nuevamente.")
-        elif clasificacion_mensaje == "mas_datos_direccion":
+        # elif (clasificacion_mensaje == "direccion") and obtener_intencion_futura(sender) == "confirmar direccion":
+        #     try:
+        #         direccion = obtener_direccion(sender, os.environ.get("ID_RESTAURANTE", "5"))
+        #         log_message(f"Dirección antes de corrección: {direccion}", "INFO")
+        #         direccion = corregir_direccion(direccion,pregunta_usuario)
+        #         log_message(f"Dirección después de corrección: {direccion}", "INFO")
+        #         mensaje = direccion_bd(nombre_cliente, direccion)
+        #         send_text_response(sender, mensaje)
+        #         guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
+        #         execute_query("""
+        #                     UPDATE clientes_whatsapp
+        #                     SET direccion_google = %s
+        #                     WHERE telefono = %s AND id_restaurante = %s;
+        #                         """, (direccion, sender, os.environ.get("ID_RESTAURANTE", "5")))
+        #         log_message(f"Dirección corregida guardada en BD para {sender}", "INFO")
+        #     except Exception as e:
+        #         log_message(f"Error al corregir dirección: {e}", "ERROR")
+        #         send_text_response(sender, "Hubo un error al procesar tu dirección. Por favor, intenta nuevamente.")
+        elif clasificacion_mensaje == "direccion":
             try:
                 ultimo_mensaje=extraer_ultimo_mensaje(pregunta_usuario)
                 direccion=get_direction(ultimo_mensaje)
@@ -931,11 +931,16 @@ def orquestador_subflujos(
                     send_text_response(sender, "Comparteme la dirección a actualizar por favor")
                     return
                 send_text_response(sender, "Validare que estes en nuestra area de cobertura dame un par de minutos")
-                direccion = obtener_direccion(sender, os.environ.get("ID_RESTAURANTE", "5"))
-                log_message(f"Dirección antes de corrección: {direccion}", "INFO")
-                direccion = corregir_direccion(direccion,pregunta_usuario)
-                log_message(f"Dirección después de corrección: {direccion}", "INFO")
-                mensaje = direccion_bd(nombre_cliente, direccion)
+                #OOObtener corrdeenandas
+                #Validar nueva direccion si esta en rango
+                #Actuualizar dirrreccion del pedido
+                #le decimos al cliente que la buuena
+                
+                # direccion = obtener_direccion(sender, os.environ.get("ID_RESTAURANTE", "5"))
+                # log_message(f"Dirección antes de corrección: {direccion}", "INFO")
+                # direccion = corregir_direccion(direccion,pregunta_usuario)
+                # log_message(f"Dirección después de corrección: {direccion}", "INFO")
+                # mensaje = direccion_bd(nombre_cliente, direccion)
                 geocode_and_assign(sender, direccion, os.environ.get("ID_RESTAURANTE", "5"))
                 datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, os.environ.get("ID_RESTAURANTE", "5"))
                 latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
