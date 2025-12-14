@@ -335,7 +335,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     f"Clasificación: {classification}, Tipo: {type_text}, Entidades: {entities_text}"
                 )
                 # Guardar mensaje en base de datos
-                save_message_to_db(sender, text, classification, type_text, str(entities_text), tipo_general, ID_RESTAURANTE)
+                #save_message_to_db(sender, text, classification, type_text, str(entities_text), tipo_general, ID_RESTAURANTE)
                 manejar_dialogo(
                     sender=sender,
                     clasificacion_mensaje=classification,

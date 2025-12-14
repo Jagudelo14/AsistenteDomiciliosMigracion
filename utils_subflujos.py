@@ -39,7 +39,7 @@ from utils import (
     obtener_intencion_futura,
     borrar_intencion_futura,
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, actualizar_pedido_con_mensaje_modificacion, clasificador_consulta_menu, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion
+from utils_chatgpt import actualizar_pedido_con_mensaje, clasificador_consulta_menu, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion
 from utils_database import execute_query, execute_query_columns
 from utils_google import calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
@@ -191,7 +191,7 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
             "eleccion_promocion": eleccion_promocion,
             "bandera_promocion": bandera_promocion
         }
-        guardar_intencion_futura(sender, "confirmacion_modificacion_pedido", pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario, datos_promocion)
+        guardar_intencion_futura(sender, "confirmar_pedido", pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario, datos_promocion)
         if id_ultima_intencion is None:
             log_message(f"No hay intención previa para marcar como resuelta para {sender}.", "INFO")
         else:
@@ -374,24 +374,25 @@ def subflujo_confirmacion_pedido(sender: str, nombre_cliente: str) -> Dict[str, 
         codigo_unico: str = obtener_intencion_futura_observaciones(sender)
         confirmar_dict: dict = marcar_pedido_como_definitivo(sender, codigo_unico)
         pedido_temp: dict = obtener_pedido_por_codigo_orignal(sender, codigo_unico)
-        total_pedido: float = confirmar_dict.get("total_productos", 0.0)
+        total_pedido: float = pedido_temp.get("total_productos", 0.0)
         if total_pedido > 200000:
             numero_admin: str = os.getenv("NUMERO_ADMIN")
             send_text_response(numero_admin, f"Atención: Pedido grande confirmado por {nombre_cliente} ({sender}) por un total de {total_pedido}. Código único: {codigo_unico}.")
-            send_text_response(sender, "Un asesor se comunicará contigo muy pronto.")
-        mensaje_metodo_recogida: dict = solicitar_metodo_recogida(nombre_cliente, codigo_unico, "Sierra Nevada", pedido_temp.get("producto", ""))
-        # Normalizar respuesta: aceptar dict {"mensaje": "..."} o str
-        
-        if isinstance(mensaje_metodo_recogida, dict):
-            texto_a_enviar = mensaje_metodo_recogida.get("mensaje") or ""
-        elif isinstance(mensaje_metodo_recogida, str):
-            texto_a_enviar = mensaje_metodo_recogida
+            send_text_response(sender, "El valor de tu pedido es muy alto, Un asesor se comunicará contigo muy pronto.")
         else:
-            log_message(f"subflujo_confirmacion_pedido: respuesta inesperada de solicitar_metodo_recogida: {type(mensaje_metodo_recogida)}", "WARN")
-            texto_a_enviar = f"{nombre_cliente}, tu pedido ({codigo_unico}) quedó delicioso! ¿Domicilio o recoges en el local?"
-        send_text_response(sender, texto_a_enviar)
-        guardar_intencion_futura(sender, "metodo_recogida", codigo_unico)
-        log_message(f'Pedido {confirmar_dict.get("codigo_unico")} confirmado correctamente para {sender}.', 'INFO')
+            mensaje_metodo_recogida: dict = solicitar_metodo_recogida(nombre_cliente, codigo_unico, "Sierra Nevada", pedido_temp.get("producto", ""))
+            # Normalizar respuesta: aceptar dict {"mensaje": "..."} o str
+            
+            if isinstance(mensaje_metodo_recogida, dict):
+                texto_a_enviar = mensaje_metodo_recogida.get("mensaje") or ""
+            elif isinstance(mensaje_metodo_recogida, str):
+                texto_a_enviar = mensaje_metodo_recogida
+            else:
+                log_message(f"subflujo_confirmacion_pedido: respuesta inesperada de solicitar_metodo_recogida: {type(mensaje_metodo_recogida)}", "WARN")
+                texto_a_enviar = f"{nombre_cliente}, tu pedido ({codigo_unico}) quedó delicioso! ¿Domicilio o recoges en el local?"
+            send_text_response(sender, texto_a_enviar)
+            guardar_intencion_futura(sender, "metodo_recogida", codigo_unico)
+            log_message(f'Pedido {confirmar_dict.get("codigo_unico")} confirmado correctamente para {sender}.', 'INFO')
     except Exception as e:
         log_message(f'Error en <SubflujoConfirmacionPedido>: {e}.', 'ERROR')
         raise e
@@ -539,53 +540,85 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         log_message(f'Error en <SubflujoMedioPago>: {e}.', 'ERROR')
         raise e
 
-def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usuario: str) -> dict:
+def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usuario: str):
     """Maneja la modificación del pedido por parte del usuario."""
     try:
         log_message(f'Iniciando función <SubflujoModificacionPedido> para {sender}.', 'INFO')
-        bandera_promocion: bool = False
-        items_menu: list = obtener_menu()
-        pedido_dict: dict = {}
-        pedido_anterior = obtener_intencion_futura_mensaje_chatbot(sender)
-        nuevos_elementos: str = pregunta_usuario
-        codigo_unico_anterior: str = obtener_intencion_futura_observaciones(sender)
-        eliminar_pedido(sender, codigo_unico_anterior)
-        pedido_dict = actualizar_pedido_con_mensaje_modificacion(pedido_anterior, items_menu, nuevos_elementos)
-        if not pedido_dict.get("order_complete", False):
-            no_completo: dict = pedido_incompleto_dynamic(pregunta_usuario, items_menu, str(pedido_dict))
-            send_text_response(sender, no_completo.get("mensaje"))
-            guardar_intencion_futura(sender, "continuacion_pedido", str(pedido_dict), no_completo.get("mensaje"), pregunta_usuario)
+
+        # Verificar si existen pedidos pendientes
+        query_pendientes = """
+        select count(*) from pedidos as p inner join clientes_whatsapp as cw
+        on p.id_whatsapp = cw.id_whatsapp 
+        where telefono = %s and estado = 'pendiente'
+        """
+        result = execute_query(query_pendientes, (sender,), fetchone=True)
+        count = result[0] if result else 0
+
+        if count > 0:
+            send_text_response(sender, "los sentimos, Tu pedido ya fue creado, se envía al administrador para que verifique si se puede modificar o no, en un momento el admin se comunicara contigo.")
+            numero_admin = os.getenv("NUMERO_ADMIN")
+            send_text_response(numero_admin, f"El usuario {nombre_cliente} ({sender}) quiere modificar su pedido. Verificar si se puede modificar.")
             return
-        pedido_info = guardar_pedido_completo(sender, pedido_dict, es_temporal=True)
-        if not pedido_info or not isinstance(pedido_info, dict) or "idpedido" not in pedido_info:
-            log_message(f'No se pudo crear el pedido para {sender}. pedido_info={pedido_info}', 'ERROR')
-            send_text_response(sender, "Lo siento, no pude guardar tu pedido. Por favor inténtalo de nuevo más tarde.")
+        else:
+            send_text_response(sender, "Lo siento, pero no tienes un pedido activo para modificar. Por favor, realiza un nuevo pedido.")
             return
-        #items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict, sender)
-        info_promociones = None
-        eleccion_promocion = None
-        if obtener_intencion_futura(sender) == "continuacion_promocion":
-            info_promociones = obtener_intencion_futura_observaciones(sender)
-            respuesta_previa_promocion = obtener_intencion_futura_mensaje_chatbot(sender)
-            eleccion_promocion = interpretar_eleccion_promocion(pregunta_usuario, info_promociones, respuesta_previa_promocion, pedido_dict)
-            send_text_response(sender, f"Elección de promoción interpretada: {str(eleccion_promocion)}")
-            if eleccion_promocion.get("valida_promocion"):
-                actualizar_total_productos(sender, pedido_info['codigo_unico'], float(eleccion_promocion.get("total_final", pedido_info.get("total_productos", 0.0))))
-                bandera_promocion = True
-            else:
-                no_completo: dict = pedido_incompleto_dynamic_promocion(pregunta_usuario, items_menu, str(pedido_dict))
-                send_text_response(sender, no_completo.get("mensaje"))
-                return
-        confirmacion_modificacion_pedido: dict = generar_mensaje_confirmacion_modificacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
-        send_text_response(sender, confirmacion_modificacion_pedido.get("mensaje"))
-        #confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
-        #send_text_response(sender, confirmacion_pedido.get("mensaje"))
-        datos_promocion = {
-            "info_promociones": info_promociones,
-            "eleccion_promocion": eleccion_promocion,
-            "bandera_promocion": bandera_promocion
-        }
-        guardar_intencion_futura(sender, "confirmacion_modificacion_pedido", pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario, datos_promocion)
+
+        # bandera_promocion: bool = False
+        # items_menu: list = obtener_menu()
+        # pedido_dict: dict = {}
+        # #pedido_anterior = obtener_intencion_futura_mensaje_chatbot(sender)
+        # nuevos_elementos: str = pregunta_usuario
+        # query = """SELECT d.*
+        #                 FROM detalle_pedido d
+        #                 INNER JOIN pedidos p
+        #                     ON d.id_pedido = p.idpedido
+        #                 WHERE p.codigo_unico = (
+        #                     SELECT p2.codigo_unico
+        #                     FROM pedidos p2
+        #                     INNER JOIN clientes_whatsapp cw
+        #                         ON p2.id_whatsapp = cw.id_whatsapp
+        #                     WHERE cw.telefono = %s
+        #                     ORDER BY p2.idpedido DESC
+        #                     LIMIT 1
+        #                 );"""
+        # pedido_anterior = execute_query(query, (sender,))
+        # #eliminar_pedido(sender, codigo_unico_anterior)
+        # pedido_dict = actualizar_pedido_con_mensaje_modificacion(pedido_anterior, items_menu, nuevos_elementos)
+        # if not pedido_dict.get("order_complete", False):
+        #     no_completo: dict = pedido_incompleto_dynamic(pregunta_usuario, items_menu, str(pedido_dict))
+        #     send_text_response(sender, no_completo.get("mensaje"))
+        #     guardar_intencion_futura(sender, "continuacion_pedido", str(pedido_dict), no_completo.get("mensaje"), pregunta_usuario)
+        #     return
+        # pedido_info = guardar_pedido_completo(sender, pedido_dict, es_temporal=True)
+        # if not pedido_info or not isinstance(pedido_info, dict) or "idpedido" not in pedido_info:
+        #     log_message(f'No se pudo crear el pedido para {sender}. pedido_info={pedido_info}', 'ERROR')
+        #     send_text_response(sender, "Lo siento, no pude guardar tu pedido. Por favor inténtalo de nuevo más tarde.")
+        #     return
+        # #items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict, sender)
+        # info_promociones = None
+        # eleccion_promocion = None
+        # if obtener_intencion_futura(sender) == "continuacion_promocion":
+        #     info_promociones = obtener_intencion_futura_observaciones(sender)
+        #     respuesta_previa_promocion = obtener_intencion_futura_mensaje_chatbot(sender)
+        #     eleccion_promocion = interpretar_eleccion_promocion(pregunta_usuario, info_promociones, respuesta_previa_promocion, pedido_dict)
+        #     send_text_response(sender, f"Elección de promoción interpretada: {str(eleccion_promocion)}")
+        #     if eleccion_promocion.get("valida_promocion"):
+        #         actualizar_total_productos(sender, pedido_info['codigo_unico'], float(eleccion_promocion.get("total_final", pedido_info.get("total_productos", 0.0))))
+        #         bandera_promocion = True
+        #     else:
+        #         no_completo: dict = pedido_incompleto_dynamic_promocion(pregunta_usuario, items_menu, str(pedido_dict))
+        #         send_text_response(sender, no_completo.get("mensaje"))
+        #         return
+        # confirmacion_modificacion_pedido: dict = generar_mensaje_confirmacion_modificacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
+        # send_text_response(sender, confirmacion_modificacion_pedido.get("mensaje"))
+        # #confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
+        # #send_text_response(sender, confirmacion_pedido.get("mensaje"))
+        # datos_promocion = {
+        #     "info_promociones": info_promociones,
+        #     "eleccion_promocion": eleccion_promocion,
+        #     "bandera_promocion": bandera_promocion
+        # }
+        # guardar_intencion_futura(sender, "confirmacion_modificacion_pedido", pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario, datos_promocion)
     except Exception as e:
         log_message(f'Error en <SubflujoModificacionPedido>: {e}.', 'ERROR')
         raise e
@@ -790,7 +823,7 @@ def orquestador_subflujos(
         if clasificacion_mensaje == "saludo":
             respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender, pregunta_usuario)
             send_text_response(sender, respuesta_bot)
-        elif (clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "continuacion_promocion") and obtener_intencion_futura(sender) != "confirmacion_modificacion_pedido":
+        elif (clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "continuacion_promocion"):
             subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, id_ultima_intencion)
         elif clasificacion_mensaje == "confirmacion_general":
             return subflujo_confirmacion_general(sender, pregunta_usuario)
@@ -823,7 +856,7 @@ def orquestador_subflujos(
             else:
                 # Fallback: intentar verificar el pago por si el usuario envió comprobante
                 subflujo_verificación_pago(sender, nombre_cliente, pregunta_usuario)
-        elif (clasificacion_mensaje == "modificacion_pedido" or clasificacion_mensaje == "continuacion_pedido" or clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "solicitud_pedido") and obtener_intencion_futura(sender) == "confirmacion_modificacion_pedido":
+        elif (clasificacion_mensaje == "modificar_pedido" or clasificacion_mensaje == "continuacion_pedido" or clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "solicitud_pedido"):
             subflujo_modificacion_pedido(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "confirmacion_modificacion_pedido":
             send_text_response(sender, "Escribe lo que quieras modificar de tu pedido de manera clara y específica.")
