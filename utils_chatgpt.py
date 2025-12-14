@@ -88,10 +88,10 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - modificar_pedido (puede ser con palabras clave como cambiar, quitar, agregar, modificar, también, etc.)
             Ejemplo: "quiero agregar una malteada de vainilla", "quiero que la hamburguesa no traiga lechuga", "cambia mi pedido por favor por...", "quitar la malteada", "también quiero una gaseosa coca cola original", "dame también una malteada de chocolate", etc.
             - negacion_general (puede ser en otros idiomas: no, non, nein, etc.)
-            - preguntas_generales
+            - preguntas_generales (estas categorias forman parte: formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.),si hacen domicilios o envíos, horarios de atención, dirección o ubicación del local,contacto, pedidos o reservas promociones o descuentos, preguntas sobre reservas-> son preguntas generales)
             - quejas (quejas de menor nivel)
             - saludo
-            - sin_intencion
+            - sin_intencion (Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, clima, películas, tecnología, etc.) → "sin_intencion".)
             - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) cosas similares a estos pedidos clasificalas como solicitud pedido
             - transferencia (quejas de mayor nivel)
             - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo)
@@ -108,6 +108,8 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - No debes crear un nuevo item cuando la frase solo aclara o modifica el producto anterior.
             - SI EL CLIENTE TE PIDE UN PRODUCTO EN COMBO NUNCA DEBES AÑADIR SU VERSIÓN SOLO COMO PARTE DEL PEDIDO A MENOS QUE LO EXIJA EXPLICITAMENTE EL MENSAJE (POR EJEMPLO: "UNA SIERRA QUESO Y UNA SIERRA QUESO EN COMBO" SI DEBES AÑADIR AMBOS PRODUCTOS AL PEDIDO EJEMPLO 2: "UNA SIERRA QUESO EN COMBO" NO DEBES AÑADIR SIERRA QUESO SOLO)
             - Si el usuario indica una cantidad explícita (ej. "2", "4", "dos", "cuatro"), debes representarla usando el campo "cantidad" y no duplicar items iguales.
+            - Las reservas las clasificas como preguntas generales y todo lo relacionado con reservas va en esa categoría.
+            - Si te preguntan que me recomiendas se refiere a preguntas generales, en general las recomendaciones relacionalas con el menu y preguntas generales.
 
             Reglas IMPORTANTES:
             - DEBES analizar y clasificar ÚNICAMENTE el ÚLTIMO mensaje enviado por el USUARIO.
@@ -177,7 +179,7 @@ def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, model: str = "gpt-3.
         • contacto, pedidos o reservas
         • promociones o descuentos
     - Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, clima, películas, tecnología, etc.) → "no_relacionada".
-
+    - Responde SOLO con el JSON, sin explicaciones ni texto adicional.
     Ejemplos:
     1️⃣ "qué hamburguesas tienen?" → {{"clasificacion": "relacionada"}}
     2️⃣ "hay hamburguesas de pollo?" → {{"clasificacion": "relacionada"}}
@@ -301,7 +303,7 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
         🕐 Horario: Todos los días de 12:00 p.m. a 7:00 p.m.
         📍 Sedes:
         - Cedritos Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca
-        💳 Medios de pago: tarjeta débito, crédito y efectivo.
+        💳 Medios de pago: solo contraentrega efectivo y datafono.
 
         El cliente preguntó: "{pregunta_usuario}"
 
@@ -325,6 +327,7 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
         - Evita frases impersonales (ej. “su solicitud ha sido procesada”).
         - Evita exageraciones o tono juvenil extremo.
         - Mantén la respuesta en máximo 2 frases si es posible.
+        - En este momento no manejamos reservas
 
         FORMATO OBLIGATORIO DE SALIDA:
         Devuelve SOLO un JSON válido con esta estructura EXACTA:
@@ -1394,6 +1397,30 @@ def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedi
     try:
         log_message('Iniciando función <solicitar_medio_pago>.', 'INFO')
 
+#         PROMPT_MEDIOS_PAGO = f"""
+# Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
+# Te llamas PAKO.
+
+# El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
+# Este es el pedido que hizo:
+# "{pedido_str}"
+
+# TAREA:
+# - Haz un comentario alegre y sabroso sobre el pedido.
+# - Estilo: cálido, entusiasta.
+# - 1 o 2 frases máximo.
+# - Luego pídele elegir medio de pago.
+# - Menciona el local: {nombre_local}
+# - Lista opciones disponibles:
+#   * Efectivo
+#   * Tarjeta débito
+#   * Tarjeta crédito
+
+# Debe responder estrictamente un JSON con el campo:
+# {{
+#    "mensaje": "texto aquí"
+# }}
+# """
         PROMPT_MEDIOS_PAGO = f"""
 Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
 Te llamas PAKO.
@@ -1406,19 +1433,17 @@ TAREA:
 - Haz un comentario alegre y sabroso sobre el pedido.
 - Estilo: cálido, entusiasta.
 - 1 o 2 frases máximo.
-- Luego pídele elegir medio de pago.
+- Luego pídele elegir medio de pago aclara que por el momento ambas son contraentrega.
 - Menciona el local: {nombre_local}
 - Lista opciones disponibles:
   * Efectivo
-  * Tarjeta débito
-  * Tarjeta crédito
+  * Datafono
 
 Debe responder estrictamente un JSON con el campo:
 {{
    "mensaje": "texto aquí"
 }}
 """
-
         client = OpenAI()
 
         response = client.chat.completions.create(
@@ -1934,7 +1959,7 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
         """Mapea la respuesta del usuario al método de pago estandarizado."""
         log_message('Iniciando función <mapear_modo_pago>.', 'INFO')
         client = OpenAI()
-        PROMPT_MAPEO_PAGO = """
+        PROMPT_MAPEO_PAGO = f"""
         Eres un clasificador experto en interpretar el método de pago que un cliente escribe en WhatsApp, incluso cuando lo escribe con errores, abreviaciones o de forma muy informal.
 
         Debes analizar el texto del usuario y responder exclusivamente uno de los siguientes valores:
@@ -1947,6 +1972,7 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
         - "tarjeta"
         - "nfc"
         - "desconocido"
+        - "datafono"
 
         Reglas:
         1. Aunque esté mal escrito, identifica la intención correcta.
@@ -1955,20 +1981,23 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
         - daviplata / davi / dabiplya / daviplaya → "transferencia - daviplata"
         - bre-b / breb → "transferencia - bre-b"
         - “movil”, “transfer”, “transfe”, “pse”, “lo hago por el celu”, “paso por app” → "transferencia - otro"
+        - "datafono", "datáfono", "dátáfono", "datafon" → "datafono"
         3. tarjeta, tc, td, targta, tarjta, crédito, débito → "tarjeta"
         4. nfc, acercar la tarjeta, contactless → "nfc"
         5. efectivo, cash → "efectivo"
         6. Si no puedes entenderlo → "desconocido"
 
         Formato de salida OBLIGATORIO (JSON puro):
-        {
+        {{
             "metodo": "uno de los valores permitidos"
-        }
+        }}
+        Aqui el mensaje del usuario:
+        {respuesta_usuario}
         """
         if not respuesta_usuario:
             return "desconocido"
 
-        prompt = PROMPT_MAPEO_PAGO + f'\n\nTexto del usuario: "{respuesta_usuario}"'
+        prompt = PROMPT_MAPEO_PAGO 
         response = client.responses.create(
             model="gpt-3.5-turbo",
             input=prompt,
@@ -1976,13 +2005,69 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
             temperature=0
         )
         raw = response.output_text
+        log_message(f'Raw response de <mapear_modo_pago>: {raw}', 'DEBUG')
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] mapear_modo_pago tokens_used={tokens_used}", "DEBUG")
-        data = json.loads(raw)
-        metodo = data.get("metodo", "desconocido")
-        log_message('Finalizando función <mapear_modo_pago>.', 'INFO')
-        return metodo
+
+        # Normalizar y sanear la respuesta: eliminar fences de código y espacios
+        try:
+            clean = str(raw or "").strip()
+            # eliminar bloque ```json ... ``` o ``` ... ``` si existen
+            clean = re.sub(r'^```json\s*', '', clean, flags=re.I)
+            clean = re.sub(r'^```', '', clean, flags=re.I).strip()
+            clean = re.sub(r'```$', '', clean, flags=re.I).strip()
+
+            if not clean:
+                log_message("mapear_modo_pago: respuesta vacía después de sanear", "WARN")
+                return "desconocido"
+
+            # Intentar parsear directamente
+            try:
+                data = json.loads(clean)
+            except Exception:
+                # Buscar primer objeto JSON en el texto
+                m = re.search(r'\{.*\}', clean, flags=re.DOTALL)
+                if m:
+                    try:
+                        data = json.loads(m.group(0))
+                    except Exception as e:
+                        log_message(f"mapear_modo_pago: fallo al parsear objeto JSON extraído: {e}", "ERROR")
+                        data = None
+                else:
+                    data = None
+
+            if data and isinstance(data, dict):
+                metodo = data.get("metodo", "desconocido")
+                log_message(f"mapear_modo_pago: metodo detectado desde JSON -> {metodo}", "DEBUG")
+                log_message('Finalizando función <mapear_modo_pago>.', 'INFO')
+                return metodo
+
+            # Fallback por keywords si no hay JSON parseable
+            text = clean.lower()
+            if "nequi" in text or "neki" in text:
+                metodo = "transferencia - nequi"
+            elif "daviplata" in text or "davi" in text:
+                metodo = "transferencia - daviplata"
+            elif "bre-b" in text or "breb" in text:
+                metodo = "transferencia - bre-b"
+            elif any(k in text for k in ("tarjeta", "tc", "td", "targta", "tarjta", "crédito", "credito", "débito", "debito")):
+                metodo = "tarjeta"
+            elif any(k in text for k in ("nfc", "contactless", "acercar")):
+                metodo = "nfc"
+            elif any(k in text for k in ("efectivo", "cash")):
+                metodo = "efectivo"
+            elif any(k in text for k in ("datafono", "datáfono", "datafon")):
+                metodo = "datafono"
+            else:
+                metodo = "desconocido"
+
+            log_message(f"mapear_modo_pago: metodo detectado por fallback -> {metodo}", "DEBUG")
+            log_message('Finalizando función <mapear_modo_pago>.', 'INFO')
+            return metodo
+        except Exception as e:
+            log_message(f"mapear_modo_pago: excepción inesperada al parsear respuesta: {e}", "ERROR")
+            return "desconocido"
     except Exception as e:
         log_message(f"Error mapeando método de pago: {e}", "ERROR")
         return "desconocido"
@@ -2507,7 +2592,7 @@ def extraer_info_personal(mensaje: str) -> dict:
     Usa ChatGPT para extraer información personal del cliente
     a partir de su mensaje en WhatsApp.
     Devuelve un dict con campos tipo_documento, numero_documento, email.
-    Siempre retorna un dict con las 3 claves; si no se extrae, el valor será "No proporcionado".
+    Siempre retorna un dict con las 4 claves; si no se extrae, el valor será "No proporcionado".
     """
     try:
         prompt = f"""
@@ -2645,7 +2730,7 @@ def get_direction(text: str) -> str | None:
             return None
         client = OpenAI(api_key=get_openai_key())
         prompt = f"""Eres un asistente experto en extraer direcciones de texto libre.
-Extrae SÓLO la dirección del siguiente texto y agrega "BOGOTA, COLOMBIA" al final si no está presente.
+Extrae SÓLO la dirección del siguiente texto y agrega al final si no está presente como "No presente".
 Texto: "{text}"
 RESPONDE únicamente con la dirección, nada más."""
         response = client.chat.completions.create(
@@ -2662,6 +2747,8 @@ RESPONDE únicamente con la dirección, nada más."""
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] get_direction tokens_used={tokens_used}", "DEBUG")
+        if raw == "" or raw is None or raw == "No presente":
+            return None
         # normalizar a string y limpiar backticks
         if isinstance(raw, dict):
             raw = json.dumps(raw, ensure_ascii=False)
