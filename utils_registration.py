@@ -116,7 +116,7 @@ def check_and_mark_datos_personales(sender: str, id_restaurante: str) -> list:
             missing.append("N_Doc")
         if not row[2] or str(row[2]).strip() == "":
             missing.append("email")
-        if not row[3] or str(row[3]).strip() == "":
+        if not row[3] or str(row[3]).strip() == "" or row[3]=="Desconocido":
             missing.append("nombre")
 
         if not missing:
