@@ -313,7 +313,11 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                                         SET direccion_google = %s
                                         WHERE telefono = %s AND id_restaurante = %s;
                                         """, (None, sender, ID_RESTAURANTE))
+                        send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos próximamente en tu barrio.😊,si aun deseas continuar porque tienes alguna pregunta o deseas hacer tu pedido a otra dirección requerimos tu autorización expresa para el tratamiento de tus datos personales (Ley 1581 de 2012). Finalidad: Procesar tu pago, gestionar tu pedido y validar si estas en nuestra area de cobertura. Derechos y Política Completa: Puedes consultar tus derechos y la legislación detallada aquí: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981Al responder SÍ, declaras conocer y aceptar la finalidad del tratamiento de tus datos. Si no estás de acuerdo, responde NO.")
                         return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+                    else:
+                        respuesta_bot = f"""Excelente {nombre_cliente} Dime que necesitas y con gusto te ayudaré 😊. ¿Tienes alguna pregunta? o talvez ¿Quieres ver el menu?"""
+                        send_text_response(sender, respuesta_bot)
                     logging.info(f"Usuario {sender} proporcionó una dirección.")
                     log_message(f"Usuario {sender} proporcionó una dirección.", "INFO")
 

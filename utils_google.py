@@ -50,23 +50,35 @@ def primera_regla_tiempo(id_sede: str, tiempo_base: int) -> int:
         log_message("Iniciando primera regla de tiempo.", "INFO")
 
         query = """
-            SELECT
-                p.idpedido,
-                COUNT(d.id_detalle) AS total_items
-            FROM pedidos p
-            LEFT JOIN detalle_pedido d
-                ON p.idpedido = d.id_pedido
-            where idsede = %s and p.estado = 'pendiente'
-            GROUP BY p.idpedido;
+        SELECT
+        p.idpedido,
+        COUNT(d.id_detalle) AS total_items
+        FROM pedidos p
+        LEFT JOIN detalle_pedido d
+        ON p.idpedido = d.id_pedido
+        WHERE p.idsede = %s
+        AND p.estado = 'pendiente'
+        GROUP BY p.idpedido;
         """
+        params = (id_sede,)
 
-        # Dos parámetros porque hay dos placeholders
-        resultado = execute_query(query, id_sede, fetchone=True)
+        # debug antes de ejecutar
+        log_message(f"[primera_regla_tiempo] SQL: {query.strip()}", "DEBUG")
+        log_message(f"[primera_regla_tiempo] params: {params}", "DEBUG")
 
-        hamburguesas_en_preparacion = resultado[0] if resultado else 0
-        log_message(f"Hamburguesas en preparación: {hamburguesas_en_preparacion}", "INFO")
+        rows = execute_query(query, params)
+        # rows expected: list of tuples (idpedido, total_items)
+        if not rows:
+            # no hay pedidos pendientes -> no aumento sobre el tiempo base
+            log_message("[primera_regla_tiempo] No hay pedidos pendientes.", "DEBUG")
+            return tiempo_base
 
-        incremento = (hamburguesas_en_preparacion // 10) * 8
+        # Sumar la cantidad de items (productos) en preparación en todos los pedidos pendientes
+        total_items = sum(r[1] or 0 for r in rows)
+        log_message(f"Total de productos en preparación: {total_items}", "INFO")
+
+        # Por cada 10 productos sumar 7 minutos
+        incremento = (total_items // 10) * 7
         tiempo_estimado = int(tiempo_base + incremento)
         log_message(f"Tiempo base: {tiempo_base} | Incremento: {incremento} | Total estimado: {tiempo_estimado}", "INFO")
 
@@ -420,16 +432,12 @@ def calcular_distancia_entre_sede_y_cliente(sender: str, latitud_cliente: float,
         sede_cercana = buscar_sede_mas_cercana_dentro_area(latitud_cliente, longitud_cliente, id_restaurante)
         if sede_cercana is None:
             log_message("No se encontró sede cercana. Retornando None.", "WARNING")
-            send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos próximamente en tu barrio.😊,si aun deseas continuar porque tienes alguna pregunta o deseas hacer tu pedido a otra dirección requerimos tu autorización expresa para el tratamiento de tus datos personales (Ley 1581 de 2012). Finalidad: Procesar tu pago, gestionar tu pedido y validar si estas en nuestra area de cobertura. Derechos y Política Completa: Puedes consultar tus derechos y la legislación detallada aquí: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981Al responder SÍ, declaras conocer y aceptar la finalidad del tratamiento de tus datos. Si no estás de acuerdo, responde NO.")
             borrar_intencion_futura(sender)
             return None
 
         if not set_sede_cliente(sede_cercana["id"], sender, id_restaurante) or not set_lat_lon(sender, latitud_cliente, longitud_cliente, id_restaurante) or not set_direccion_cliente(sender, sede_cercana["direccion_envio"], id_restaurante):
             return None
 
-
-        respuesta_bot = f"""Excelente {nombre_cliente} Dime que necesitas y con gusto te ayudaré 😊. ¿Tienes alguna pregunta? o talvez ¿Quieres ver el menu?"""
-        send_text_response(sender, respuesta_bot)
         return True
     except Exception as e:
         log_message(f"Ocurrió un error con el orquestador, revisar {e}", "ERROR")
