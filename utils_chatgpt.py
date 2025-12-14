@@ -82,7 +82,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - consulta_pedido
             - consulta_promociones
             - continuacion_pedido (cuando incluye una aclaracion sobre un prodcuto como : es tal producto o era tal bebida se puede considerar como la continuacion de un pedido)
-            - direccion (Cuando unicamente contiene una direccion)
+            - direccion (Cuando unicamente contiene una direccion o sobre modificaciones en direccion de envio)
             - info_personal
             - modificar_pedido (puede ser con palabras clave como cambiar, quitar, agregar, modificar, también, etc.)
             Ejemplo: "quiero agregar una malteada de vainilla", "quiero que la hamburguesa no traiga lechuga", "cambia mi pedido por favor por...", "quitar la malteada", "también quiero una gaseosa coca cola original", "dame también una malteada de chocolate", etc.
@@ -1343,7 +1343,7 @@ def generar_mensaje_cancelacion(
     """
     try:
         log_message('Iniciando función <generar_mensaje_cancelacion>.', 'INFO')
-        dict_registro_temp: dict = obtener_pedido_por_codigo(sender, codigo_unico)
+        dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
         producto = dict_registro_temp.get("producto", "N/A")
         total_productos = dict_registro_temp.get("total_productos", "N/A")
         client = OpenAI()
@@ -2729,7 +2729,7 @@ def get_direction(text: str) -> str | None:
             return None
         client = OpenAI(api_key=get_openai_key())
         prompt = f"""Eres un asistente experto en extraer direcciones de texto libre.
-Extrae SÓLO la dirección del siguiente texto y agrega al final si no está presente como "No presente".
+Extrae SÓLO la dirección del siguiente texto y si no encuentras dirección responde como "No presente".
 Texto: "{text}"
 RESPONDE únicamente con la dirección, nada más."""
         response = client.chat.completions.create(

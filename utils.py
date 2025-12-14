@@ -1252,20 +1252,19 @@ def actualizar_medio_pago(sender: str, codigo_unico: str, metodo_pago: str) -> d
         return {"actualizado": False, "error": str(e)}
 
 def obtener_pedido_por_codigo(codigo_unico: str) -> dict:
-    q = "SELECT idpedido, producto, total_productos, fecha, hora, id_whatsapp, es_temporal,total_final,tiempo_estimado FROM pedidos WHERE codigo_unico = %s"
+    q = "SELECT idpedido, total_productos, fecha, hora, id_whatsapp, es_temporal,total_final,tiempo_estimado FROM pedidos WHERE codigo_unico = %s"
     res = execute_query(q, (codigo_unico,), fetchone=True)
     if not res:
         return {}
     return {
         "idpedido": res[0],
-        "producto": res[1],
-        "total_productos": float(res[2]) if res[2] is not None else 0.0,
-        "fecha": res[3],
-        "hora": res[4],
-        "id_whatsapp": res[5],
-        "es_temporal": res[6],
-        "total_final": float(res[7]) if res[7] is not None else 0.0,
-        "tiempo_estimado": res[8]
+        "total_productos": float(res[1]) if res[1] is not None else 0.0,
+        "fecha": res[2],
+        "hora": res[3],
+        "id_whatsapp": res[4],
+        "es_temporal": res[5],
+        "total_final": float(res[6]) if res[6] is not None else 0.0,
+        "tiempo_estimado": res[7]
     }
 
 # Helper: obtener ordenes existentes por idpedido (cada fila representa un item)

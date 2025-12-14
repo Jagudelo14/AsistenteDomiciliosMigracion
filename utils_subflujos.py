@@ -931,18 +931,15 @@ def orquestador_subflujos(
                     send_text_response(sender, "Comparteme la dirección a actualizar por favor")
                     return
                 send_text_response(sender, "Validare que estes en nuestra area de cobertura dame un par de minutos")
-                #OOObtener corrdeenandas
-                #Validar nueva direccion si esta en rango
-                #Actuualizar dirrreccion del pedido
-                #le decimos al cliente que la buuena
                 geocode_and_assign(sender, direccion, os.environ.get("ID_RESTAURANTE", "5"))
                 datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, os.environ.get("ID_RESTAURANTE", "5"))
                 latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
                 longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
                 resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,os.environ.get("ID_RESTAURANTE", "5"), nombre_cliente)
                 if not resultado:
-                    send_text_response(sender, f"Lo siento {nombre_cliente}, pero tu dirección está fuera de nuestra área de cobertura. Por favor, verifica la dirección o elige otra opción de entrega.")
+                    send_text_response(sender, f"Lo siento {nombre_cliente}, pero tu dirección está fuera de nuestra área de cobertura. puedes recogerla en el restaurante o enviarnos otra dirección dentro del área.")
                     return
+                mensaje = direccion_bd(nombre_cliente, direccion)
                 send_text_response(sender, mensaje)
                 guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
                 log_message(f"Dirección corregida guardada en BD para {sender}", "INFO")
