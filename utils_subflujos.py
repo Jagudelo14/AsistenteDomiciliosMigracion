@@ -12,6 +12,7 @@ from utils_registration import validate_direction_first_time
 
 # --- IMPORTS INTERNOS --- #
 from utils import (
+    extraer_ultimo_mensaje,
     marcar_estemporal_true_en_pedidos,
     obtener_direccion,
     actualizar_costos_y_tiempos_pedido,
@@ -39,9 +40,9 @@ from utils import (
     obtener_intencion_futura,
     borrar_intencion_futura,
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, actualizar_pedido_con_mensaje_modificacion, clasificador_consulta_menu, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion
+from utils_chatgpt import actualizar_pedido_con_mensaje, actualizar_pedido_con_mensaje_modificacion, clasificador_consulta_menu, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion,get_direction
 from utils_database import execute_query, execute_query_columns
-from utils_google import calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
+from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
 
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
@@ -466,7 +467,19 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         medio_pago_real: str = mapear_modo_pago(respuesta_usuario)
         #datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
         if medio_pago_real =="efectivo":
-            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, ten el monto exacto listo para facilitar la transacción. ¡Gracias por tu preferencia!"
+            dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
+            tiempo= dict_registro_temp.get("tiempo_estimado", "N/A")
+            total_productos = dict_registro_temp.get("total_final", "N/A")
+            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            send_text_response(sender, mensaje_pago)
+            borrar_intencion_futura(sender)
+            marcar_estemporal_true_en_pedidos(sender,codigo_unico)
+            return
+        elif medio_pago_real == "datafono":
+            dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
+            tiempo= dict_registro_temp.get("tiempo_estimado", "N/A")
+            total_productos = dict_registro_temp.get("total_final", "N/A")
+            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar con tarjeta (datafono) al momento de la entrega o recogida de tu pedido ({codigo_unico}). El costo de tu domicilio es {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
@@ -879,12 +892,25 @@ def orquestador_subflujos(
                 send_text_response(sender, "Hubo un error al procesar tu dirección. Por favor, intenta nuevamente.")
         elif clasificacion_mensaje == "mas_datos_direccion":
             try:
+                ultimo_mensaje=extraer_ultimo_mensaje(pregunta_usuario)
+                direccion=get_direction(ultimo_mensaje)
+                if not direccion:
+                    send_text_response(sender, "Comparteme la dirección a actualizar por favor")
+                    return
+                send_text_response(sender, "Validare que estes en nuestra area de cobertura dame un par de minutos")
                 direccion = obtener_direccion(sender, os.environ.get("ID_RESTAURANTE", "5"))
                 log_message(f"Dirección antes de corrección: {direccion}", "INFO")
                 direccion = corregir_direccion(direccion,pregunta_usuario)
                 log_message(f"Dirección después de corrección: {direccion}", "INFO")
                 mensaje = direccion_bd(nombre_cliente, direccion)
                 geocode_and_assign(sender, direccion, os.environ.get("ID_RESTAURANTE", "5"))
+                datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, os.environ.get("ID_RESTAURANTE", "5"))
+                latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
+                longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
+                resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,os.environ.get("ID_RESTAURANTE", "5"), nombre_cliente)
+                if not resultado:
+                    send_text_response(sender, f"Lo siento {nombre_cliente}, pero tu dirección está fuera de nuestra área de cobertura. Por favor, verifica la dirección o elige otra opción de entrega.")
+                    return
                 send_text_response(sender, mensaje)
                 guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
                 log_message(f"Dirección corregida guardada en BD para {sender}", "INFO")
