@@ -935,12 +935,6 @@ def orquestador_subflujos(
                 #Validar nueva direccion si esta en rango
                 #Actuualizar dirrreccion del pedido
                 #le decimos al cliente que la buuena
-                
-                # direccion = obtener_direccion(sender, os.environ.get("ID_RESTAURANTE", "5"))
-                # log_message(f"Dirección antes de corrección: {direccion}", "INFO")
-                # direccion = corregir_direccion(direccion,pregunta_usuario)
-                # log_message(f"Dirección después de corrección: {direccion}", "INFO")
-                # mensaje = direccion_bd(nombre_cliente, direccion)
                 geocode_and_assign(sender, direccion, os.environ.get("ID_RESTAURANTE", "5"))
                 datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, os.environ.get("ID_RESTAURANTE", "5"))
                 latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
