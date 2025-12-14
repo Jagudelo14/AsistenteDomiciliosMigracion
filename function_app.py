@@ -75,7 +75,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         #Validación mensaje duplicado
-        # if validate_duplicated_message(message_id):
+        #if validate_duplicated_message(message_id):
         #     logging.info(f"Mensaje duplicado: {message_id}")
         #     return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]

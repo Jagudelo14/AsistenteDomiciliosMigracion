@@ -180,7 +180,7 @@ def handle_create_client(sender: str, datos: str, id_restaurante: str, es_tempor
         logging.info('Iniciando función <handleCreateClient>.')
         log_message(f'Datos recibidos para crear/actualizar cliente: {datos}', 'INFO')
         nombre = "Desconocido"
-        id_sede = 20
+        id_sede = 21
         if datos is not None:
             nombre = datos
         logging.info(f'Nombre del cliente: {nombre}')
@@ -1252,7 +1252,7 @@ def actualizar_medio_pago(sender: str, codigo_unico: str, metodo_pago: str) -> d
         return {"actualizado": False, "error": str(e)}
 
 def obtener_pedido_por_codigo(codigo_unico: str) -> dict:
-    q = "SELECT idpedido, producto, total_productos, fecha, hora, id_whatsapp, es_temporal,total_final FROM pedidos WHERE codigo_unico = %s"
+    q = "SELECT idpedido, producto, total_productos, fecha, hora, id_whatsapp, es_temporal,total_final,tiempo_estimado FROM pedidos WHERE codigo_unico = %s"
     res = execute_query(q, (codigo_unico,), fetchone=True)
     if not res:
         return {}
@@ -1264,8 +1264,8 @@ def obtener_pedido_por_codigo(codigo_unico: str) -> dict:
         "hora": res[4],
         "id_whatsapp": res[5],
         "es_temporal": res[6],
-        "es_promocion": res[7],
-        "total_final": float(res[8]) if res[8] is not None else 0.0
+        "total_final": float(res[7]) if res[7] is not None else 0.0,
+        "tiempo_estimado": res[8]
     }
 
 # Helper: obtener ordenes existentes por idpedido (cada fila representa un item)
@@ -1866,3 +1866,95 @@ def corregir_total_price_en_result(result: Dict) -> Dict:
     except Exception as e:
         log_message(f"Error en corregir_total_price_en_result: {e}", "ERROR")
         return result
+
+def extraer_ultimo_mensaje(mensaje: str) -> str:
+    """
+    Extrae el último mensaje del usuario de una cadena que puede contener
+    múltiples mensajes concatenados (por ejemplo, en chats largos).
+    Asume que los mensajes están separados por saltos de línea.
+    Retorna el último mensaje limpio.
+    """
+    try:
+        log_message("Iniciando extraer_ultimo_mensaje", "INFO")
+        if not mensaje:
+            return ""
+
+        # Si la entrada es una representación de una lista/tupla de tuplas/dicts
+        # intentar parsearla con ast.literal_eval y buscar el último texto del rol 'usuario'.
+        try:
+            import ast
+            parsed = None
+            if isinstance(mensaje, str) and (mensaje.strip().startswith("[") or "'rol'" in mensaje or '"rol"' in mensaje):
+                try:
+                    parsed = ast.literal_eval(mensaje)
+                except Exception:
+                    parsed = None
+
+            if parsed and isinstance(parsed, (list, tuple)):
+                # recorrer de atrás hacia adelante buscando rol usuario
+                for elem in reversed(parsed):
+                    # elem puede ser un tuple que contiene dicts
+                    candidates = []
+                    if isinstance(elem, dict):
+                        candidates = [elem]
+                    elif isinstance(elem, (list, tuple)):
+                        # a veces viene como ((dict,),)
+                        for sub in elem:
+                            if isinstance(sub, dict):
+                                candidates.append(sub)
+                            elif isinstance(sub, (list, tuple)):
+                                for sub2 in sub:
+                                    if isinstance(sub2, dict):
+                                        candidates.append(sub2)
+                    # revisar candidatos
+                    for c in candidates:
+                        if not isinstance(c, dict):
+                            continue
+                        role = (c.get('rol') or c.get('role') or c.get('sender') or '').strip().lower()
+                        text_field = c.get('texto') or c.get('text') or c.get('mensaje') or c.get('message')
+                        if role in ('usuario', 'user', 'cliente') and text_field:
+                            if isinstance(text_field, (list, tuple)):
+                                # tomar el último elemento si es lista
+                                ultimo_text = str(text_field[-1]).strip()
+                            else:
+                                ultimo_text = str(text_field).strip()
+                            log_message(f"Último mensaje extraído (desde estructura): {ultimo_text}", "DEBUG")
+                            return ultimo_text
+                # si no encontramos rol usuario, extraer el último 'texto' disponible
+                for elem in reversed(parsed):
+                    # buscar el primer dict con clave 'texto' o 'text'
+                    if isinstance(elem, dict):
+                        text_field = elem.get('texto') or elem.get('text')
+                        if text_field:
+                            return str(text_field if not isinstance(text_field, (list, tuple)) else text_field[-1]).strip()
+                    elif isinstance(elem, (list, tuple)):
+                        for sub in reversed(elem):
+                            if isinstance(sub, dict):
+                                text_field = sub.get('texto') or sub.get('text')
+                                if text_field:
+                                    return str(text_field if not isinstance(text_field, (list, tuple)) else text_field[-1]).strip()
+        except Exception:
+            # fallthrough al parsing por líneas
+            pass
+
+        # Fallback: Dividir por líneas y tomar la última no vacía
+        lineas = [line.strip() for line in mensaje.splitlines() if line.strip()]
+        if lineas:
+            ultimo = lineas[-1]
+            log_message(f"Último mensaje extraído (por líneas): {ultimo}", "DEBUG")
+            return ultimo
+
+        # Último recurso: buscar con regex la última ocurrencia de texto dentro de comillas después de 'texto' o 'message'
+        try:
+            m = re.findall(r"(?:'texto'|\"texto\"|\'message\'|\"message\")\s*:\s*(?:\[)?\s*([\'\"])(.*?)\1", mensaje, flags=re.I | re.S)
+            if m:
+                ultimo = m[-1][1].strip()
+                log_message(f"Último mensaje extraído (por regex): {ultimo}", "DEBUG")
+                return ultimo
+        except Exception:
+            pass
+
+        return ""
+    except Exception as e:
+        log_message(f"Error en extraer_ultimo_mensaje: {e}", "ERROR")
+        return ""
