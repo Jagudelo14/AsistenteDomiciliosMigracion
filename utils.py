@@ -503,7 +503,8 @@ def obtener_menu() -> list[dict[str, Any]]:
     try:
         log_message("Iniciando función <ObtenerMenu>.", "INFO")
         query = """
-                SELECT 
+                SELECT
+                    iditem,
                     nombre, 
                     tipo_comida, 
                     descripcion, 
@@ -515,12 +516,13 @@ def obtener_menu() -> list[dict[str, Any]]:
                 """
         items_data = execute_query(query)
         items = [
-            {
-                "nombre": row[0],
-                "tipo_comida": row[1],
-                "descripcion": row[2],
-                "observaciones": row[3],
-                "precio": float(row[4]) if row[4] is not None else 0.0
+            {   
+                "iditem": row[0],
+                "nombre": row[1],
+                "tipo_comida": row[2],
+                "descripcion": row[3],
+                "observaciones": row[4],
+                "precio": float(row[5]) if row[5] is not None else 0.0
             }
             for row in items_data
             ]
@@ -604,15 +606,15 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
                 cantidad = int(cantidad) if cantidad is not None else 1
             except Exception:
                 cantidad = 1
-            if nombre:
-                # añadir el nombre repetido según la cantidad
-                for _ in range(max(1, cantidad)):
-                    productos.append(nombre)
-            else:
-                log_message(f"[WARN] Item sin matched en <GuardarPedidoCompleto>: {item}", "WARN")
-                for _ in range(max(1, cantidad)):
-                    productos.append("SIN_MATCH")
-        productos_str = " | ".join(productos)
+            # if nombre:
+            #     # añadir el nombre repetido según la cantidad
+            #     for _ in range(max(1, cantidad)):
+            #         productos.append(nombre)
+            # else:
+            #     log_message(f"[WARN] Item sin matched en <GuardarPedidoCompleto>: {item}", "WARN")
+            #     for _ in range(max(1, cantidad)):
+            #         productos.append("SIN_MATCH")
+        #productos_str = " | ".join(productos)
         total_price = float(pedido_dict.get("total_price", 0))
         # ------------------------------- # 5. Hora y fecha Bogotá # -------------------------------
         now = datetime.now(ZoneInfo("America/Bogota"))
@@ -624,8 +626,8 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         estado = "pendiente"
         metodo_pago = "efectivo"
         # ------------------------------- # 7. Query con RETURNING # -------------------------------
-        query = """ INSERT INTO pedidos ( producto, total_productos, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal,direccion ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING idpedido, codigo_unico """
-        params = ( productos_str, total_price, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal, direccion )
+        query = """ INSERT INTO pedidos ( total_productos, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal,direccion ) VALUES ( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING idpedido, codigo_unico """
+        params = (total_price, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal, direccion )
         # ------------------------------- # 8. Ejecutar y retornar el id # -------------------------------
         logging.info(f"[GuardarPedidoCompleto] Ejecutando INSERT pedidos. params={params}")
         res = execute_query(query, params, fetchone=True)
@@ -636,6 +638,13 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
             logging.error('La inserción de pedido no devolvió resultados. Query o DB pueden haber fallado. params=%s', params)
             return None
         log_message(f'Pedido guardado con ID {res[0]} y código único {res[1]}', 'INFO')
+        # Guardar detalle de los productos
+        for item in pedido_dict.get("items", []):
+            especificaciones_txt = normalizar_especificaciones(item)
+            query = """ INSERT INTO detalle_pedido ( id_producto,id_pedido, cantidad, total, especificaciones) VALUES (%s, %s, %s, %s, %s)"""
+            params = (item.get("matched").get("id"), res[0], item.get("cantidad"), (item.get("matched").get("price") * item.get("cantidad", 1)), especificaciones_txt )
+            res_detalle = execute_query(query, params)
+        log_message(f'Detalle de pedido guardado para pedido ID {res[0]}', 'INFO')  
         return {
             "idpedido": res[0],
             "codigo_unico": res[1]
@@ -645,6 +654,29 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         log_message(f'Error al hacer uso de función <GuardarPedidoCompleto>: {e}.\nTRACEBACK:\n{tb}', 'ERROR')
         logging.error(f'Error al hacer uso de función <GuardarPedidoCompleto>: {e}.\n{tb}')
         return {}
+    
+def normalizar_especificaciones(item):
+    specs = []
+
+    requested_specs = item.get("requested", {}).get("especificaciones")
+    if isinstance(requested_specs, list):
+        specs.extend(requested_specs)
+
+    modifiers = item.get("modifiers_applied")
+    if isinstance(modifiers, list):
+        specs.extend(modifiers)
+
+    if not specs:
+        return None
+
+    # Eliminar duplicados manteniendo el orden
+    specs_unicos = list(dict.fromkeys(str(s).strip().lower() for s in specs))
+
+    # Capitalizar o normalizar presentación
+    specs_final = [s.capitalize() for s in specs_unicos]
+
+    return " | ".join(specs_final)
+
 
 def guardar_ordenes(idpedido: int, pedido_json: dict, sender: str) -> dict:
     """
@@ -995,7 +1027,7 @@ def obtener_pedido_por_codigo_orignal(sender: str, codigo_unico: str) -> dict:
                 "msg": "No existe id_whatsapp para este número."
             }
         query = """
-            SELECT producto, total_productos, codigo_unico
+            SELECT total_productos, codigo_unico
             FROM pedidos
             WHERE codigo_unico = %s
               AND id_whatsapp = %s;
@@ -1006,9 +1038,8 @@ def obtener_pedido_por_codigo_orignal(sender: str, codigo_unico: str) -> dict:
         if res:
             return {
                 "exito": True,
-                "producto": res[0],
-                "total_productos": res[1],
-                "codigo_unico": res[2]
+                "total_productos": res[0],
+                "codigo_unico": res[1]
             }
         else:
             return {
