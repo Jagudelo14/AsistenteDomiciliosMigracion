@@ -455,7 +455,7 @@ def orquestador_ubicacion_exacta(sender: str, latitud_cliente: float, longitud_c
         sede_cercana = buscar_sede_mas_cercana_dentro_area(latitud_cliente, longitud_cliente, id_restaurante)
         if sede_cercana is None:
             log_message("No se encontró sede cercana. Retornando None.", "WARNING")
-            send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos próximamente en tu barrio. 😊 - Sierra Nevada")
+            send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos estar próximamente en tu barrio. 😊 - Sierra Nevada")
             borrar_intencion_futura(sender)
             return None
         if not set_sede_cliente(sede_cercana["id"], sender, id_restaurante) or not set_lat_lon(sender, latitud_cliente, longitud_cliente, id_restaurante) or not set_direccion_cliente(sender, sede_cercana["direccion_envio"], id_restaurante):

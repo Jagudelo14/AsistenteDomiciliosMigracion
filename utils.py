@@ -456,6 +456,7 @@ def guardar_intencion_futura(telefono: str, intencion_futura: str, observaciones
         log_message(f"Intención futura guardada/actualizada para {telefono}: {intencion_futura}", "INFO")
     except Exception as e:
         log_message(f"Error al guardar la intención futura: {e}", "ERROR")
+        raise
 
 def obtener_intencion_futura(telefono: str) -> str:
     """
@@ -586,7 +587,6 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
             new_num = 1
         codigo_unico = f"P-{new_num:05d}" 
         # ------------------------------- # 4. Preparar productos y total # ------------------------------- 
-# ...existing code...
         productos = []
         for item in pedido_dict.get("items", []):
             matched = item.get("matched") or {}
@@ -889,7 +889,7 @@ def _merge_items(base_items: List[Dict], new_items: List[Dict], replace_all: boo
     return list(merged.values())
 
 def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
-    """Marca es_temporal = TRUE en el pedido del cliente."""
+    """Marca es_temporal = FALSE en el pedido del cliente."""
     try:
         log_message('Iniciando función <MarcarTrue>.', 'INFO')
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
@@ -903,7 +903,7 @@ def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
             }
         query = """
             UPDATE pedidos
-            SET es_temporal = TRUE
+            SET es_temporal = FALSE
             WHERE codigo_unico = %s
               AND id_whatsapp = %s
             RETURNING idpedido;
@@ -1252,7 +1252,7 @@ def actualizar_medio_pago(sender: str, codigo_unico: str, metodo_pago: str) -> d
         return {"actualizado": False, "error": str(e)}
 
 def obtener_pedido_por_codigo(codigo_unico: str) -> dict:
-    q = "SELECT idpedido, total_productos, fecha, hora, id_whatsapp, es_temporal,total_final,tiempo_estimado FROM pedidos WHERE codigo_unico = %s"
+    q = "SELECT idpedido, total_productos, fecha, hora, id_whatsapp, es_temporal,total_final,tiempo_estimado,total_domicilio FROM pedidos WHERE codigo_unico = %s"
     res = execute_query(q, (codigo_unico,), fetchone=True)
     if not res:
         return {}
@@ -1264,7 +1264,8 @@ def obtener_pedido_por_codigo(codigo_unico: str) -> dict:
         "id_whatsapp": res[4],
         "es_temporal": res[5],
         "total_final": float(res[6]) if res[6] is not None else 0.0,
-        "tiempo_estimado": res[7]
+        "tiempo_estimado": res[7],
+        "total_domicilio": float(res[7]) if res[7] is not None else 0.0
     }
 
 # Helper: obtener ordenes existentes por idpedido (cada fila representa un item)

@@ -471,7 +471,8 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
             dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
             tiempo= dict_registro_temp.get("tiempo_estimado", "N/A")
             total_productos = dict_registro_temp.get("total_final", "N/A")
-            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            total_domicilios = dict_registro_temp.get("total_domicilio", "N/A")
+            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es {total_domicilios} para un total de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
@@ -479,8 +480,8 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         elif medio_pago_real == "datafono":
             dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
             tiempo= dict_registro_temp.get("tiempo_estimado", "N/A")
-            total_productos = dict_registro_temp.get("total_final", "N/A")
-            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar con tarjeta (datafono) al momento de la entrega o recogida de tu pedido ({codigo_unico}). El costo de tu domicilio es {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            total_domicilios = dict_registro_temp.get("total_domicilio", "N/A")
+            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar con tarjeta (datafono) al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es {total_domicilios} para un total de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
@@ -772,6 +773,7 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
             codigo_pedido=codigo_unico
         )
         send_text_response(sender, mensaje)
+        marcar_estemporal_true_en_pedidos
         log_message("Termina subflujo eleccion sede", "INFO")
     except Exception as e:
         log_message(f"Error en subflujo eleccion sede {e}", "ERROR")
