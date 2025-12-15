@@ -109,6 +109,9 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - Si el usuario indica una cantidad explícita (ej. "2", "4", "dos", "cuatro"), debes representarla usando el campo "cantidad" y no duplicar items iguales.
             - Las reservas las clasificas como preguntas generales y todo lo relacionado con reservas va en esa categoría.
             - Si te preguntan que me recomiendas se refiere a preguntas generales, en general las recomendaciones relacionalas con el menu y preguntas generales.
+            - Si el usuario solo dice "sí" o "no" sin contexto, clasifícalo como confirmación_general o negación_general respectivamente.
+            - Si el usuario pide hablar con un asesor, persona, humano, gerente, administrador, supervisor, encargado, responsable, operador, agente, representante o similar, clasifícalo como transferencia.
+            - Si el usuario pide ayuda o soporte, clasifícalo como transferencia.
 
             Reglas IMPORTANTES:
             - DEBES analizar y clasificar ÚNICAMENTE el ÚLTIMO mensaje enviado por el USUARIO.
@@ -535,6 +538,8 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - NUNCA multipliques matched.price por la cantidad.
         - El campo total_price es el ÚNICO lugar donde se refleja la multiplicación por cantidad.
         - La cantidad debe reflejarse solo en modifiers_applied o note.
+        - UNICAMENTE CUANDO NO SE INDIQUE UNA BEBIDA EN EL COMBO AÑADIR UNA COCA COLA 400 ML SI EL COMBO TRAE INDICACIÓN DE BEBIDA SE LE AÑADE ESA BEBIDA Y COLOCA EN LA NOTA EL NOMBRE DE LA BEBIDA
+
         MENÚ COMPLETO:
         {json.dumps(menu_items, ensure_ascii=False)}
 
@@ -1362,6 +1367,7 @@ def generar_mensaje_cancelacion(
         5. No uses emojis.
         6. No inventes productos, no supongas nada, no des confirmaciones.
         7. Devuelve un JSON **válido**:
+        8. no menciones codigo unico no tienes esa información
         {{
         "mensaje": "mensaje natural pidiendo al cliente que explique qué está mal y escriba de nuevo su pedido",
         "siguiente_intencion": "corregir_pedido"
@@ -2580,6 +2586,8 @@ Instrucciones del mensaje:
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] generar_mensaje_recogida_invitar_pago tokens_used={tokens_used}", "DEBUG")
+
+
         return response.choices[0].message.content
 
     except Exception as e:
