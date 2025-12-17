@@ -29,7 +29,6 @@ def get_openai_key() -> str:
 def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str], Dict[str, Any]]:
     try:
         """Clasifica un mensaje de WhatsApp usando un modelo fine-tuned de OpenAI."""
-        log_message('Iniciando función <GetClassifier>.', 'INFO')
         logging.info('Clasificando mensaje')
         classification_prompt: str = """
             Eres un clasificador de mensajes para un asistente de WhatsApp de un restaurante.
@@ -78,7 +77,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
 
             Lista de intenciones posibles:
             - confirmacion_general (puede ser en otros idiomas: yes, oui, ja, etc.)
-            - consulta_menu
+            - consulta_menu ()
             - consulta_pedido
             - consulta_promociones
             - continuacion_pedido (cuando incluye una aclaracion sobre un prodcuto como : es tal producto o era tal bebida se puede considerar como la continuacion de un pedido)
@@ -94,7 +93,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) cosas similares a estos pedidos clasificalas como solicitud pedido
             - transferencia (quejas de mayor nivel)
             - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo)
-            - recoger_restaurante   (NUEVA intención: cuando el usuario dice que pasará a recoger, irá al restaurante o lo recoge en tienda)
+            - recoger_restaurante   (NUEVA intención: cuando el usuario dice que pasará a recoger, irá al restaurante o lo recoge en tienda o en una de nuestras sedes: Caobos)
             - domicilio             (NUEVA intención: cuando el usuario pide entrega a domicilio, "tráelo", "envíamelo", "a mi casa", etc.)
 
             Instrucciones importantes:
@@ -144,7 +143,6 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             raise ValueError(f"Respuesta inválida, faltan claves: {result}")
         logging.info(f"Respuesta del clasificador: {result}")
         logging.info(f"Intent: {intent}, Type: {type_}, Entities: {entities}")
-        log_message('Finalizando función <GetClassifier>.', 'INFO')
         log_message(f'Respuesta del clasificador: {result}', 'INFO')
         return intent, type_, entities
     except Exception as e:
@@ -153,13 +151,12 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
         send_text_response(sender, "Lo siento, hubo un error al procesar tu mensaje. ¿Podrías repetirlo?")
         return None, None, {}
 
-def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, model: str = "gpt-3.5-turbo") -> dict:
+def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "gpt-4o") -> dict:
     """
     Clasifica si una pregunta del usuario está relacionada con el menú o con servicios
     del negocio (hamburguesería) usando un modelo de lenguaje (ChatGPT).
     """
 
-    log_message('Iniciando función <ClasificarPreguntaMenuChatGPT>.', 'INFO')
     client: OpenAI = OpenAI()
 
     prompt: str = f"""
@@ -180,6 +177,7 @@ def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, model: str = "gpt-3.
         • dirección o ubicación del local
         • contacto, pedidos o reservas
         • promociones o descuentos
+        • preguntas sobre productos (hamburguesas, malteadas, perros, gaseosas)
     - Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, clima, películas, tecnología, etc.) → "no_relacionada".
     - Responde SOLO con el JSON, sin explicaciones ni texto adicional.
     Ejemplos:
@@ -194,6 +192,9 @@ def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, model: str = "gpt-3.
     9️⃣ "dónde queda Bogotá?" → {{"clasificacion": "no_relacionada"}}
     🔟 "qué es Python?" → {{"clasificacion": "no_relacionada"}}
 
+    Este es el menú completo si la pregunta incluye un producto del menu o se refiere a comidas o bebidas es relacionada:
+    {json.dumps(items, ensure_ascii=False)}
+    
     Ahora clasifica la siguiente pregunta del usuario:
     "{pregunta_usuario}"
 
@@ -207,12 +208,33 @@ def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, model: str = "gpt-3.
             temperature=0
         )
         text_output = response.output[0].content[0].text.strip()
+        # limpiar posibles fences/triple-backticks u otros prefijos
+        try:
+            text_output = _clean_model_output(text_output)
+        except Exception:
+            pass
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] clasificar_pregunta_menu_chatgpt tokens_used={tokens_used}", "DEBUG")
-        result = json.loads(text_output)
-        log_message('Finalizando función <ClasificarPreguntaMenuChatGPT>.', 'INFO')
-        return result
+        # Extraer JSON dentro de fences ```json ... ``` o buscar primer objeto JSON
+        clean = text_output or ""
+        m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean, flags=re.IGNORECASE)
+        if m:
+            clean = m.group(1).strip()
+        else:
+            clean = clean.strip()
+        if not clean.startswith('{'):
+            m2 = re.search(r"(\{[\s\S]*\})", clean)
+            if m2:
+                clean = m2.group(1)
+
+        try:
+            result = json.loads(clean)
+            return result
+        except json.JSONDecodeError:
+            logging.error(f"Error al parsear JSON en clasificar_pregunta_menu_chatgpt: {clean!r}")
+            log_message(f'Error al parsear JSON en <ClasificarPreguntaMenuChatGPT>: {clean}', 'ERROR')
+            return {"clasificacion": "no_relacionada"}
 
     except json.JSONDecodeError:
         logging.error(f"Error al parsear JSON: {text_output}")
@@ -293,7 +315,6 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
     Incluye información sobre horarios, sedes y medios de pago.
     Devuelve: (result: dict, prompt: str)
     """
-    log_message('Iniciando función <ResponderPreguntaMenuChatGPT>.', 'INFO')
 
     # Prompt unificado
     prompt = f"""
@@ -304,7 +325,7 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
         Información del restaurante:
         🕐 Horario: Todos los días de 12:00 p.m. a 7:00 p.m.
         📍 Sedes:
-        - Cedritos Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca
+        - Caobos Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca
         💳 Medios de pago: solo contraentrega efectivo y datafono.
 
         El cliente preguntó: "{pregunta_usuario}"
@@ -386,7 +407,6 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
         result.setdefault("productos", [])
         result.setdefault("recomendacion", False)
         log_message(f"Respuesta generada: {result}", "INFO")
-        log_message('Finalizando función <ResponderPreguntaMenuChatGPT>.', 'INFO')
         return result
 
     except Exception as e:
@@ -550,7 +570,6 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         SIEMPRE DEVUELVE ORDER_COMPLETE: TRUE A MENOS QUE ALGUN PRODUCTO SEA NOT_FOUND.
         """
     try:
-        log_message('Iniciando función <MapearPedidoAlMenu>.', 'INFO')
         log_message(f'Prompt generado en <MapearPedidoAlMenu>: {prompt}', 'DEBUG')
         response = client.responses.create(
             model=model,
@@ -575,7 +594,6 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         result = json.loads(clean)
 
         log_message(f'Resultado parseado en <MapearPedidoAlMenu>: {result}', 'DEBUG')
-        log_message('Finalizando función <MapearPedidoAlMenu>.', 'INFO')
         result = corregir_total_price_en_result(result)
         return result
 
@@ -605,7 +623,6 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
   
 def sin_intencion_respuesta_variable(contenido_usuario: str, nombre_cliente: str) -> str:
     try:
-        log_message('Iniciando función <sin_intencion>.', 'INFO')
         PROMPT_SIN_INTENCION = (
             "Eres el asistente oficial de Sierra Nevada, La Cima del Sabor.\n"
             "Tu objetivo es responder cuando el cliente envía algo que no tiene sentido, "
@@ -651,7 +668,6 @@ def sin_intencion_respuesta_variable(contenido_usuario: str, nombre_cliente: str
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] sin_intencion tokens_used={tokens_used}", "DEBUG")
-        log_message('Finalizando función <sin_intencion>.', 'INFO')
         return mensaje.strip()
     except Exception as e:
         log_message(f'Error en función <sin_intencion>: {e}', 'ERROR')
@@ -660,7 +676,7 @@ def sin_intencion_respuesta_variable(contenido_usuario: str, nombre_cliente: str
 
 def saludo_dynamic(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
     try:
-        log_message('Iniciando función <saludo_dynamic>.', 'INFO')
+
 
         PROMPT_SALUDO_DYNAMIC = """
 Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
@@ -758,7 +774,6 @@ No incluyas texto adicional fuera del JSON.
                 ]
             }
 
-        log_message('Finalizando función <saludo_dynamic>.', 'INFO')
         return data
 
     except Exception as e:
@@ -777,7 +792,6 @@ No incluyas texto adicional fuera del JSON.
     
 def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
     try:
-        log_message('Iniciando función <respuesta_quejas>.', 'INFO')
         PROMPT_QUEJA_LEVE = """
             Eres el asistente oficial de servicio al cliente de Sierra Nevada, La Cima del Sabor.
 
@@ -855,7 +869,6 @@ def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) ->
                 "resumen_queja": "Queja leve del cliente sobre su experiencia.",
                 "intencion": "quejas"
             }
-        log_message('Finalizando función <respuesta_quejas>.', 'INFO')
         return data
     except Exception as e:
         log_message(f'Error en función <respuesta_quejas>: {e}', 'ERROR')
@@ -868,7 +881,6 @@ def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) ->
 
 def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
     try:
-        log_message('Iniciando función <respuesta_quejas_graves_ia>.', 'INFO')
         PROMPT_QUEJA_GRAVE = """
             Eres el asistente oficial de servicio al cliente de Sierra Nevada, La Cima del Sabor.
             Esta vez atenderás *quejas graves*, donde puede que el pedido NO haya llegado,
@@ -937,7 +949,6 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
                 "resumen_ejecutivo": "Cliente reporta una queja grave; requiere revisión del punto y logística.",
                 "intencion": "queja_grave"
             }
-        log_message('Finalizando función <respuesta_quejas_graves_ia>.', 'INFO')
         return data
     except Exception as e:
         log_message(f'Error en función <respuesta_quejas_graves_ia>: {e}', 'ERROR')
@@ -952,7 +963,6 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
 
 def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str) -> dict:
     try:
-        log_message('Iniciando función <pedido_incompleto_dynamic>.', 'INFO')
         PROMPT_PEDIDO_INCOMPLETO = """
             Eres la voz oficial de Sierra Nevada, La Cima del Sabor. Te llamas PAKO.
             El cliente escribió: "{mensaje_usuario}"
@@ -1072,7 +1082,6 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
                 "recomendaciones": recomendaciones_backup,
                 "intencion": "consulta_menu"
             }
-        log_message('Finalizando función <pedido_incompleto_dynamic>.', 'INFO')
         return data
     except Exception as e:
         log_message(f'Error en función <pedido_incompleto_dynamic>: {e}', 'ERROR')
@@ -1097,8 +1106,6 @@ def actualizar_pedido_con_mensaje(
     Ahora incluye intento de selección directa cuando el usuario nombra una candidate.
     """
     try:
-        log_message('Iniciando función <actualizar_pedido_con_mensaje>.', 'INFO')
-        logging.info("Iniciando actualizar_pedido_con_mensaje.")
         pedido_actual = _safe_parse_order(pedido_actual)
 
         # --- NUEVA ETAPA: intentar aplicar selección directa antes de llamar al modelo ---
@@ -1192,8 +1199,6 @@ def actualizar_pedido_con_mensaje(
         }
         if parsed.get("debug") or parsed.get("warnings"):
             result["debug_from_model"] = parsed.get("debug") or parsed.get("warnings")
-        logging.info("Finalizando actualizar_pedido_con_mensaje.")
-        log_message('Finalizando función <actualizar_pedido_con_mensaje>.', 'INFO')
         log_message(f'Resultado de <actualizar_pedido_con_mensaje>: {result}', 'DEBUG')
         ##validacion costo
         result= corregir_total_price_en_result(result)
@@ -1321,7 +1326,6 @@ def generar_mensaje_confirmacion_pedido(
         clean = re.sub(r'^```', '', clean).strip()
         clean = re.sub(r'```$', '', clean).strip()
 
-        log_message('Finalizando función <generar_mensaje_confirmacion_pedido>.', 'INFO')
         return json.loads(clean)
 
     except Exception as e:
@@ -1347,7 +1351,6 @@ def generar_mensaje_cancelacion(
     }
     """
     try:
-        log_message('Iniciando función <generar_mensaje_cancelacion>.', 'INFO')
         dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
         producto = dict_registro_temp.get("producto", "N/A")
         total_productos = dict_registro_temp.get("total_productos", "N/A")
@@ -1388,7 +1391,6 @@ def generar_mensaje_cancelacion(
         clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
         clean = re.sub(r'^```', '', clean).strip()
         clean = re.sub(r'```$', '', clean).strip()
-        log_message('Finalizando función <generar_mensaje_cancelacion>.', 'INFO')
         return json.loads(clean)
     except Exception as e:
         log_message(f'Error en función <generar_mensaje_cancelacion>: {e}', 'ERROR')
@@ -1400,7 +1402,6 @@ def generar_mensaje_cancelacion(
 
 def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str) -> dict:
     try:
-        log_message('Iniciando función <solicitar_medio_pago>.', 'INFO')
 
 #         PROMPT_MEDIOS_PAGO = f"""
 # Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
@@ -1471,7 +1472,6 @@ Debe responder estrictamente un JSON con el campo:
                 "mensaje": f"¡{nombre}, ese pedido está para antojar a cualquiera! 🤤 Tu orden ({codigo_unico}) en {nombre_local} quedó tremenda. ¿Qué medio de pago prefieres: efectivo, transferencia (Nequi/Daviplata/Bre-B), tarjeta débito o tarjeta crédito?"
             }
 
-        log_message('Finalizando función <solicitar_medio_pago>.', 'INFO')
         return data
 
     except Exception as e:
@@ -1482,7 +1482,6 @@ Debe responder estrictamente un JSON con el campo:
 
 def enviar_menu_digital(nombre: str, nombre_local: str, menu, promociones_list: list | None) -> dict:
     try:
-        log_message('Iniciando función <enviar_menu_digital>.', 'INFO')
         if promociones_list:
             hoy = date.today()
             promociones_con_vigencia = []
@@ -1528,6 +1527,7 @@ def enviar_menu_digital(nombre: str, nombre_local: str, menu, promociones_list: 
             - Recomienda 1 o 2 promociones específicas.
             - Estilo: cálido, entusiasta, sin sarcasmo ni groserías.
             - Máximo 1 o 2 frases.
+            - No saludes, el usuario esta en medio de una conversación
 
             FORMATO DE RESPUESTA (OBLIGATORIO):
             {{
@@ -1550,6 +1550,7 @@ def enviar_menu_digital(nombre: str, nombre_local: str, menu, promociones_list: 
             - Estilo cálido y entusiasta.
             - Máximo 1 o 2 frases.
             - Menciona el local: {nombre_local}
+            - No saludes, el usuario esta en medio de una conversación
 
             FORMATO DE RESPUESTA (OBLIGATORIO):
             {{
@@ -1559,7 +1560,7 @@ def enviar_menu_digital(nombre: str, nombre_local: str, menu, promociones_list: 
             """
         client = OpenAI()
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": "Eres el generador oficial de mensajes alegres y de pago para Sierra Nevada."},
                 {"role": "user", "content": PROMPT}
@@ -1577,7 +1578,7 @@ def enviar_menu_digital(nombre: str, nombre_local: str, menu, promociones_list: 
             data = {
                 "mensaje": f"¡{nombre}, tenemos promociones activas en {nombre_local}! 😋 ¡Aprovecha y pide ya!"
             }
-        log_message('Finalizando función <enviar_menu_digital>.', 'INFO')
+
         return data
     except Exception as e:
         log_message(f'Error en función <enviar_menu_digital>: {e}', 'ERROR')
@@ -1588,7 +1589,6 @@ def enviar_menu_digital(nombre: str, nombre_local: str, menu, promociones_list: 
 
 def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: dict, pregunta_usuario: str) -> dict:
     try:
-        log_message('Iniciando función <ResponderSobrePedido>.', 'INFO')
         pedido_info_serializable = convert_decimals(pedido_info)
         pedido_info_serializable = {
             k: to_json_safe(v)
@@ -1659,7 +1659,6 @@ def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: dict, pr
                            f"Si quieres, puedo mostrarte el menú o contarte nuestras promociones.",
                 "futura_intencion": "consulta_menu"
             }
-        log_message('Finalizando función <ResponderSobrePedido>.', 'INFO')
         return data
     except Exception as e:
         log_message(f'Error en función <ResponderSobrePedido>: {e}', 'ERROR')
@@ -1675,7 +1674,6 @@ def responder_sobre_promociones(nombre: str, nombre_local: str, promociones_info
     sobre promociones y nada más. Basado SOLO en promociones_info.
     """
     try:
-        log_message('Iniciando función <ResponderSobrePromociones>.', 'INFO')
 
         # Convertir valores a JSON-safe (Decimal, datetime, etc.)
         promociones_serializables = []
@@ -1739,7 +1737,6 @@ def responder_sobre_promociones(nombre: str, nombre_local: str, promociones_info
                 "futura_intencion": "continuacion_promocion"
             }
 
-        log_message('Finalizando función <ResponderSobrePromociones>.', 'INFO')
         return data
 
     except Exception as e:
@@ -1755,7 +1752,6 @@ def interpretar_eleccion_promocion(pregunta_usuario: str, info_promociones_str: 
     info_promociones_str: viene como STR desde intencion_futura → lo convertimos a lista
     pedido_dict: contiene items, total_price, etc.
     """
-    log_message('Iniciando función <interpretar_eleccion_promocion>.', 'INFO')
     prompt = f"""
         Eres un sistema experto en análisis de promociones.
         ### Productos del pedido:
@@ -1813,12 +1809,10 @@ def interpretar_eleccion_promocion(pregunta_usuario: str, info_promociones_str: 
             "nombre_promocion": "",
             "motivo": "Error interpretando la IA"
         }
-    log_message('Finalizando función <interpretar_eleccion_promocion>.', 'INFO')
     return data
 
 def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: str, json_pedido: str) -> dict:
     try:
-        log_message('Iniciando función <pedido_incompleto_dynamic_promocion>.', 'INFO')
 
         PROMPT_PEDIDO_INCOMPLETO = """
         Eres la voz oficial de Sierra Nevada, La Cima del Sabor. Te llamas PAKO.
@@ -1949,7 +1943,6 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
                 "recomendaciones": [],
                 "intencion": "consulta_menu"
             }
-        log_message('Finalizando función <pedido_incompleto_dynamic_promocion>.', 'INFO')
         return data
     except Exception as e:
         log_message(f'Error en función <pedido_incompleto_dynamic_promocion>: {e}', 'ERROR')
@@ -1962,7 +1955,6 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
 def mapear_modo_pago(respuesta_usuario: str) -> str:
     try:
         """Mapea la respuesta del usuario al método de pago estandarizado."""
-        log_message('Iniciando función <mapear_modo_pago>.', 'INFO')
         client = OpenAI()
         PROMPT_MAPEO_PAGO = f"""
         Eres un clasificador experto en interpretar el método de pago que un cliente escribe en WhatsApp, incluso cuando lo escribe con errores, abreviaciones o de forma muy informal.
@@ -2045,7 +2037,6 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
             if data and isinstance(data, dict):
                 metodo = data.get("metodo", "desconocido")
                 log_message(f"mapear_modo_pago: metodo detectado desde JSON -> {metodo}", "DEBUG")
-                log_message('Finalizando función <mapear_modo_pago>.', 'INFO')
                 return metodo
 
             # Fallback por keywords si no hay JSON parseable
@@ -2068,7 +2059,6 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
                 metodo = "desconocido"
 
             log_message(f"mapear_modo_pago: metodo detectado por fallback -> {metodo}", "DEBUG")
-            log_message('Finalizando función <mapear_modo_pago>.', 'INFO')
             return metodo
         except Exception as e:
             log_message(f"mapear_modo_pago: excepción inesperada al parsear respuesta: {e}", "ERROR")
@@ -2079,7 +2069,6 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
 
 def solicitar_metodo_recogida(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str) -> str:
     try:
-        log_message('Iniciando función <solicitar_metodo_recogida>.', 'INFO')
 
         prompt = f"""
 Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
@@ -2092,13 +2081,14 @@ Este es el pedido que hizo:
 TAREA:
 - Haz un comentario alegre, sabroso y un poquito divertido sobre el pedido.
 - Estilo: cálido, entusiasta.
-- Máximo 1 o 2 frases.
+- Máximo 1 frase en tres lineas.
 Después:
 - Pregunta amablemente dónde quiere recibir su pedido.
 - Menciona el local: {nombre_local}.
+- No saludes estamos en medio de una conversación
 - Lista ambas opciones:
   • Recoger en tienda
-  • Envío a domicilio (depende de la zona y tiene costo adicional).
+  • Envío a domicilio (depende de la zona).
 Incluye el código único del pedido en el mensaje.
 FORMATO ESTRICTO:
 {{
@@ -2139,7 +2129,6 @@ FORMATO ESTRICTO:
             # fallback seguro (texto por defecto)
             mensaje = f"¡{nombre}, tu pedido ({codigo_unico}) quedó delicioso! ¿Vas a querer domicilio o prefieres recogerlo en el restaurante?"
 
-        log_message('Finalizando función <solicitar_metodo_recogida>.', 'INFO')
         log_message(f'Respuesta de <solicitar_metodo_recogida> (mensaje): {mensaje[:300]}', 'DEBUG')
         return mensaje
 
@@ -2272,7 +2261,6 @@ def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> di
     usando ChatGPT con tono cálido y cercano.
     """
     try:
-        log_message('Iniciando función <solicitar_confirmacion_direccion>.', 'INFO')
 
         PROMPT_CONFIRMAR_DIRECCION = """
         Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
@@ -2339,8 +2327,6 @@ def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> di
                     "¿es correcta? si no lo es envianos la correcta"
                 )
             }
-
-        log_message('Finalizando función <solicitar_confirmacion_direccion>.', 'INFO')
         return data
 
     except Exception as e:
@@ -2427,7 +2413,7 @@ El cliente se llama: {nombre_cliente}
 Genera un mensaje corto y amable invitándolo a escoger una de las siguientes sedes:
 
 📍 **Sedes disponibles**
-- Cedritos: Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca
+- Caobos: Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca
 
 Instrucciones:
 - Habla como asistente conversacional (no en formato técnico).
@@ -2467,6 +2453,7 @@ def mapear_sede_cliente(texto_cliente: str):
     sedes = execute_query("""
         SELECT nombre, direccion, id_sede, latitud, longitud
         FROM sedes
+        where estado = true
     """)
 
     if not sedes:
@@ -2569,7 +2556,6 @@ Instrucciones del mensaje:
 - Indica en cuánto tiempo puede pasar por él.
 - Indica el valor total del pedido.
 - Menciona claramente el código del pedido.
-- Invítalo a realizar el pago para comenzar la preparación.
 - No mencionar domicilio ni distancias porque es recogida en tienda.
 - No inventar información adicional.
 """
@@ -2599,7 +2585,7 @@ def extraer_info_personal(mensaje: str) -> dict:
     Usa ChatGPT para extraer información personal del cliente
     a partir de su mensaje en WhatsApp.
     Devuelve un dict con campos tipo_documento, numero_documento, email.
-    Siempre retorna un dict con las 4 claves; si no se extrae, el valor será "No proporcionado".
+    Siempre retorna un dict con las 3 claves; si no se extrae, el valor será "No proporcionado".
     """
     try:
         prompt = f"""
@@ -2613,13 +2599,11 @@ Si te dicen NIT, responde NIT.
 Si te dicen Pasaporte, responde PA.
 - Número de documento
 - Email
-- Nombre de la persona
 Devuélvelo SOLO en formato JSON EXACTO, sin texto adicional, por ejemplo:
 {{
     "tipo_documento": "CC",
     "numero_documento": "12345678",
     "email": "correo@ejemplo.com",
-    "nombre": "Juan Agudelo"
 }}
 Si no encuentras un campo coloca exactamente "No proporcionado" como valor para ese campo.
 """
@@ -2671,8 +2655,6 @@ Si no encuentras un campo coloca exactamente "No proporcionado" como valor para 
                 val = parsed.get(k)
                 if val and isinstance(val, str) and val.strip():
                     resultado[k] = val.strip()
-        log_message('Finalizando función <extraer_info_personal>.', 'INFO')
-        logging.info('Finalizando función <extraer_info_personal>.')
         return resultado
     except Exception as e:
         log_message(f"Error en extraer_info_personal: {e}", "ERROR")
@@ -2809,8 +2791,6 @@ Esta es la Direccion almacenada: {direccion_almacedada} y este es el mensaje del
         log_message(f"Error en corregir_direccion: {e}", "ERROR")
         return direccion_almacedada
 
-
-# ...existing code...
 def _extract_total_tokens(resp) -> int | None:
     """Extrae total_tokens de distintos formatos de respuesta OpenAI (robusto)."""
     try:
@@ -2832,7 +2812,6 @@ def clasificador_consulta_menu(pedido_resumen: str) -> str:
     Usa ChatGPT para clasificar si es una pregunta solicitando el menu o aclaracion de prodcuto
     """
     try:
-        log_message('Iniciando función <clasificador_consulta_menu>.', 'INFO')
 
         prompt = f"""
 Eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada, La Cima del Sabor.
@@ -2859,7 +2838,6 @@ BAJO NINGUNA CIRCUSTANCIA PUEDES USAR ALGO DIFERENTE A ESTAS DOS RESPUESTAS Y NO
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] clasificador_consulta_menu tokens_used={tokens_used}", "DEBUG")
-        log_message('Finalizando función <clasificador_consulta_menu>.', 'INFO')
         log_message(f'Respuesta de clasificación: {raw}', 'INFO')
         return raw
     except Exception as e:
@@ -2871,7 +2849,6 @@ def clasificar_modificacion_pedido(mensaje_cliente: str) -> dict:
     Usa ChatGPT para clasificar si el mensaje del cliente indica si desea modificar el pedido o si desea tomarlo asi como está
     """
     try:
-        log_message('Iniciando función <generar_mensaje_confirmacion_modificacion_pedido>.', 'INFO')
 
         prompt = f"""
 eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada, La Cima del Sabor.
@@ -2897,10 +2874,49 @@ Si el mensaje incluye un producto clasificalo como actualizar pedido"""
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] clasificador_consulta_menu tokens_used={tokens_used}", "DEBUG")
-        log_message('Finalizando función <clasificador_consulta_menu>.', 'INFO')
         log_message(f'Respuesta de clasificación: {raw}', 'INFO')
         return raw
     except Exception as e:
         log_message(f'Error en función <clasificar_modificacion_pedido>: {e}', 'ERROR')
         return "error_clasificacion"
     
+def get_name(text: str) -> str | None:
+    """
+    Extrae un nombre del texto del cliente usando el LLM.
+    Retorna el nombre como string (si se encontró) o None.
+    """
+    try:
+        if not text or not isinstance(text, str):
+            return None
+        client = OpenAI(api_key=get_openai_key())
+        prompt = f"""Eres un asistente experto en extraer nombres de texto libre.
+Extrae SÓLO el nombre del siguiente texto y si no encuentras nombre responde como "No presente".
+Texto: "{text}"
+RESPONDE únicamente con el nombre, nada más."""
+        response = client.chat.completions.create(
+        model="gpt-5.1",
+            messages=[
+                {"role": "system", "content": "Eres un extractor preciso de nombres."},
+                {"role": "user", "content": prompt}
+            ],
+ #           max_tokens=80,
+            temperature=0
+        )
+        raw = response.choices[0].message.content
+        # Registrar consumo de tokens
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] get_direction tokens_used={tokens_used}", "DEBUG")
+        if raw == "" or raw is None or raw == "No presente":
+            return None
+        # normalizar a string y limpiar backticks
+        if isinstance(raw, dict):
+            raw = json.dumps(raw, ensure_ascii=False)
+        name = str(raw).strip().strip("`").strip()
+        if not name:
+            return None
+        log_message("Nombre extraído: " + name, "INFO")
+        return name
+    except Exception as e:
+        log_message(f"Error en get_name: {e}", "ERROR")
+        return None

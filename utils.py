@@ -59,8 +59,6 @@ def api_whatsapp() -> str:
         token: str = os.getenv("WABA_TOKEN", "")
         if not token:
             raise ValueError("No se encontró el token WABA_TOKEN en las variables de entorno.")
-        logging.info('Token de WhatsApp obtenido')
-        log_message('Finalizando función <ApiWhatsApp>.', 'INFO')
         return token
     except Exception as e:
         log_message(f'Error al hacer uso de función <ApiWhatsApp>: {e}.', 'ERROR')
@@ -72,14 +70,12 @@ def send_text_response(to: str, message: str) -> str:
         conversacion = actualizar_conversacion(message,to,"asistente")
         log_message(f"Conversación actualizada: {conversacion}", "INFO")
         """Envía un mensaje de texto por WhatsApp Business API."""
-        log_message('Iniciando función <SendTextResponse>.', 'INFO')
         logging.info('Enviando respuesta a WhatsApp')
         token: str = api_whatsapp()
         PHONE_ID: str = os.environ["PHONE_NUMBER_ID"]
         whatsapp: WhatsApp = WhatsApp(token, PHONE_ID)
         whatsapp.send_message(message, to)
-        logging.info('Respuesta enviada.')
-        log_message('Finalizando función <SendTextResponse>.', 'INFO')
+        log_message(f'Respuesta enviada a {to}: {message}', 'INFO')
         return ("OK")
     except Exception as e:
         log_message(f'Error al hacer uso de función <SendTextResponse>: {e}.', 'ERROR')
@@ -93,7 +89,6 @@ def limpiar_respuesta_json(raw: str) -> str:
     - Limpia bloque triple ```json.
     - Repara estructuras comunes rotas.
     """
-    log_message('Iniciando función <LimpiarRespuestaJson>.', 'INFO')
     text: str = raw.strip()
     # Caso: respuesta como tupla Python
     if text.startswith("(") and text.endswith(")"):
@@ -126,23 +121,18 @@ def limpiar_respuesta_json(raw: str) -> str:
         log_message(f"JSON inválido tras limpieza: {e}", 'ERROR')
         logging.error(f"JSON inválido tras limpieza: {e}")
         raise ValueError(f"JSON inválido tras limpieza: {e}")
-    log_message('Finalizando función <LimpiarRespuestaJson>.', 'INFO')
     return s
 
 def validate_duplicated_message(message_id: str) -> bool:
     try:
         """Valida si un mensaje de WhatsApp ya fue procesado usando su ID único."""
-        log_message("Iniciando función <ValidarMensajeDuplicado>.", 'INFO')
-        logging.info('Iniciando función <ValidarMensajeDuplicado>.')
         resultTemp = execute_query("""Select * from id_whatsapp_messages where id_messages = %s;""", (message_id,))
         if len(resultTemp)>0:
             logging.info('Mensaje ya registrado.')
-            log_message("Finalizando función <ValidarMensajeDuplicado>.", 'INFO')
             return True
         else:
             logging.info('Mensaje no registrado.')
             execute_query("""Insert into id_whatsapp_messages(id_messages) values (%s);""", (message_id,))
-            log_message("Finalizando función <ValidarMensajeDuplicado>.", 'INFO')
             return False
     except Exception as e:
         log_message(f'Error al hacer uso de función <ValidarMensajeDuplicado>: {e}.', 'ERROR')
@@ -151,8 +141,6 @@ def validate_duplicated_message(message_id: str) -> bool:
 def get_client_database(numero_celular: str, id_restaurante: str) -> bool:
     try:
         """Verifica si un cliente existe en la base de datos por su número de celular y no es temporal."""
-        log_message('Iniciando función <get_client_database>.', 'INFO')
-        logging.info('Iniciando función <get_client_database>.')
         query = """
             SELECT 1
             FROM clientes_whatsapp
@@ -164,8 +152,6 @@ def get_client_database(numero_celular: str, id_restaurante: str) -> bool:
         resultado = execute_query(query, (numero_celular, id_restaurante))
         logging.info(f"Resultado de la consulta: {resultado}")
         log_message(f"Resultado de la consulta: {resultado}", "INFO")
-        log_message('Finalizando función <get_client_database>.', 'INFO')
-
         # Devolver booleano seguro (maneja None y colecciones vacías)
         return bool(resultado) and len(resultado) > 0
 
@@ -176,8 +162,6 @@ def get_client_database(numero_celular: str, id_restaurante: str) -> bool:
 
 def handle_create_client(sender: str, datos: str, id_restaurante: str, es_temporal: bool) -> str:
     try:
-        log_message('Iniciando función <handleCreateClient>.', 'INFO')
-        logging.info('Iniciando función <handleCreateClient>.')
         log_message(f'Datos recibidos para crear/actualizar cliente: {datos}', 'INFO')
         nombre = "Desconocido"
         id_sede = 21
@@ -198,8 +182,6 @@ def handle_create_client(sender: str, datos: str, id_restaurante: str, es_tempor
                 id_sede = EXCLUDED.id_sede;
         """, (nombre, sender, id_restaurante, es_temporal,id_sede))
 
-        logging.info('Cliente creado o actualizado exitosamente.')
-        log_message('Finalizando función <handleCreateClient>.', 'INFO')
         log_message(f'Cliente creado o actualizado exitosamente.{nombre}', 'INFO')
         return nombre.split()[0]  # Retorna el primer nombre
     except Exception as e:
@@ -210,14 +192,11 @@ def handle_create_client(sender: str, datos: str, id_restaurante: str, es_tempor
 def save_message_to_db(sender: str, message: str, classification: str, tipo_clasificacion: str, entidades: str, tipo_mensaje: str, id_restaurante: str) -> None:
     try:
         """Guarda el mensaje recibido y su clasificación en la base de datos."""
-        log_message('Iniciando función <SaveMessageToDB>.', 'INFO')
-        logging.info('Iniciando función <SaveMessageToDB>.')
         execute_query("""
             INSERT INTO conversaciones_whatsapp (telefono, mensaje_usuario, clasificacion, tipo_clasificacion, entidades, fecha, tipo_mensaje, idcliente)
             VALUES (%s, %s, %s, %s, %s, (NOW() AT TIME ZONE 'America/Bogota'), %s, %s);
         """, (sender, message, classification, tipo_clasificacion, entidades, tipo_mensaje, id_restaurante))
         logging.info('Mensaje guardado exitosamente.')
-        log_message('Finalizando función <SaveMessageToDB>.', 'INFO')
     except Exception as e:
         log_message(f'Error al hacer uso de función <SaveMessageToDB>: {e}.', 'ERROR')
         logging.error(f'Error al hacer uso de función <SaveMessageToDB>: {e}.')
@@ -320,7 +299,7 @@ def point_in_polygon(lat, lng, poly):
         except Exception:
             # no queremos que esto rompa todo; seguir con el algoritmo
             logging.debug(f"point_on_segment fallo con puntos {(xi, yi)} {(xj, yj)} y punto {(x, y)}")
-
+            log_message(f"point_on_segment fallo con puntos {(xi, yi)} {(xj, yj)} y punto {(x, y)}", "ERROR")
         # ignora horizontales exactas evitando división por cero
         if ((yi > y) != (yj > y)):
             # calcular intersección en X de la arista con la horizontal y
@@ -428,7 +407,7 @@ def guardar_intencion_futura(telefono: str, intencion_futura: str, observaciones
     Si no existe el registro, lo crea. Si ya existe, actualiza la intención.
     """
     try:
-        log_message('Iniciando función <GuardarIntencionFutura>.', 'INFO')
+
         query = """
             INSERT INTO clasificacion_intenciones_futuras 
             (telefono, intencion_futura, fecha_actualizacion, observaciones, mensaje_chatbot, mensaje_usuario, datos_promocion)
@@ -502,7 +481,6 @@ def borrar_intencion_futura(telefono: str) -> bool:
 
 def obtener_menu() -> list[dict[str, Any]]:
     try:
-        log_message("Iniciando función <ObtenerMenu>.", "INFO")
         query = """
                 SELECT
                     iditem,
@@ -535,7 +513,6 @@ def obtener_menu() -> list[dict[str, Any]]:
 
 def normalizar_entities_items(entities: dict) -> dict:
     try:
-        log_message('Iniciando función <NormalizarEntitiesItems>.', 'INFO')
         items = entities.get("items", [])
         resultado = {}
         for item in items:
@@ -554,7 +531,6 @@ def normalizar_entities_items(entities: dict) -> dict:
                     "cantidad": cantidad }
         entities["items"] = list(resultado.values())
         log_message(f'Entities normalizadas: {entities}', 'INFO')
-        log_message('Finalizando función <NormalizarEntitiesItems>.', 'INFO')
         return entities
     except Exception as e:
         log_message(f"Error en función <NormalizarEntitiesItems>: {e}", "ERROR")
@@ -563,7 +539,6 @@ def normalizar_entities_items(entities: dict) -> dict:
 def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = False) -> dict:
     try:
         """ Guarda un pedido completo en la BD y retorna: { "idpedido": X, "codigo_unico": "P-00015" } """
-        log_message('Iniciando función <GuardarPedidoCompleto>.', 'INFO')
         # ------------------------------- # 1. Obtener id_whatsapp # -------------------------------
         q_idw = "SELECT * FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
@@ -703,7 +678,6 @@ def guardar_ordenes(idpedido: int, pedido_json: dict, sender: str) -> dict:
     }
     """
     try:
-        log_message('Iniciando función <GuardarOrdenes>.', 'INFO')
         items = pedido_json.get("items", [])
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
@@ -891,7 +865,6 @@ def _merge_items(base_items: List[Dict], new_items: List[Dict], replace_all: boo
 def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
     """Marca es_temporal = FALSE en el pedido del cliente."""
     try:
-        log_message('Iniciando función <MarcarTrue>.', 'INFO')
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
@@ -932,7 +905,6 @@ def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
 def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
     """MARCA UN PEDIDO COMO FALSE EN ES_TEMPORAL Y RETORNA INFO DEL PEDIDO ACTUALIZADO."""
     try:
-        log_message('Iniciando función <MarcarPedidoComoDefinitivo>.', 'INFO')
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
@@ -969,7 +941,6 @@ def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
 
 def eliminar_pedido(sender: str, codigo_unico: str) -> dict:
     try:
-        log_message('Iniciando función <EliminarPedido>.', 'INFO')
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
@@ -1016,7 +987,6 @@ def eliminar_pedido(sender: str, codigo_unico: str) -> dict:
     
 def obtener_pedido_por_codigo_orignal(sender: str, codigo_unico: str) -> dict:
     try:
-        log_message('Iniciando función <ObtenerPedidoPorCodigo>.', 'INFO')
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
@@ -1056,7 +1026,6 @@ def send_pdf_response(sender: str):
         """
         Envía un PDF al usuario vía WhatsApp Cloud API usando una URL con SAS.
         """
-        log_message('Iniciando función <SendPDFResponse>.', 'INFO')
         ACCESS_TOKEN = os.environ["WABA_TOKEN"]
         PHONE_ID = os.environ["PHONE_NUMBER_ID"]
         url = f"https://graph.facebook.com/v20.0/{PHONE_ID}/messages"
@@ -1085,7 +1054,6 @@ def send_pdf_response(sender: str):
 
 def obtener_estado_pedido_por_codigo(sender: str, codigo_unico: str) -> dict:
     try:
-        log_message('Iniciando función <ObtenerPedidoPorCodigo>.', 'INFO')
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s;"
         res_idw = execute_query_columns(q_idw, (sender,), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
@@ -1133,7 +1101,6 @@ def obtener_estado_pedido_por_codigo(sender: str, codigo_unico: str) -> dict:
 def convert_decimals(obj):
     try:
         """Convierte objetos Decimal en float dentro de estructuras anidadas."""
-        log_message('Iniciando función <ConvertDecimals>.', 'INFO')
         if isinstance(obj, dict):
             log_message('Convirtiendo diccionario en <ConvertDecimals>.', 'INFO')
             return {k: convert_decimals(v) for k, v in obj.items()}
@@ -1166,7 +1133,6 @@ def actualizar_total_productos(sender: str, codigo_unico: str, nuevo_total: floa
     Retorna el idpedido y los valores actualizados.
     """
     try:
-        log_message("Iniciando <actualizar_total_productos>", "INFO")
         query = """
             UPDATE pedidos
             SET es_promocion = true,
@@ -1215,7 +1181,6 @@ def actualizar_total_productos(sender: str, codigo_unico: str, nuevo_total: floa
 
 def actualizar_medio_pago(sender: str, codigo_unico: str, metodo_pago: str) -> dict:
     try:
-        log_message('Iniciando función <MarcarPedidoComoDefinitivo>.', 'INFO')
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
@@ -1265,7 +1230,7 @@ def obtener_pedido_por_codigo(codigo_unico: str) -> dict:
         "es_temporal": res[5],
         "total_final": float(res[6]) if res[6] is not None else 0.0,
         "tiempo_estimado": res[7],
-        "total_domicilio": float(res[7]) if res[7] is not None else 0.0
+        "total_domicilio": float(res[8]) if res[8] is not None else 0.0
     }
 
 # Helper: obtener ordenes existentes por idpedido (cada fila representa un item)
@@ -1512,8 +1477,6 @@ def obtener_pedido_pendiente_reciente(sender: str) -> dict:
     - asociado al sender
     """
     try:
-        log_message('Iniciando función <ObtenerPedidoPendienteReciente>.', 'INFO')
-
         # 1. Obtener id_whatsapp
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
@@ -1569,8 +1532,8 @@ def actualizar_costos_y_tiempos_pedido(
     y total_final = total_productos + total_domicilio.
     """
     try:
-        log_message("Iniciando función <ActualizarCostosYTiempoPedido>.", "INFO")
-
+        #establecer valor domicilio en 0
+        valor=0.0
         # 1. Obtener id_whatsapp
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
@@ -1660,8 +1623,6 @@ def verify_hour_atettion(sender: str, ID_RESTAURANTE: int) -> bool:
         """
         params = (ID_RESTAURANTE,)
         res = execute_query(query, params, fetchone=True)
-        log_message("Iniciando verificación de horario de atención", "INFO")
-
         # corregir la lógica y usar valores por defecto si vienen como NULL
         hora_inicio = int(res[0]) if res and res[0] is not None else 11
         hora_fin = int(res[1]) if res and res[1] is not None else 22
@@ -1714,7 +1675,6 @@ def actualizar_order_complete_en_observaciones(sender: str) -> dict:
     los items y actualiza la fila en la base. Retorna dict con el resultado y la nueva observación.
     """
     try:
-        log_message("Iniciando <actualizar_order_complete_en_observaciones>", "INFO")
         query_sel = """
             SELECT observaciones
             FROM public.clasificacion_intenciones_futuras
@@ -1810,7 +1770,6 @@ def corregir_total_price_en_result(result: Dict) -> Dict:
       o posibles campos de cantidad en requested.
     - Retorna el mismo dict con result['total_price'] actualizado (float, 2 decimales).
     """
-    log_message("Iniciando corregir_total_price_en_result", "INFO")
     try:
         if not isinstance(result, dict):
             return result
@@ -1875,7 +1834,6 @@ def extraer_ultimo_mensaje(mensaje: str) -> str:
     Retorna el último mensaje limpio.
     """
     try:
-        log_message("Iniciando extraer_ultimo_mensaje", "INFO")
         if not mensaje:
             return ""
 
@@ -1958,3 +1916,24 @@ def extraer_ultimo_mensaje(mensaje: str) -> str:
     except Exception as e:
         log_message(f"Error en extraer_ultimo_mensaje: {e}", "ERROR")
         return ""
+
+def validar_pedido_editable(codigo_unico:str) -> bool:
+    """
+    Verifica si un pedido es editable (es_temporal = TRUE).
+    Retorna True/False.
+    """
+    try:
+        query = """
+            SELECT es_temporal
+            FROM pedidos
+            WHERE codigo_unico = %s
+            LIMIT 1;
+        """
+        res = execute_query(query, (codigo_unico,), fetchone=True)
+        if not res:
+            return False
+        es_temporal = res[0]
+        return bool(es_temporal)
+    except Exception as e:
+        log_message(f"Error en validar_pedido_editable: {e}", "ERROR")
+        return False

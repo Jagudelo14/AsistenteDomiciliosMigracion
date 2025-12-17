@@ -33,9 +33,9 @@ def main():
     try:
         body = resp.get_body().decode("utf-8")
     except Exception:
-        body = str(resp)
+        body = str(resp)    
     print("status:", getattr(resp, "status_code", "unknown"))
     print("body:", body)
 
 if __name__ == "__main__":
-    main()
+    main()  
