@@ -2,18 +2,18 @@ import logging
 from utils_database import execute_query
 from utils import log_message
 
-def update_tratamiento_datos(sender: str, id_restaurante: str, valor: bool) -> None:
+def update_nombre_bool(sender: str, id_restaurante: str, valor: bool) -> None:
     try:
         query = """
             UPDATE public.clientes_whatsapp
-            SET tratamiento_datos = %s
+            SET nombre_bool = %s
             WHERE telefono = %s AND id_restaurante = %s;
         """
         params = (valor, sender, id_restaurante)
         execute_query(query, params)
     except Exception as e:
-        log_message(f"update_tratamiento_datos error: {e}", "ERROR")
-        logging.error(f"update_tratamiento_datos error: {e}")
+        log_message(f"update_nombre_bool error: {e}", "ERROR")
+        logging.error(f"update_nombre_bool error: {e}")
         raise
 
 def update_dir_primera_vez(sender: str, id_restaurante: str, valor: bool) -> None:
@@ -29,6 +29,7 @@ def update_dir_primera_vez(sender: str, id_restaurante: str, valor: bool) -> Non
         log_message(f"update_dir_primera_vez error: {e}", "ERROR")
         logging.error(f"update_dir_primera_vez error: {e}")
         raise
+
 
 def update_datos_personales(sender: str, id_restaurante: str, valor: bool) -> None:
     try:
@@ -94,6 +95,8 @@ def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, 
         logging.error(f"save_personal_data_partial error: {e}")
         raise
 
+
+
 def check_and_mark_datos_personales(sender: str, id_restaurante: str) -> list:
     """
     Consulta los 4 campos (Tipo_Doc, N_Doc, email).
@@ -102,7 +105,7 @@ def check_and_mark_datos_personales(sender: str, id_restaurante: str) -> list:
     """
     try:
         query = """
-            SELECT "Tipo_Doc", "N_Doc", email , nombre
+            SELECT "Tipo_Doc", "N_Doc", email 
             FROM public.clientes_whatsapp
             WHERE telefono = %s AND id_restaurante = %s;
         """
@@ -116,8 +119,7 @@ def check_and_mark_datos_personales(sender: str, id_restaurante: str) -> list:
             missing.append("N_Doc")
         if not row[2] or str(row[2]).strip() == "":
             missing.append("email")
-        if not row[3] or str(row[3]).strip() == "" or row[3]=="Desconocido":
-            missing.append("nombre")
+
 
         if not missing:
             # marcar como completos
@@ -170,10 +172,10 @@ def validate_direction_first_time(sender: str, id_restaurante: str) -> bool:
         logging.error(f"validate_direction_first_time error: {e}")
         return False
 
-def validate_data_treatment(sender: str, id_restaurante: str) -> bool:
+def validate_nombre_bool(sender: str, id_restaurante: str) -> bool:
     try:
         query = """
-            SELECT tratamiento_datos
+            SELECT nombre_bool
             FROM public.clientes_whatsapp
             WHERE telefono = %s AND id_restaurante = %s;
         """
@@ -184,6 +186,6 @@ def validate_data_treatment(sender: str, id_restaurante: str) -> bool:
             return bool(tratamiento_datos)
         return False
     except Exception as e:
-        log_message(f"validate_data_treatment error: {e}", "ERROR")
-        logging.error(f"validate_data_treatment error: {e}")
+        log_message(f"validate_nombre_bool error: {e}", "ERROR")
+        logging.error(f"validate_nombre_bool error: {e}")
         return False

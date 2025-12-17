@@ -5,7 +5,7 @@ import os
 import psycopg2
 from psycopg2.extensions import connection, cursor
 import logging
-
+import time
 def connect_database() -> connection:
     try:
         """Establece una conexión a la base de datos PostgreSQL usando variables de entorno."""
@@ -21,11 +21,10 @@ def connect_database() -> connection:
             user=user,
             password=password,
             host=host,
-            port=port
+            port=port,
+            sslmode='require'
         )
         cur: cursor = conn.cursor()
-        cur.execute("SELECT current_database(), inet_server_addr(), inet_server_port();")
-        #info = cur.fetchone()
         cur.close()
         return conn
     except Exception as e:
@@ -33,21 +32,55 @@ def connect_database() -> connection:
         raise
 
 def execute_query(query: str, params: tuple = (), fetchone: bool = False):
+    attempts = 3
+    last_exc = None
+    if params is None:
+        params = ()
     try:
-        conn: connection = connect_database()
-        cur: cursor = conn.cursor()
-        cur.execute(query, params)
-        results = None
-        lowered = query.strip().lower()
-        if lowered.startswith("select") or "returning" in lowered:
-            results = cur.fetchone() if fetchone else cur.fetchall()
-        conn.commit()
-        cur.close()
-        conn.close()
-        return results
-    except Exception as e:
-        logging.error(f"Error al ejecutar la consulta: {e}")
-        raise
+        for attempt in range(1, attempts + 1):
+            conn: connection = None
+            cur: cursor = None
+            try:
+                conn = connect_database()
+                cur = conn.cursor()
+                cur.execute(query, params)
+                results = None
+                lowered = query.strip().lower()
+                if lowered.startswith("select") or "returning" in lowered:
+                    results = cur.fetchone() if fetchone else cur.fetchall()
+                conn.commit()
+                return results
+            except Exception as e:
+                logging.error(f"execute_query attempt {attempt} failed: {e}")
+                last_exc = e
+                # close resources and retry
+                try:
+                    if cur:
+                        cur.close()
+                except Exception:
+                    pass
+                try:
+                    if conn:
+                        conn.close()
+                except Exception:
+                    pass
+                sleep_time = 2 ** attempt
+                logging.info(f"Reintentando en {sleep_time} segundos...")
+                time.sleep(sleep_time)
+                if attempt == attempts:
+                    logging.error("execute_query: agotados los reintentos")
+                    raise last_exc
+    finally:
+        try:
+            if cur and not cur.closed:
+                cur.close()
+        except Exception:
+            pass
+        try:
+            if conn and not conn.closed:
+                conn.close()
+        except Exception:
+            pass
 
 def execute_query_columns(query: str, params: tuple = (), fetchone: bool = False, return_columns: bool = False):
     try:

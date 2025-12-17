@@ -1,25 +1,24 @@
 # function_app.py
 # Last modified: 2025-09-30 by Andrés Bermúdez
-#CAMBIOS 14 diciembre 7:00 pm
+#salida a prod 17 diciembre 2025 8 de la mañana
 import azure.functions as func
 from datetime import datetime
 import logging
 import os
 import json
 from utils import obtener_datos_cliente_por_telefono, send_text_response,  log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion,verify_hour_atettion,validate_duplicated_message
-from utils_chatgpt import get_classifier, get_openai_key,extraer_info_personal,get_direction
+from utils_chatgpt import get_classifier, get_openai_key,extraer_info_personal,get_direction,get_name
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign
-from utils_registration import  update_datos_personales, update_dir_primera_vez, update_tratamiento_datos, validate_personal_data, validate_data_treatment, validate_direction_first_time, save_personal_data_partial, check_and_mark_datos_personales
+from utils_registration import  update_datos_personales, update_dir_primera_vez, update_nombre_bool, validate_nombre_bool, validate_personal_data, validate_direction_first_time, save_personal_data_partial, check_and_mark_datos_personales
 from utils_database import execute_query
 from typing import Any, Dict, Optional, List
 import requests
 from openai import OpenAI
 import io
-import re
 from utils_contexto import set_sender,crear_conversacion, actualizar_conversacion,obtener_contexto_conversacion
-app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
+app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 # Constantes desde variables de entorno
 VERIFY_TOKEN: str = os.environ["META_VERIFY_TOKEN"] 
@@ -57,9 +56,7 @@ def _verify_webhook(req: func.HttpRequest) -> func.HttpResponse:
 def _process_message(req: func.HttpRequest) -> func.HttpResponse:
     try:
         """Procesa los mensajes recibidos desde WhatsApp Business API."""
-        log_message('Iniciando función <ProcessMessage>.', 'INFO')
         req_body: Dict[str, Any] = json.loads(req.get_body().decode("utf-8"))
-        log_message(f"Cuerpo recibido: {json.dumps(req_body, indent=2)}", "INFO")
         logging.info(f"Cuerpo recibido: {json.dumps(req_body, indent=2)}")
         entry: Dict[str, Any] = req_body.get("entry", [{}])[0]
         change: Dict[str, Any] = entry.get("changes", [{}])[0]
@@ -70,11 +67,10 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             logging.info("No hay mensajes en el evento. Puede ser una notificación de estado.")
             return func.HttpResponse("Sin mensajes para procesar", status_code=200)
         message: Dict[str, Any] = messages[0]
-        log_message(f"Mensaje extraído: {json.dumps(message, indent=2)}", "INFO")
         tipo_general = message["type"]
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
-        #Validación mensaje duplicado
+        #Validación mensaje duplicado###################################
         if validate_duplicated_message(message_id):
              logging.info(f"Mensaje duplicado: {message_id}")
              return func.HttpResponse("Mensaje duplicado", status_code=200)
@@ -123,12 +119,11 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 log_message(f"Mensaje transcrito {text}", "INFO")
                 conversacion = crear_conversacion(text)
                 log_message(f"Conversación iniciada: {conversacion}", "INFO")          
-            send_text_response(sender,"¡Hola! necesitamos tu aprobación para el tratamiento de tus datos personales según la Ley 1581 de 2012.Por favor, responde NO para rechazar, si continuas la conversación entendemos que aceptas el tratamiento de tus datos. ")
-            send_text_response(sender, "Entoces para continuar ,Por favor envia los siguientes datos:\nNombre, Tipo de documento, Número de documento, Correo electrónico.\nEjemplo:Juan Perez, C.C, 123456789, juan14@gmail.com")
-            log_message("Empieza a clasificar cliente nuevo", "INFO")
+            send_text_response(sender,"¡Hola! al continuar la conversación entendemos que aceptas el tratamiento de tus datos. \nPuedes saber mas de la política de aqui: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981")
+            send_text_response(sender, "Para continuar, por favor compártenos:\nTu nombre\nTu dirección")
             return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
         ####################################
-        ########### CLIENTE EXISTENTE ##########  
+        ########### CLIENTE EXISTENTE ######
         ####################################
         else:
             log_message("Cliente existente detectado", "INFO")
@@ -163,9 +158,6 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     conversacion = actualizar_conversacion(text,sender,"usuario")
                     logging.info(f"Transcripción recibida: {text}")
                     log_message(f"Mensaje transcrito {text}", "INFO")
-            #############
-            #validar ubicación primera vez
-            #############
             elif tipo_general == "location" and validate_direction_first_time(sender, ID_RESTAURANTE) is False:
                 latitude_temp = message["location"]["latitude"]
                 longitude_temp = message["location"]["longitude"]
@@ -201,134 +193,49 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 return func.HttpResponse("EVENT_RECEIVED", status_code=200)
             else:
                 logging.warning(f"⚠️ Tipo de mensaje no soportado: {tipo_general}")
-                send_text_response(sender, "Por el momento solo puedo procesar mensajes de texto.")
+                send_text_response(sender, "Por el momento solo puedo procesar mensajes de texto.Intenta de nuevo con un mensaje escrito o de voz.")
                 return func.HttpResponse("Tipo de mensaje no soportado", status_code=200)
                 # Clasificación con modelo OpenAI
             log_message(f"Empieza a clasificar con text {text}", "INFO")
-            pattern = re.compile(r'\bno\b', re.IGNORECASE)
-            def contiene_no(texto: str) -> bool:
-                return bool(pattern.search(texto))
-            if validate_data_treatment(sender, ID_RESTAURANTE) is False:
-                if contiene_no(text):
-                    log_message("Usuario negó el tratamiento de datos", "INFO")
-                    update_tratamiento_datos(sender, ID_RESTAURANTE, False)
-                    update_datos_personales(sender, ID_RESTAURANTE,  False)
-                    update_dir_primera_vez(sender, ID_RESTAURANTE, True)
-                    update_tratamiento_datos(sender, ID_RESTAURANTE, False)
-                    save_personal_data_partial(sender, ID_RESTAURANTE, None, None, None)
-                    send_text_response(sender, f"Entendido {nombre_cliente}, no procesaremos tus datos personales. Si cambias de opinión, no dudes en contactarnos nuevamente.")
-                    logging.info(f"Usuario {sender} negó el tratamiento de datos.")
-                    log_message("Usuario negó el tratamiento de datos", "INFO")
-                    return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-                else:
-                    log_message("Usuario aceptó el tratamiento de datos", "INFO")
-                    update_tratamiento_datos(sender, ID_RESTAURANTE, True)
-                    logging.info(f"Usuario {sender} aceptó el tratamiento de datos.")
-                    log_message(f"Usuario {sender} aceptó el tratamiento de datos.", "INFO")
-                    #######################################
-                    #validación datos personales
-                    #######################################
-                    if validate_personal_data(sender, ID_RESTAURANTE) is False:
-                        datos = extraer_info_personal(text)
-                        # datos es dict con keys: tipo_documento, numero_documento, email
-                        tipo_doc = datos.get("tipo_documento")
-                        n_doc = datos.get("numero_documento")
-                        email = datos.get("email")
-                        nombre = datos.get("nombre")
-                        # Guardar solo los campos que traigan información útil
-                        try:
-                            save_personal_data_partial(sender, ID_RESTAURANTE, tipo_doc, n_doc, email,nombre)
-                        except Exception as e:
-                            logging.error(f"Error guardando datos parciales: {e}")
-                            log_message(f"Error guardando datos parciales: {e}", "ERROR")
-                            send_text_response(sender, f"{nombre_cliente}, ocurrió un error al guardar tus datos. Intenta de nuevo.")
-                            return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-
-                        # Verificar si ahora la fila tiene los 4 campos completos
-                        missing = check_and_mark_datos_personales(sender, ID_RESTAURANTE)
-                        if not missing:
-                            logging.info(f"Datos personales de {sender} completos y marcados.")
-                            log_message(f"Datos personales de {sender} completos y marcados.", "INFO")
-                            send_text_response(sender, "Gracias. Ahora por ultimo ¿puedes proporcionarme tu dirección para validar que estes en nuestra area de cobertura?")
-                            return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-                        else:
-                            # mapear nombres amigables
-                            friendly = {"Tipo_Doc": "tipo de documento", "N_Doc": "número de documento", "email": "correo electrónico", "nombre": "nombre completo"}
-                            faltantes = ", ".join(friendly.get(m, m) for m in missing)
-                            send_text_response(sender, f"aún faltan los siguientes datos: {faltantes}. Por favor envíalos para continuar.")
-                            return func.HttpResponse("EVENT_RECEIVED", status_code=200)     
-            #######################################
-            #validación datos personales
-            #######################################
-            if validate_personal_data(sender, ID_RESTAURANTE) is False:
-                datos = extraer_info_personal(text)
-                # datos es dict con keys: tipo_documento, numero_documento, email
-                tipo_doc = datos.get("tipo_documento")
-                n_doc = datos.get("numero_documento")
-                email = datos.get("email")
-                nombre = datos.get("nombre")
-                # Guardar solo los campos que traigan información útil
-                try:
-                    save_personal_data_partial(sender, ID_RESTAURANTE, tipo_doc, n_doc, email,nombre)
-                except Exception as e:
-                    logging.error(f"Error guardando datos parciales: {e}")
-                    log_message(f"Error guardando datos parciales: {e}", "ERROR")
-                    send_text_response(sender, ", ocurrió un error al guardar tus datos. Intenta de nuevo.")
-                    return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-
-                # Verificar si ahora la fila tiene los 4 campos completos
-                missing = check_and_mark_datos_personales(sender, ID_RESTAURANTE)
-                if not missing:
-                    logging.info("Datos personales completos y marcados.")
-                    log_message("Datos personales completos y marcados.", "INFO")
-                    send_text_response(sender, "Gracias. Ahora por ultimo ¿puedes proporcionarme tu dirección para validar que estes en nuestra area de cobertura?")
-                    return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-                else:
-                    # mapear nombres amigables
-                    friendly = {"Tipo_Doc": "tipo de documento", "N_Doc": "número de documento", "email": "correo electrónico", "nombre": "nombre completo"}
-                    faltantes = ", ".join(friendly.get(m, m) for m in missing)
-                    send_text_response(sender, "aún faltan los siguientes datos: {faltantes}. Por favor envíalos para continuar.")
-                    return func.HttpResponse("EVENT_RECEIVED", status_code=200)            
-            #######################################
-            #validación dirección primera vez
-            #######################################
-            if validate_direction_first_time(sender, ID_RESTAURANTE) is False:
-                classification: str
-                type_text: str
-                entities_text: str
-                classification, type_text, entities_text = get_classifier(text, sender)
-                # revision de si es direccion
-                if classification == "direccion" or classification =="mas_datos_direccion":
-                    send_text_response(sender, "Gracias , voy a validar que estes en nuestra cobertura dame un par de minutos.")
+            if text:
+                if not validate_direction_first_time(sender, ID_RESTAURANTE) or not validate_nombre_bool(sender, ID_RESTAURANTE):
                     direccion=get_direction(text)
-                    geocode_and_assign(sender, direccion, ID_RESTAURANTE)
-                    datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, ID_RESTAURANTE)
-                    latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
-                    longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
-                    resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,ID_RESTAURANTE, nombre_cliente)
-                    update_dir_primera_vez(sender, ID_RESTAURANTE, True)
-                    if resultado is None:
+                    nombre=get_name(text)
+                    booleano_dir: bool = True
+                    if direccion and not validate_direction_first_time(sender, ID_RESTAURANTE):
+                        send_text_response(sender, "Gracias , voy a validar que estes en nuestra cobertura dame un par de minutos.")
+                        logging.info(f"Usuario {sender} proporcionó una dirección.")
+                        log_message(f"Usuario {sender} proporcionó una dirección.", "INFO")
+                        geocode_and_assign(sender, direccion, ID_RESTAURANTE)
+                        datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, ID_RESTAURANTE)
+                        latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
+                        longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
+                        resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,ID_RESTAURANTE, nombre_cliente)
+                        update_dir_primera_vez(sender, ID_RESTAURANTE, True)
+                        if resultado is None:
+                            execute_query("""
+                                            UPDATE clientes_whatsapp
+                                            SET direccion_google = %s
+                                            WHERE telefono = %s AND id_restaurante = %s;
+                                            """, (None, sender, ID_RESTAURANTE))
+                            booleano_dir = False
+                    if nombre and not validate_nombre_bool(sender, ID_RESTAURANTE):
                         execute_query("""
                                         UPDATE clientes_whatsapp
-                                        SET direccion_google = %s
+                                        SET nombre = %s
                                         WHERE telefono = %s AND id_restaurante = %s;
-                                        """, (None, sender, ID_RESTAURANTE))
-                        send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos próximamente en tu barrio.😊,si aun deseas continuar porque tienes alguna pregunta o deseas hacer tu pedido a otra dirección requerimos tu autorización expresa para el tratamiento de tus datos personales (Ley 1581 de 2012). Finalidad: Procesar tu pago, gestionar tu pedido y validar si estas en nuestra area de cobertura. Derechos y Política Completa: Puedes consultar tus derechos y la legislación detallada aquí: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981Al responder SÍ, declaras conocer y aceptar la finalidad del tratamiento de tus datos. Si no estás de acuerdo, responde NO.")
-                        return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-                    else:
-                        respuesta_bot = f"""Excelente {nombre_cliente} Dime que necesitas y con gusto te ayudaré 😊. ¿Tienes alguna pregunta? o talvez ¿Quieres ver el menu?"""
-                        send_text_response(sender, respuesta_bot)
-                    logging.info(f"Usuario {sender} proporcionó una dirección.")
-                    log_message(f"Usuario {sender} proporcionó una dirección.", "INFO")
-
+                        """, (nombre,sender, ID_RESTAURANTE))
+                        log_message(f'Cliente creado o actualizado exitosamente.{nombre}', 'INFO')
+                        update_nombre_bool(sender, ID_RESTAURANTE, True)
+                    if not validate_direction_first_time(sender, ID_RESTAURANTE):
+                        send_text_response(sender, "Por favor, comparteme tu ubicación para continuar con el pedido.")
+                    if not validate_nombre_bool(sender, ID_RESTAURANTE):
+                        send_text_response(sender, "Por favor, indícame tu nombre para continuar con el pedido.")
+                    if booleano_dir is False:
+                        send_text_response(sender, "No estas dentro de nuestra area de operación, puedes hacer tu pedido para recoger en tienda")
+                    if validate_direction_first_time(sender, ID_RESTAURANTE) and validate_nombre_bool(sender, ID_RESTAURANTE):
+                        send_text_response(sender,"¡Gracias por la información! 😊 ¿Te gustaría ver el menú o ya sabes qué pedir?")
                     return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-                else:
-                    send_text_response(sender, f"{nombre_cliente}, para continuar con tu pedido, por favor envíanos tu ubicación actual o tu dirección.")
-                    logging.info(f"Usuario {sender} no proporcionó una dirección válida.")
-                    log_message(f"Usuario {sender} no proporcionó una dirección válida.", "INFO")
-                return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-
-            if text:
                 text = obtener_contexto_conversacion(sender)
                 log_message(f"Contexto de conversación obtenido: {text}", "INFO")
                 classification: str
@@ -351,7 +258,6 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     nombre_local="Sierra Nevada",
                     type_text = type_text
                 )
-                log_message('Finalizando función <ProcessMessage>.', 'INFO')
                 return func.HttpResponse("EVENT_RECEIVED", status_code=200)
     except Exception as e:
         log_message(f'Error al hacer uso de función <ProcessMessage>: {e}.', 'ERROR')

@@ -11,7 +11,7 @@ import json
 import os
 
 CANTIDAD_TIEMPO_PEDIDO: int = 5 # Cantidad de tiempo por pedido en cola en minutos
-TIEMPO_TOLERANCIA: int = 10 # Cantidad de minutos de tolerancia para tiempo total de domicilio
+TIEMPO_TOLERANCIA: int = 5 # Cantidad de minutos de tolerancia para tiempo total de domicilio
 UMBRAL_TIEMPO: int = 150 # Cantidad de minutos de umbral máximo para un domicilio (2 horas y 30 minutos)
 API_KEY_GOOGLE_MAPS: str = os.environ.get("API_KEY_GOOGLE_MAPS", "")
 
@@ -47,8 +47,6 @@ def primera_regla_tiempo(id_sede: str, tiempo_base: int) -> int:
     Suma 8 minutos por cada 10 hamburguesas en preparación en la sede indicada.
     """
     try:
-        log_message("Iniciando primera regla de tiempo.", "INFO")
-
         query = """
         SELECT
         p.idpedido,
@@ -134,7 +132,8 @@ def calcular_tiempo_pedido(tiempo_domicilio: str, id_sede: str) -> int:
                     minutos_totales += int(minutos_extra)
         elif "min" in tiempo_domicilio:
             minutos_totales += int(''.join(filter(str.isdigit, tiempo_domicilio)))
-        minutos_totales += primera_regla_tiempo(id_sede, minutos_totales) # Ajuste por demanda
+        log_message(f"Minutos totales iniciales: {minutos_totales}", "INFO")
+        minutos_totales = primera_regla_tiempo(id_sede, minutos_totales) # Ajuste por demanda
         tiempo_pedido: int = minutos_totales + TIEMPO_TOLERANCIA
         if tiempo_pedido > UMBRAL_TIEMPO:
             log_message(f"Tiempo de pedido supera el umbral {tiempo_pedido} minutos.", "INFO")
@@ -365,13 +364,15 @@ def set_direccion_cliente(numero_cliente: str, direccion: str, id_restaurante: s
         log_message(f"Error al actualizar dirección del cliente: {e}", "ERROR")
         raise e
 
-def calcular_valor(distancia) -> float:    
+def calcular_valor(distancia) -> float: 
+    #calcular valor del domicilio   
     if distancia <= 2000:
         valor = 2000
     else:
         valor = 2000 + ((distancia - 2000) * 0.4)
 
-    valor_redondeado = round(valor // 100) * 100
+    #valor_redondeado = round(valor // 100) * 100
+    valor_redondeado = 0.0  # establecer valor del domicilio en 0
     return valor_redondeado
 
 def calcular_distancia_y_tiempo(origen: tuple, destino: tuple, numero_telefono: str, id_restaurante: str, id_sede: str):
@@ -455,7 +456,7 @@ def orquestador_ubicacion_exacta(sender: str, latitud_cliente: float, longitud_c
         sede_cercana = buscar_sede_mas_cercana_dentro_area(latitud_cliente, longitud_cliente, id_restaurante)
         if sede_cercana is None:
             log_message("No se encontró sede cercana. Retornando None.", "WARNING")
-            send_text_response(sender, "📍 Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos estar próximamente en tu barrio. 😊 - Sierra Nevada")
+            send_text_response(sender, "Gracias por tu ubicación.\nEn este momento no encontramos una sede que pueda atender tu dirección dentro de nuestra zona de cobertura.\nEsperamos estar próximamente en tu barrio. 😊 - Sierra Nevada")
             borrar_intencion_futura(sender)
             return None
         if not set_sede_cliente(sede_cercana["id"], sender, id_restaurante) or not set_lat_lon(sender, latitud_cliente, longitud_cliente, id_restaurante) or not set_direccion_cliente(sender, sede_cercana["direccion_envio"], id_restaurante):
