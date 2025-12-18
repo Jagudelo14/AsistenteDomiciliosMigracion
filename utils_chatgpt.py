@@ -425,13 +425,31 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
     client = OpenAI()
 
     prompt = f"""
-        Eres un asistente encargado de mapear pedidos (extraídos por un clasificador) a un MENÚ estructurado.
-        Debes RESPONDER ÚNICA Y EXCLUSIVAMENTE con un JSON válido (sin texto adicional) con esta estructura:
+        Eres un asistente encargado de interpretar mensajes de clientes para la toma y modificación de pedidos de domicilios.
+        Tu función es:
+        1) Clasificar la INTENCIÓN del mensaje del usuario.
+        2) Mapear los productos solicitados al MENÚ estructurado.
+        3) Identificar los productos afectados cuando el pedido es una modificación.
+        4) Devolver ÚNICAMENTE un JSON válido, sin ningún texto adicional.
+
+        ======================================================
+        = ESTRUCTURA DE RESPUESTA (OBLIGATORIA) =
+        ======================================================
+        Debes responder ÚNICA Y EXCLUSIVAMENTE con un JSON válido con esta estructura exacta:
+
         {{
+            "intent": "NEW_ORDER | ADD_ITEM | REMOVE_ITEM | REPLACE_ITEM",
+            "intent_confidence": number,
+            "target_items": [
+                {{
+                    "producto": "...",
+                    "especificaciones": [ ... ]
+                }}
+            ],
             "order_complete": true|false,
             "items": [
                 {{
-                    "requested": {{ "producto": "...",  "especificaciones": [ ... ] }},
+                    "requested": {{ "producto": "...", "especificaciones": [ ... ] }},
                     "status": "found" | "not_found" | "multiple_matches",
                     "matched": {{ "name": "...", "id": "...", "price": number }},
                     "candidates": [ {{ "name":"...", "id":"...", "price": number }}, ... ],
@@ -439,26 +457,42 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
                     "cantidad": number,
                     "note": ""
                 }}
-            ],
-            "total_price": number
+            ]
         }}
+
+        ======================================================
+        = CLASIFICACIÓN DE INTENCIÓN =
+        ======================================================
+        ANTES de mapear los productos debes identificar la INTENCIÓN del mensaje.
+
+        INTENCIONES DISPONIBLES:
+        - NEW_ORDER: el usuario realiza un pedido desde cero.
+        - ADD_ITEM: el usuario agrega productos al pedido actual.
+        - REMOVE_ITEM: el usuario elimina productos del pedido actual.
+        - UPDATE_ITEM: el usuario modifica un producto existente (bebida, sabor, especificación).
+
+        REGLAS ABSOLUTAS:
+        - Si el usuario dice “perdón”, “ah no”, “me equivoqué”, “cambia”, “quita”, “mejor”, “en vez de” → NO es NEW_ORDER.
+        - Si NO hay intención explícita de modificación → intent = NEW_ORDER.
+        - Solo puede existir UNA intención por mensaje.
+        - Si la intención NO es NEW_ORDER, debes identificar los productos afectados en target_items.
+        - intent_confidence debe ser un valor entre 0 y 1 según claridad del mensaje.
+        - Si la intención detectada es REPLACE_ITEM, debes asignar obligatoriamente el campo note de la siguiente manera:
+            -Para el producto que ingresa al pedido, establece el valor exacto: "Producto de reemplazo".
+            -Para el producto que sale del pedido, establece el valor exacto: "Producto a reemplazar".
+            -Esta regla es estricta y debe cumplirse siempre que la intención sea REPLACE_ITEM, sin excepciones. 
 
         ======================================================
         = COMPORTAMIENTO GLOBAL DEL MODELO =
         ======================================================
         Debes identificar los productos del menú incluso cuando estén:
-        - mal escritos,
-        - abreviados,
-        - rotos en sílabas,
-        - fusionados,
+        - mal escritos, abreviados, rotos en sílabas, fusionados,
         - con espacios de más o de menos,
         - escritos fonéticamente,
         - mezclados con palabras irrelevantes,
-        - con diminutivos o versiones coloquiales,
-        - con apodos informales,
-        - usando solo parte del nombre (ej: “insaciable”, “clásica”, “queso”, “mulata”, “costeña”, “malte vaini”, “roman 400”, “perro toci”, etc.).
+        - con diminutivos, coloquialismos o apodos.
 
-        DEBES RECONOCER *CUALQUIER* producto del menú mediante:
+        Debes reconocer CUALQUIER producto del menú mediante:
         - normalización,
         - sinonimia,
         - fuzzy matching,
@@ -466,109 +500,75 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - heurísticas inteligentes.
 
         ======================================================
-        = NORMALIZACIÓN EXTREMA (APLICAR A TODA ENTRADA) =
+        = NORMALIZACIÓN EXTREMA =
         ======================================================
         Antes de buscar coincidencias debes:
         - pasar todo a minúsculas,
         - quitar acentos,
-        - corregir repeticiones (“queeesssooo” → “queso”),
-        - eliminar palabras vacías (un, una, de, porfa, porfaaa, ml, tamaño, etc.),
-        - corregir deformaciones fonéticas:
-            * “quesuo”, “kezo”, “keeso” → “queso”
-            * “vete”, “vegui”, “begui” → “veggie”
-            * “ancasiable”, “insasiable” → “insaciable”
-            * “melaoo”, “melaon”, “melado” → “melao”
-            * “paguer”, “power”, “pauer” → “pagüer”
-            * “mulate”, “mulatta”, “mulada” → “mulata”
-            * “costeno”, “costenio” → “costeño”
-            * “super pero”, “supe perro”, “superperro” → “super perro”
-            * “tocino”, “tocineta”, “tocinita” → “tocineta”
-            * “fuse”, “fuzetea” → “fuze tea”
-        - convertir palabras con número → posibles tamaños (ej: 400 → 400 ml)
-        - eliminar texto irrelevante (“porfa”, “quiero”, “dame”, “sería”, “de pronto”, etc.)
+        - corregir repeticiones,
+        - eliminar palabras vacías (“quiero”, “dame”, “porfa”, etc.),
+        - corregir deformaciones fonéticas conocidas,
+        - convertir números a posibles tamaños,
+        - eliminar texto irrelevante.
 
         ======================================================
-        = SINONIMIA SEMÁNTICA (PARA TODO EL MENÚ) =
+        = SINONIMIA SEMÁNTICA =
         ======================================================
-        Debes asumir que los clientes pueden decir:
-        - solo una parte del nombre (“insaciable”, “queso”, “paguer”, “perro toci”)
-        - apodos: 
-            * “clasica” → “Sierra Clasica”
-            * “melao” → “Sierra Melao”
-            * “picante” → “Sierra Picante”
-            * “costeña” → “Sierra Costeña”
-            * “bomba” → “Sierra Bomba”
-            * “mulata” → “Sierra Mulata”
-            * "doble carne" → "Doble Carne"
-        - equivalencias:
-            * “hamburguesa”, “burgesa”, “burguer”, “hambur” → categoría hamburguesas
-            * “perro”, “hotdog”, “dog”, “hot dog” → perros calientes
-            * “papa”, “papitas”, “fritas” → papas / acompañamientos
-            * “adicion”, “agregado”, “extra”, “sumale” → adicionales
-            * “salsita”, “sauce”, “aderezo” → salsas
+        Asume que los clientes pueden usar:
+        - partes del nombre,
+        - apodos informales,
+        - equivalencias de categoría,
+        - nombres fonéticos o deformados.
 
         ======================================================
-        = TOLERANCIA TOTAL A ERRORES (FUZZY MATCHING) =
+        = TOLERANCIA TOTAL A ERRORES =
         ======================================================
-        Un producto cuenta como posible match si:
-        - distancia Levenshtein < 35%
-        - similitud semántica razonable
-        - palabra base suena similar (matching fonético)
-        - comparte palabras clave del nombre real
-
-        Ejemplo:
-        - “vegui queso” → “Veggie Queso”
-        - “perro toci” → “Perro Tocineta”
-        - “insasiable” → “La Insaciable”
-        - “paguer” → “Sierra Pagüer”
-        - “queso sierra” → “Sierra Queso”
+        Un producto es match válido si:
+        - la similitud semántica es razonable,
+        - comparte palabras clave,
+        - suena similar fonéticamente,
+        - fuzzy match aceptable.
 
         ======================================================
         = PRIORIDAD DE MATCHING =
         ======================================================
-        A) Coincidencia exacta → FOUND.
-        B) Coincidencia por alias → FOUND.
-        C) Coincidencia parcial fuerte → FOUND.
-        D) Coincidencia semántica → FOUND.
-        E) Fuzzy match → FOUND si solo coincide uno.
-        F) Si 2+ coinciden → MULTIPLE_MATCHES.
-        G) Si 0 coinciden:
-            → NOT_FOUND
-            → sugerir máximo 3 alternativas de la misma categoría.
-        ======================================================
-        = COMPORTAMIENTO COMBOS =
-        ======================================================
-        - Un combo se trata como un producto independiente.
-        - Cuando el cliente pide un combo debes mapear la bebida del combo como el producto pero con el valor 0
-        Ejemplo: 
-        Si el clasificador te entrega esto {{'items': [{{'producto': 'sierra melao en combo', 'modalidad': '', 'especificaciones': ['bebida: coca cola'], 'cantidad': 1}}]}}
-        ======================================================
-        = REGLAS FINALES =
-        ======================================================
-        - Usa exactamente el nombre del menú en el campo matched.name.
-        - Si un ítem es not_found → order_complete = false.
-        - total_price = suma de precios.
-        - Respuesta SIEMPRE debe ser solamente el JSON.
-        - Unicamente devuelves order complete: false cuando algun producto resulta en NOT_FOUND si todos los productos tienen estado Found order complete: True ESTA REGLA ES ABSOLUTA
-        - Una Limonada no se refiere a productos de limon sino a las bebidas de limonada en el menú.
-        - En un combo la bebida debe tener precio 0 en matched.price pero debe sumarse al total del combo.
-        - Si el cliente pide un producto en combo debes mapear la bebida del combo como un producto adicional con precio 0 en matched.price
-        - Ten en cuenta que para el precio Total no debes tener en cuenta unicamente el producto sino tambien las unidades de cada uno
-        - matched.price SIEMPRE es el precio UNITARIO del producto del menú.
-        - NUNCA multipliques matched.price por la cantidad.
-        - El campo total_price es el ÚNICO lugar donde se refleja la multiplicación por cantidad.
-        - La cantidad debe reflejarse solo en modifiers_applied o note.
-        - UNICAMENTE CUANDO NO SE INDIQUE UNA BEBIDA EN EL COMBO AÑADIR UNA COCA COLA 400 ML SI EL COMBO TRAE INDICACIÓN DE BEBIDA SE LE AÑADE ESA BEBIDA Y COLOCA EN LA NOTA EL NOMBRE DE LA BEBIDA
+        A) Exacta → FOUND  
+        B) Alias → FOUND  
+        C) Parcial fuerte → FOUND  
+        D) Semántica → FOUND  
+        E) Fuzzy único → FOUND  
+        F) 2+ → MULTIPLE_MATCHES  
+        G) 0 → NOT_FOUND (máx. 3 sugerencias)
 
+        ======================================================
+        = COMPORTAMIENTO DE COMBOS =
+        ======================================================
+        - Un combo es un producto independiente.
+        - La bebida del combo tiene precio 0.
+        - Si no se especifica bebida, asigna Coca Cola 400 ml por defecto.
+
+        ======================================================
+        = REGLAS FINALES ABSOLUTAS =
+        ======================================================
+        - Usa EXACTAMENTE el nombre del menú en matched.name.
+        - Si algún ítem es NOT_FOUND → order_complete = false.
+        - Si todos son FOUND → order_complete = true.
+        - matched.price SIEMPRE es el precio UNITARIO.
+        - NO multipliques matched.price por cantidad.
+        - total_price es el ÚNICO lugar donde se multiplica por cantidad.
+        - La cantidad NO modifica matched.price.
+        - La respuesta debe ser SOLO el JSON.
+
+        ======================================================
         MENÚ COMPLETO:
         {json.dumps(menu_items, ensure_ascii=False)}
 
         CLASIFICADOR:
         {json.dumps(contenido_clasificador, ensure_ascii=False)}
 
-        DEVUELVE SOLO EL JSON. 
-        SIEMPRE DEVUELVE ORDER_COMPLETE: TRUE A MENOS QUE ALGUN PRODUCTO SEA NOT_FOUND.
+        DEVUELVE SOLO EL JSON.
         """
+
     try:
         log_message(f'Prompt generado en <MapearPedidoAlMenu>: {prompt}', 'DEBUG')
         response = client.responses.create(
@@ -963,6 +963,7 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
 
 def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str) -> dict:
     try:
+        menu_str = "\n".join([f"- {item['nombre']}" for item in menu])
         PROMPT_PEDIDO_INCOMPLETO = """
             Eres la voz oficial de Sierra Nevada, La Cima del Sabor. Te llamas PAKO.
             El cliente escribió: "{mensaje_usuario}"
@@ -993,66 +994,10 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             - No agregues explicaciones fuera del JSON.
             Aquí está el menú disponible:
             {menu_str}
-            LAS HAMBURGESAS SE LLAMAN:
-            "Veggie Queso"
-            "La Insaciable"
-            "Sierra Bomba"
-            "Sierra Mulata"
-            "Sierra Pagüer"
-            "Sierra Picante"
-            "Sierra Costeña"
-            "Sierra Melao"
-            "Sierra Clasica"
-            "Camino a la cima"
-            "Sierra Queso"
-        HAY PERROS CALIENTES LLAMADOS:
-            "Super Perro"
-            "Super Chanchita"
-            "Perro Tocineta"
-        CUANDO PIDAN UN ADICIONAL EN CUALQUIER PRODUCTO, PUEDE SER UNO DE ESTOS, PUEDES USAR COINCIDENCIAS PARCIALES O APROXIMADAS PERO NADA FUERA DE AQUI:
-        	"Carne de res 120g"
-            "Cebollas caramelizadas"
-            "Cebollas caramelizadas picantes"
-            "Pepinillos agridulces"
-            "Plátano maduro frito"
-            "Suero costeño"
-            "Chicharrón"
-            "Tocineta"
-            "Queso costeño frito"
-            "Queso cheddar"
-        CUANDO PIDAN SALSAS, SOLO PUEDE SER:
-            "Salsa de tomate"
-            "Salsa mostaza"
-            "Salsa bbq"
-            "Salsa mayonesa"
-        CUANDO PIDAN BEBIDAS, SOLO PUEDE SER:
-            "Malteada de Vainilla"
-            "Malteada de Mil0"
-            "Malteada de Frutos Rojos"
-            "Malteada de Chocolate y avellanas"
-            "Malteada de Arequipe"
-            "Malteada Oblea"
-            "Malteada Galleta"
-            "Fuze tea de manzana 400 ml"
-            "Fuze tea de limón 400 ml"
-            "Fuze tea de durazno 400 ml"
-            "Kola Roman 400 ml"
-            "Quatro 400 ml"
-            "Sprite 400ml"
-            "Coca Cola Sin Azúcar 400 ml"
-            "Coca Cola Original 400 ml"
-            "Agua normal 600 ml"
-            "Agua con gas 600ml"
-            "Limonada de panela orgánica 350Ml"
-        CUANDO PIDAN ACOMPAÑAMIENTOS, SOLO PUEDE SER:
-            "Platanitos maduros"
-            "Papas Costeñas (francesas medianas + 4 deditos de queso costeño)"
-            "Costeñitos fritos + Suero Costeño"
-            "Anillos de Cebolla"
-            "Papas francesas"
+            
         TEN EN CUENTA PUEDES USAR COINCIDENCIAS PARCIALES SOLO SI ES UNA VARIANTE CLARA PERO NO INVENTAR NI REEMPLAZAR SABORES.    
             """
-        menu_str = "\n".join([f"- {item['nombre']}" for item in menu])
+        
         log_message(f'Prompt generado en <pedido_incompleto_dynamic>: {PROMPT_PEDIDO_INCOMPLETO}', 'DEBUG')
         prompt = PROMPT_PEDIDO_INCOMPLETO.format(
             mensaje_usuario=mensaje_usuario.lower(),
