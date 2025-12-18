@@ -59,7 +59,7 @@ def save_personal_data(sender: str, id_restaurante: str, tipo_doc: str, n_doc: s
         logging.error(f"save_personal_data error: {e}")
         raise
 
-def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, n_doc: str, email: str, nombre: str) -> None:
+def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, n_doc: str, email: str) -> None:
     """
     Actualiza solo los campos que traigan valor útil (no None y != "No proporcionado").
     """
@@ -75,9 +75,6 @@ def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, 
         if email and email != "No proporcionado":
             sets.append('email = %s')
             params.append(email.strip())
-        if nombre and nombre != "No proporcionado":
-            sets.append('nombre = %s')
-            params.append(nombre.strip())
 
         if not sets:
             # nada que actualizar
@@ -147,6 +144,8 @@ def validate_personal_data(sender: str, id_restaurante: str) -> bool:
         result = execute_query(query, params)
         if result and result[0]:
             datos_personales = result[0][0]
+            if datos_personales is None:
+                return False
             return bool(datos_personales)
         return False
     except Exception as e:
