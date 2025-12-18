@@ -1917,23 +1917,23 @@ def extraer_ultimo_mensaje(mensaje: str) -> str:
         log_message(f"Error en extraer_ultimo_mensaje: {e}", "ERROR")
         return ""
 
-def validar_pedido_editable(codigo_unico:str) -> bool:
-    """
-    Verifica si un pedido es editable (es_temporal = TRUE).
-    Retorna True/False.
-    """
-    try:
-        query = """
-            SELECT es_temporal
-            FROM pedidos
-            WHERE codigo_unico = %s
-            LIMIT 1;
-        """
-        res = execute_query(query, (codigo_unico,), fetchone=True)
-        if not res:
-            return False
-        es_temporal = res[0]
-        return bool(es_temporal)
-    except Exception as e:
-        log_message(f"Error en validar_pedido_editable: {e}", "ERROR")
-        return False
+# def validar_pedido_editable(codigo_unico:str) -> bool:
+#     """
+#     Verifica si un pedido es editable (es_temporal = TRUE).
+#     Retorna True/False.
+#     """
+#     try:
+#         query = """
+#             SELECT es_temporal
+#             FROM pedidos
+#             WHERE codigo_unico = %s
+#             LIMIT 1;
+#         """
+#         res = execute_query(query, (codigo_unico,), fetchone=True)
+#         if not res:
+#             return False
+#         es_temporal = res[0]
+#         return bool(es_temporal)
+#     except Exception as e:
+#         log_message(f"Error en validar_pedido_editable: {e}", "ERROR")
+#         return False

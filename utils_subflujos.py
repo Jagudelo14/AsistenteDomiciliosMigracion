@@ -12,7 +12,6 @@ from utils_registration import validate_direction_first_time
 
 # --- IMPORTS INTERNOS --- #
 from utils import (
-    validar_pedido_editable,
     extraer_ultimo_mensaje,
     marcar_estemporal_true_en_pedidos,
     obtener_direccion,
@@ -40,6 +39,7 @@ from utils import (
     send_text_response,
     obtener_intencion_futura,
     borrar_intencion_futura,
+    normalizar_especificaciones
 )
 from utils_chatgpt import actualizar_pedido_con_mensaje, clasificador_consulta_menu,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion,extraer_info_personal
 from utils_database import execute_query, execute_query_columns
@@ -575,78 +575,144 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
     try:
         # Verificar si existen pedidos pendientes
         query_pendientes = """
-        select count(*) from pedidos as p inner join clientes_whatsapp as cw
-        on p.id_whatsapp = cw.id_whatsapp 
-        where telefono = %s and estado = 'pendiente'
+                SELECT d.id_pedido,i.nombre,d.cantidad,i.precio,d.total,d.especificaciones, p.codigo_unico
+                    FROM detalle_pedido d
+                    INNER JOIN pedidos p 
+                        ON d.id_pedido = p.idpedido
+                    INNER JOIN items i 
+                        ON i.iditem = d.id_producto
+                    WHERE p.codigo_unico = (
+                        SELECT p2.codigo_unico
+                        FROM pedidos p2
+                        INNER JOIN clientes_whatsapp cw 
+                            ON p2.id_whatsapp = cw.id_whatsapp
+                        WHERE cw.telefono = %s and p.estado = 'pendiente' and p.es_temporal = true
+                        ORDER BY p2.idpedido DESC
+                        LIMIT 1
+                    );
         """
-        result = execute_query(query_pendientes, (sender,), fetchone=True)
-        count = result[0] if result else 0
-        codigo_unico = None
-        if count > 0 and validar_pedido_editable(codigo_unico):
+        result = execute_query(query_pendientes, (sender,))
+        codigo_unico = result[0][6] if result else 0
+        if codigo_unico != 0:
+            id_pedido = result[0][0] 
+            items_menu: list = obtener_menu()
+            txtSolicitud = extraer_ultimo_mensaje(pregunta_usuario)
+            productos = mapear_pedido_al_menu(txtSolicitud, items_menu, model="gpt-5.1")
+            if productos.get("order_complete", False) is False:
+                log_message(f"Modificación de pedido incompleta para {sender}.", "INFO")
+                no_completo: dict = pedido_incompleto_dynamic(txtSolicitud, items_menu, str(productos))
+                send_text_response(sender, no_completo.get("mensaje"))
+                guardar_intencion_futura(sender, "confirmacion_modificacion_pedido", codigo_unico, str(productos), pregunta_usuario)
+                return
+            else:
+                intent = productos["intent"]
+                log_message(f'Modificación de pedido detectada: {productos} con la intención {intent}' , 'INFO')
+                # Procesar modificaciones según la intención detectada  
+                match intent:
+                    case "ADD_ITEM":
+                        for item in productos.get("items", []):
+                            query = """SELECT id_detalle, cantidad
+                                        FROM detalle_pedido
+                                        WHERE id_pedido = %s AND id_producto = %s"""
+                            params = ( id_pedido, item.get("matched").get("id"))
+                            res_detalle = execute_query(query, params, fetchone=True)
+                            if res_detalle:
+                                especificaciones_txt = normalizar_especificaciones(item)
+                                id_detalle, cantidad_actual = res_detalle
+                                nueva_cantidad = cantidad_actual + item.get("cantidad", 1)
+                                query = """ UPDATE detalle_pedido SET cantidad = %s, total = %s ,especificaciones = CASE
+                                            WHEN %s IS NULL OR %s = '' THEN especificaciones
+                                            ELSE %s 
+                                            END
+                                            WHERE id_detalle = %s"""
+                                params = ( nueva_cantidad, (item.get("matched").get("price") * nueva_cantidad), especificaciones_txt,especificaciones_txt,especificaciones_txt, id_detalle )
+                                res_detalle = execute_query(query, params)
+                            else:     
+                                especificaciones_txt = normalizar_especificaciones(item)           
+                                query = """ INSERT INTO detalle_pedido ( id_producto,id_pedido, cantidad, total, especificaciones) VALUES (%s, %s, %s, %s, %s)"""
+                                params = (item.get("matched").get("id"), id_pedido, item.get("cantidad"), (item.get("matched").get("price") * item.get("cantidad", 1)), especificaciones_txt )
+                                res_detalle = execute_query(query, params)                    
+                    case "REMOVE_ITEM":
+                        for item in productos.get("items", []):
+                            query = """SELECT id_detalle, cantidad
+                                        FROM detalle_pedido
+                                        WHERE id_pedido = %s AND id_producto = %s"""
+                            params = ( id_pedido, item.get("matched").get("id"))
+                            res_detalle = execute_query(query, params, fetchone=True)
+                            if res_detalle:
+                                id_detalle, cantidad_actual = res_detalle
+                                nueva_cantidad = cantidad_actual - item.get("cantidad", 1)
+                                especificaciones_txt = normalizar_especificaciones(item) 
+                                if nueva_cantidad > 0:
+                                    query = """ UPDATE detalle_pedido SET cantidad = %s, total = %s, especificaciones = CASE
+                                                WHEN %s IS NULL OR %s = '' THEN especificaciones
+                                                ELSE %s END
+                                                WHERE id_detalle = %s"""
+                                    params = ( nueva_cantidad, (item.get("matched").get("price") * nueva_cantidad),especificaciones_txt,especificaciones_txt,especificaciones_txt, id_detalle)
+                                    res_detalle = execute_query(query, params)
+                                else:
+                                    query = """ DELETE FROM detalle_pedido WHERE id_pedido = %s AND id_producto = %s"""
+                                    params = ( id_pedido, item.get("matched").get("id"))
+                                    res_detalle = execute_query(query, params)
+                    case "REPLACE_ITEM":
+                        for item in productos.get("items", []):            
+                            cambio = item.get("note")
+                            query = """SELECT id_detalle, cantidad
+                                        FROM detalle_pedido
+                                        WHERE id_pedido = %s AND id_producto = %s"""
+                            params = ( id_pedido, item.get("matched").get("id"))
+                            res_detalle = execute_query(query, params, fetchone=True)  
+                            if cambio == "Producto de reemplazo":
+                                if res_detalle:
+                                    especificaciones_txt = normalizar_especificaciones(item)
+                                    id_detalle, cantidad_actual = res_detalle
+                                    nueva_cantidad = cantidad_actual + item.get("cantidad", 1)
+                                    query = """ UPDATE detalle_pedido SET cantidad = %s, total = %s ,especificaciones = CASE
+                                                WHEN %s IS NULL OR %s = '' THEN especificaciones
+                                                ELSE %s 
+                                                END
+                                                WHERE id_detalle = %s"""
+                                    params = ( nueva_cantidad, (item.get("matched").get("price") * nueva_cantidad), especificaciones_txt,especificaciones_txt,especificaciones_txt, id_detalle )
+                                    res_detalle = execute_query(query, params)
+                                else:     
+                                    especificaciones_txt = normalizar_especificaciones(item)           
+                                    query = """ INSERT INTO detalle_pedido ( id_producto,id_pedido, cantidad, total, especificaciones) VALUES (%s, %s, %s, %s, %s)"""
+                                    params = (item.get("matched").get("id"), id_pedido, item.get("cantidad"), (item.get("matched").get("price") * item.get("cantidad", 1)), especificaciones_txt )
+                                    res_detalle = execute_query(query, params)
+                            elif cambio == "Producto a reemplazar":
+                                if res_detalle:
+                                    id_detalle, cantidad_actual = res_detalle
+                                    nueva_cantidad = cantidad_actual - item.get("cantidad", 1)
+                                    especificaciones_txt = normalizar_especificaciones(item) 
+                                    if nueva_cantidad > 0:
+                                        query = """ UPDATE detalle_pedido SET cantidad = %s, total = %s, especificaciones = CASE
+                                                    WHEN %s IS NULL OR %s = '' THEN especificaciones
+                                                    ELSE %s END
+                                                    WHERE id_detalle = %s"""
+                                        params = ( nueva_cantidad, (item.get("matched").get("price") * nueva_cantidad),especificaciones_txt,especificaciones_txt,especificaciones_txt, id_detalle)
+                                        res_detalle = execute_query(query, params)
+                                    else:
+                                        query = """ DELETE FROM detalle_pedido WHERE id_pedido = %s AND id_producto = %s"""
+                                        params = ( id_pedido, item.get("matched").get("id"))
+                                        res_detalle = execute_query(query, params) 
+
+                log_message(f'Pedido modificado correctamente: {id_pedido} para {sender}.', 'INFO')
+                query_actualizar_total = """update pedidos set total_productos = 
+                                            (select sum(total) from detalle_pedido		
+                                            where id_pedido = %s)
+                                            where idpedido = %s """
+                execute_query(query_actualizar_total, (id_pedido, id_pedido))
+                result = execute_query(query_pendientes, (sender,))
+
+                texto = generar_mensaje_confirmacion_modificacion_pedido(result)
+
+                send_text_response(sender,texto.get("mensaje"))
+                return
+        else:
             send_text_response(sender, "los sentimos, Tu pedido ya fue creado, se envía al administrador para que verifique si se puede modificar o no, en un momento el admin se comunicara contigo.")
             numero_admin = os.getenv("NUMERO_ADMIN")
             send_text_response(numero_admin, f"El usuario {nombre_cliente} ({sender}) quiere modificar su pedido. Verificar si se puede modificar.")
             return
-        else:
-            send_text_response(sender, "Lo siento, pero no tienes un pedido activo para modificar. Por favor, realiza un nuevo pedido.")
-            return
-
-        # bandera_promocion: bool = False
-        # items_menu: list = obtener_menu()
-        # pedido_dict: dict = {}
-        # #pedido_anterior = obtener_intencion_futura_mensaje_chatbot(sender)
-        # nuevos_elementos: str = pregunta_usuario
-        # query = """SELECT d.*
-        #                 FROM detalle_pedido d
-        #                 INNER JOIN pedidos p
-        #                     ON d.id_pedido = p.idpedido
-        #                 WHERE p.codigo_unico = (
-        #                     SELECT p2.codigo_unico
-        #                     FROM pedidos p2
-        #                     INNER JOIN clientes_whatsapp cw
-        #                         ON p2.id_whatsapp = cw.id_whatsapp
-        #                     WHERE cw.telefono = %s
-        #                     ORDER BY p2.idpedido DESC
-        #                     LIMIT 1
-        #                 );"""
-        # pedido_anterior = execute_query(query, (sender,))
-        # #eliminar_pedido(sender, codigo_unico_anterior)
-        # pedido_dict = actualizar_pedido_con_mensaje_modificacion(pedido_anterior, items_menu, nuevos_elementos)
-        # if not pedido_dict.get("order_complete", False):
-        #     no_completo: dict = pedido_incompleto_dynamic(pregunta_usuario, items_menu, str(pedido_dict))
-        #     send_text_response(sender, no_completo.get("mensaje"))
-        #     guardar_intencion_futura(sender, "continuacion_pedido", str(pedido_dict), no_completo.get("mensaje"), pregunta_usuario)
-        #     return
-        # pedido_info = guardar_pedido_completo(sender, pedido_dict, es_temporal=True)
-        # if not pedido_info or not isinstance(pedido_info, dict) or "idpedido" not in pedido_info:
-        #     log_message(f'No se pudo crear el pedido para {sender}. pedido_info={pedido_info}', 'ERROR')
-        #     send_text_response(sender, "Lo siento, no pude guardar tu pedido. Por favor inténtalo de nuevo más tarde.")
-        #     return
-        # #items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict, sender)
-        # info_promociones = None
-        # eleccion_promocion = None
-        # if obtener_intencion_futura(sender) == "continuacion_promocion":
-        #     info_promociones = obtener_intencion_futura_observaciones(sender)
-        #     respuesta_previa_promocion = obtener_intencion_futura_mensaje_chatbot(sender)
-        #     eleccion_promocion = interpretar_eleccion_promocion(pregunta_usuario, info_promociones, respuesta_previa_promocion, pedido_dict)
-        #     send_text_response(sender, f"Elección de promoción interpretada: {str(eleccion_promocion)}")
-        #     if eleccion_promocion.get("valida_promocion"):
-        #         actualizar_total_productos(sender, pedido_info['codigo_unico'], float(eleccion_promocion.get("total_final", pedido_info.get("total_productos", 0.0))))
-        #         bandera_promocion = True
-        #     else:
-        #         no_completo: dict = pedido_incompleto_dynamic_promocion(pregunta_usuario, items_menu, str(pedido_dict))
-        #         send_text_response(sender, no_completo.get("mensaje"))
-        #         return
-        # confirmacion_modificacion_pedido: dict = generar_mensaje_confirmacion_modificacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
-        # send_text_response(sender, confirmacion_modificacion_pedido.get("mensaje"))
-        # #confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
-        # #send_text_response(sender, confirmacion_pedido.get("mensaje"))
-        # datos_promocion = {
-        #     "info_promociones": info_promociones,
-        #     "eleccion_promocion": eleccion_promocion,
-        #     "bandera_promocion": bandera_promocion
-        # }
-        # guardar_intencion_futura(sender, "confirmacion_modificacion_pedido", pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario, datos_promocion)
     except Exception as e:
         log_message(f'Error en <SubflujoModificacionPedido>: {e}.', 'ERROR')
         raise e
