@@ -1195,7 +1195,7 @@ def actualizar_medio_pago(sender: str, codigo_unico: str, metodo_pago: str) -> d
             SET metodo_pago = %s
             WHERE codigo_unico = %s
               AND id_whatsapp = %s
-            RETURNING idpedido, producto;
+            RETURNING idpedido;
         """
         params = (metodo_pago, codigo_unico, id_whatsapp)
         res = execute_query(query, params, fetchone=True)
@@ -1203,7 +1203,6 @@ def actualizar_medio_pago(sender: str, codigo_unico: str, metodo_pago: str) -> d
             return {
                 "actualizado": True,
                 "idpedido": res[0],
-                "producto": res[1],
                 "codigo_unico": codigo_unico
             }
         else:
