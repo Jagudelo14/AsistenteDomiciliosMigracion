@@ -8,7 +8,7 @@ from typing import Any, List, Optional, Tuple, Dict
 import os
 import json
 import ast
-from utils import REPLACE_PHRASES, _apply_direct_selection_from_text, obtener_pedido_por_codigo, send_text_response, limpiar_respuesta_json, log_message, _safe_parse_order, _merge_items, _price_of_item, convert_decimals, to_json_safe,corregir_total_price_en_result, obtener_ordenes_por_idpedido, insertar_orden, recalcular_y_actualizar_pedido, match_item_to_menu
+from utils import REPLACE_PHRASES, _apply_direct_selection_from_text, obtener_pedido_por_codigo, send_text_response, limpiar_respuesta_json, log_message, _safe_parse_order, _merge_items, _price_of_item, convert_decimals, to_json_safe,corregir_total_price_en_result
 from utils_database import execute_query
 from datetime import datetime, date
 
@@ -111,11 +111,12 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - Si el usuario solo dice "sí" o "no" sin contexto, clasifícalo como confirmación_general o negación_general respectivamente.
             - Si el usuario pide hablar con un asesor, persona, humano, gerente, administrador, supervisor, encargado, responsable, operador, agente, representante o similar, clasifícalo como transferencia.
             - Si el usuario pide ayuda o soporte, clasifícalo como transferencia.
-
+            - Si hay información personal antes de clasificarlo revisa el contexto de los mensajes anteriores si es el correo el documento y el numero del documento es si o si validación_pago
+            
             Reglas IMPORTANTES:
             - DEBES analizar y clasificar ÚNICAMENTE el ÚLTIMO mensaje enviado por el USUARIO.
-            -Todos los mensajes anteriores son SOLO CONTEXTO y NO deben usarse para inferir intención, pedido o entidades.
-            -Nunca clasifiques mensajes del asistente.
+            - Todos los mensajes anteriores son SOLO CONTEXTO y NO deben usarse para inferir intención, pedido o entidades.
+            - Nunca clasifiques mensajes del asistente pero si es contexto importante para la decisión final.
             """
 
         messages = [
@@ -1374,25 +1375,37 @@ def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedi
 # """
         PROMPT_MEDIOS_PAGO = f"""
 Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
-Te llamas PAKO.
+Tu nombre es PAKO.
 
 El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
-Este es el pedido que hizo:
+Pedido realizado:
 "{pedido_str}"
 
-TAREA:
-- Haz un comentario alegre y sabroso sobre el pedido.
-- Estilo: cálido, entusiasta.
-- 1 o 2 frases máximo.
-- Luego pídele elegir medio de pago aclara que por el momento ambas son contraentrega.
-- Menciona el local: {nombre_local}
-- Lista opciones disponibles:
-  * Efectivo
-  * Datafono
+OBJETIVO:
+Generar un ÚNICO mensaje breve, cálido y entusiasta.
 
-Debe responder estrictamente un JSON con el campo:
+INSTRUCCIONES OBLIGATORIAS:
+- Haz un comentario alegre y sabroso sobre el pedido.
+- Pide al cliente que elija un método de pago.
+- Menciona únicamente estas opciones de pago:
+  * Efectivo
+  * Datáfono
+- Solicita los datos personales listados abajo.
+- La solicitud de datos DEBE tener EXACTAMENTE esta estructura y este orden,
+  sin agregar texto intermedio ni variaciones:
+
+-Metodo de pago
+-Documento
+-Tipo de documento
+-Correo electronico
+
+FORMATO DE RESPUESTA:
+- Responde ÚNICA Y EXCLUSIVAMENTE con un JSON válido.
+- No agregues texto antes ni después del JSON.
+
+Estructura final:
 {{
-   "mensaje": "texto aquí"
+  "mensaje": "texto aquí"
 }}
 """
         client = OpenAI()
@@ -1404,8 +1417,9 @@ Debe responder estrictamente un JSON con el campo:
                 {"role": "user", "content": PROMPT_MEDIOS_PAGO}
             ]
         )
-
+    
         raw_text = response.choices[0].message.content
+        log_message(f"Respuesta cruda:{raw_text}","INFO")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] solicitar_medio_pago tokens_used={tokens_used}", "DEBUG")

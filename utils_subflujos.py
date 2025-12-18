@@ -451,24 +451,43 @@ def subflujo_promociones(sender: str, nombre_cliente: str, pregunta_usuario: str
 def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str) -> None:
     try:
         """Maneja la selección del modo de pago por parte del usuario."""
+        mensaje=extraer_ultimo_mensaje(respuesta_usuario)
+        if not validate_personal_data(sender,os.environ.get("ID_RESTAURANTE", "5")):
+            datos = extraer_info_personal(mensaje)
+            # datos es dict con keys: tipo_documento, numero_documento, email
+            tipo_doc = datos.get("tipo_documento")
+            n_doc = datos.get("numero_documento")
+            email = datos.get("email")
+            # Guardar solo los campos que traigan información útil
+            try:
+                save_personal_data_partial(sender, os.environ.get("ID_RESTAURANTE", "5"), tipo_doc, n_doc, email)
+            except Exception as e:
+                logging.error(f"Error guardando datos parciales: {e}")
+                log_message(f"Error guardando datos parciales: {e}", "ERROR")
+                send_text_response(sender, ", ocurrió un error al guardar tus datos. Enviamelos de nuevo escritos de otra manera por favor")
+                return 
+            # Verificar si ahora la fila tiene los 4 campos completos
+            missing = check_and_mark_datos_personales(sender, os.environ.get("ID_RESTAURANTE", "5"))
+            if missing:
+                # mapear nombres amigables
+                friendly = {"Tipo_Doc": "tipo de documento", "N_Doc": "número de documento", "email": "correo electrónico"}
+                faltantes = ", ".join(friendly.get(m, m) for m in missing)
+                send_text_response(sender, f"aún faltan los siguientes datos: {faltantes}. Por favor envíalos para continuar.")
+                return 
         codigo_unico: str = obtener_intencion_futura_observaciones(sender)
-        medio_pago_real: str = mapear_modo_pago(respuesta_usuario)
-        #datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
+        medio_pago_real: str = mapear_modo_pago(mensaje)
+        datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
+        dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
+        tiempo= dict_registro_temp.get("tiempo_estimado", "N/A")
+        total_productos = dict_registro_temp.get("total_final", "N/A")
+        #total_domicilios = dict_registro_temp.get("total_domicilio", "N/A")
         if medio_pago_real =="efectivo":
-            dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
-            tiempo= dict_registro_temp.get("tiempo_estimado", "N/A")
-            total_productos = dict_registro_temp.get("total_final", "N/A")
-            #total_domicilios = dict_registro_temp.get("total_domicilio", "N/A")
             mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
             return
         elif medio_pago_real == "datafono":
-            dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
-            tiempo= dict_registro_temp.get("tiempo_estimado", "N/A")
-            total_productos = dict_registro_temp.get("total_final", "N/A")
-            #total_domicilios = dict_registro_temp.get("total_domicilio", "N/A")
             mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar con tarjeta (datafono) al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es  de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
@@ -476,72 +495,12 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
             return
         elif medio_pago_real == "tarjeta":
             try:
-                if validate_personal_data(sender, os.environ["ID_RESTAURANTE"]) is False:
-                    mensaje=extraer_ultimo_mensaje(sender)
-                    datos = extraer_info_personal(mensaje)
-                    # datos es dict con keys: tipo_documento, numero_documento, email
-                    tipo_doc = datos.get("tipo_documento")
-                    n_doc = datos.get("numero_documento")
-                    email = datos.get("email")
-                    # Guardar solo los campos que traigan información útil
-                    try:
-                        save_personal_data_partial(sender, os.environ["ID_RESTAURANTE"], tipo_doc, n_doc, email)
-                    except Exception as e:
-                        logging.error(f"Error guardando datos parciales: {e}")
-                        log_message(f"Error guardando datos parciales: {e}", "ERROR")
-                        send_text_response(sender, ", ocurrió un error al guardar tus datos. Intenta de nuevo.")
-                        return 
-                    # Verificar si ahora la fila tiene los 4 campos completos
-                    missing = check_and_mark_datos_personales(sender, os.environ["ID_RESTAURANTE"])
-                    if not missing:
-                        logging.info("Datos personales completos y marcados.")
-                        log_message("Datos personales completos y marcados.", "INFO")
-                        send_text_response(sender, "Voy a generar tu link de pago ahora mismo.")
-                    else:
-                        # mapear nombres amigables
-                        friendly = {"Tipo_Doc": "tipo de documento", "N_Doc": "número de documento", "email": "correo electrónico", "nombre": "nombre completo"}
-                        faltantes = ", ".join(friendly.get(m, m) for m in missing)
-                        send_text_response(sender, f"aún faltan los siguientes datos: {faltantes}. Por favor envíalos para continuar.")
-                        return 
-                # Obtener el monto total del pedido
-                query = """
-                    SELECT total_productos
-                    FROM public.pedidos
-                    WHERE codigo_unico = %s;"""
-                params = (codigo_unico,)
-                # Pedimos también las columnas para mapear filas a dicts si es necesario
-                result = execute_query_columns(query, params, fetchone=False, return_columns=True)
-                if isinstance(result, tuple) and len(result) == 2:
-                    data, cols = result
-                else:
-                    data = result
-                    cols = None
-
-                if not data:
-                    send_text_response(sender, "Lo siento nuestra plataforma de pagos esta fallando, por favor intenta más tarde o elige otro medio de pago.")
-                    return
-
-                first_row = data[0]
-                if isinstance(first_row, dict):
-                    monto_raw = first_row.get('total_productos')
-                elif cols:
-                    row = dict(zip(cols, first_row))
-                    monto_raw = row.get('total_productos')
-                else:
-                    # fallback: tomar la primera columna
-                    monto_raw = first_row[0] if isinstance(first_row, (list, tuple)) and len(first_row) > 0 else first_row
-
-                try:
-                    monto = int(round(float(monto_raw))) if monto_raw is not None else 0
-                except Exception:
-                    monto = 0
-
+                monto = float(total_productos)  # por ejemplo 31900.0
                 log_message(f"[SubflujoMedioPago] Generando link de pago para {sender} por monto {monto}.", "INFO")
-                monto = float(monto_raw)            # por ejemplo 31900.0
                 monto_cents = int(round(monto * 100))  # 3190000
                 pago = generar_link_pago(monto_cents,sender)
                 if pago is None:
-                    send_text_response(sender, "No fue posible generar el link de pago ahora mismo. Intenta más tarde o elige otro medio.")
+                    send_text_response(sender, "No fue posible generar el link de pago ahora mismo.elige otro medio.")
                     return
                 form_url, order_id = pago
                 # Guardar referencia del pago en la BD (si falla, informar pero continuar)
