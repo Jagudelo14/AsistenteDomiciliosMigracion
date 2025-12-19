@@ -4,31 +4,44 @@
 import os
 import psycopg2
 from psycopg2.extensions import connection, cursor
+from psycopg2.pool import ThreadedConnectionPool
 import logging
 import time
+_pool = None
+
 def connect_database() -> connection:
+    """
+    Devuelve una conexión a la base de datos usando un pool global ThreadedConnectionPool.
+    Si el pool no está inicializado, lo crea con parámetros de entorno.
+    """
+    global _pool
     try:
-        """Establece una conexión a la base de datos PostgreSQL usando variables de entorno."""
         dbname: str = os.getenv("DB_NAME", "")
         user: str = os.getenv("DB_USER", "")
         password: str = os.getenv("DB_PASSWORD", "")
         host: str = os.getenv("DB_HOST", "")
         port: str = os.getenv("DB_PORT", "5432")
+        minconn = 1
+        maxconn = 20
         if not all([dbname, user, password, host]):
             raise ValueError("Faltan variables de entorno para la conexión a la base de datos.")
-        conn: connection = psycopg2.connect(
-            dbname=dbname,
-            user=user,
-            password=password,
-            host=host,
-            port=port,
-            sslmode='require'
-        )
-        cur: cursor = conn.cursor()
-        cur.close()
+        if _pool is None:
+            _pool = ThreadedConnectionPool(
+                minconn,
+                maxconn,
+                dbname=dbname,
+                user=user,
+                password=password,
+                host=host,
+                port=port,
+                sslmode='require'
+            )
+        conn: connection = _pool.getconn()
+        if conn is None:
+            raise Exception("No se pudo obtener conexión del pool.")
         return conn
     except Exception as e:
-        logging.error(f"Error al conectar a la base de datos: {e}")
+        logging.error(f"Error al conectar a la base de datos (pool): {e}")
         raise
 
 def execute_query(query: str, params: tuple = (), fetchone: bool = False):
@@ -36,6 +49,7 @@ def execute_query(query: str, params: tuple = (), fetchone: bool = False):
     last_exc = None
     if params is None:
         params = ()
+    global _pool
     try:
         for attempt in range(1, attempts + 1):
             conn: connection = None
@@ -61,7 +75,10 @@ def execute_query(query: str, params: tuple = (), fetchone: bool = False):
                     pass
                 try:
                     if conn:
-                        conn.close()
+                        if _pool is not None:
+                            _pool.putconn(conn)
+                        else:
+                            conn.close()
                 except Exception:
                     pass
                 sleep_time = 2 ** attempt
@@ -78,11 +95,17 @@ def execute_query(query: str, params: tuple = (), fetchone: bool = False):
             pass
         try:
             if conn and not conn.closed:
-                conn.close()
+                if _pool is not None:
+                    _pool.putconn(conn)
+                else:
+                    conn.close()
         except Exception:
             pass
 
 def execute_query_columns(query: str, params: tuple = (), fetchone: bool = False, return_columns: bool = False):
+    global _pool
+    conn = None
+    cur = None
     try:
         conn = connect_database()
         cur = conn.cursor()
@@ -103,3 +126,17 @@ def execute_query_columns(query: str, params: tuple = (), fetchone: bool = False
     except Exception as e:
         logging.error(f"Error en execute_query: {e}")
         raise e
+    finally:
+        try:
+            if cur and not cur.closed:
+                cur.close()
+        except Exception:
+            pass
+        try:
+            if conn and not conn.closed:
+                if _pool is not None:
+                    _pool.putconn(conn)
+                else:
+                    conn.close()
+        except Exception:
+            pass

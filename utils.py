@@ -618,6 +618,9 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
             especificaciones_txt = normalizar_especificaciones(item)
             query = """ INSERT INTO detalle_pedido ( id_producto,id_pedido, cantidad, total, especificaciones) VALUES (%s, %s, %s, %s, %s)"""
             params = (item.get("matched").get("id"), res[0], item.get("cantidad"), (item.get("matched").get("price") * item.get("cantidad", 1)), especificaciones_txt )
+            id=item.get("matched").get("id")
+            if id == '' or id is None:
+                continue  # saltar items sin id_producto válido
             res_detalle = execute_query(query, params)
         log_message(f'Detalle de pedido guardado para pedido ID {res[0]}', 'INFO')  
         return {
@@ -1916,23 +1919,53 @@ def extraer_ultimo_mensaje(mensaje: str) -> str:
         log_message(f"Error en extraer_ultimo_mensaje: {e}", "ERROR")
         return ""
 
-# def validar_pedido_editable(codigo_unico:str) -> bool:
-#     """
-#     Verifica si un pedido es editable (es_temporal = TRUE).
-#     Retorna True/False.
-#     """
-#     try:
-#         query = """
-#             SELECT es_temporal
-#             FROM pedidos
-#             WHERE codigo_unico = %s
-#             LIMIT 1;
-#         """
-#         res = execute_query(query, (codigo_unico,), fetchone=True)
-#         if not res:
-#             return False
-#         es_temporal = res[0]
-#         return bool(es_temporal)
-#     except Exception as e:
-#         log_message(f"Error en validar_pedido_editable: {e}", "ERROR")
-#         return False
+def obtener_dos_mensajes(telefono: str) -> str:
+    query = """
+    SELECT mensaje
+    FROM conversaciones,
+         jsonb_array_elements(conversacion->'mensajes') WITH ORDINALITY AS m(mensaje, idx)
+    WHERE telefono = %s
+    ORDER BY idx DESC
+    LIMIT %s;
+    """
+
+    mensajes  = execute_query(query, (telefono, 2))
+    mensajes = list(reversed(mensajes))
+
+    return str(mensajes)
+
+def actualizar_medio_entrega(sender: str, codigo_unico: str, metodo_entrega: str) -> dict:
+    try:
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
+        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        id_whatsapp = res_idw[0] if res_idw else None
+
+        if id_whatsapp is None:
+            return {
+                "actualizado": False,
+                "msg": "No existe id_whatsapp para este número."
+            }
+        query = """
+            UPDATE pedidos
+            SET metodo_entrega = %s
+            WHERE codigo_unico = %s
+              AND id_whatsapp = %s
+            RETURNING idpedido;
+        """
+        params = (metodo_entrega, codigo_unico, id_whatsapp)
+        res = execute_query(query, params, fetchone=True)
+        if res:
+            return {
+                "actualizado": True,
+                "idpedido": res[0],
+                "codigo_unico": codigo_unico
+            }
+        else:
+            return {
+                "actualizado": False,
+                "msg": "No se encontró un pedido temporal con ese código y ese id_whatsapp."
+            }
+    except Exception as e:
+        log_message(f'Error en <MarcarPedidoComoDefinitivo>: {e}', 'ERROR')
+        logging.error(f'Error en marcar_pedido_como_definitivo: {e}')
+        return {"actualizado": False, "error": str(e)}

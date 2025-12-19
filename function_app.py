@@ -1,12 +1,12 @@
 # function_app.py
 # Last modified: 2025-09-30 by Andrés Bermúdez
-#salida a prod 17 diciembre 2025 8 de la mañana
+#a15:50 activar validacion
 import azure.functions as func
 from datetime import datetime
 import logging
 import os
 import json
-from utils import obtener_datos_cliente_por_telefono, send_text_response,  log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion,verify_hour_atettion,validate_duplicated_message
+from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion,verify_hour_atettion,validate_duplicated_message
 from utils_chatgpt import get_classifier, get_openai_key,get_direction,get_name
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign
@@ -71,9 +71,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         #Validación mensaje duplicado###################################
-        # if validate_duplicated_message(message_id):
-        #      logging.info(f"Mensaje duplicado: {message_id}")
-        #      return func.HttpResponse("Mensaje duplicado", status_code=200)
+        #if validate_duplicated_message(message_id):
+        #     logging.info(f"Mensaje duplicado: {message_id}")
+        #     return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
@@ -203,7 +203,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     nombre=get_name(text)
                     booleano_dir: bool = True
                     if direccion and not validate_direction_first_time(sender, ID_RESTAURANTE):
-                        send_text_response(sender, "Gracias , voy a validar que estes en nuestra cobertura dame un par de minutos.")
+                        #send_text_response(sender, "Gracias , voy a validar que estes en nuestra cobertura dame un par de minutos.")
                         logging.info(f"Usuario {sender} proporcionó una dirección.")
                         log_message(f"Usuario {sender} proporcionó una dirección.", "INFO")
                         geocode_and_assign(sender, direccion, ID_RESTAURANTE)
@@ -234,7 +234,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     if booleano_dir is False:
                         send_text_response(sender, "No estas dentro de nuestra area de operación, puedes hacer tu pedido para recoger en tienda")
                     if validate_direction_first_time(sender, ID_RESTAURANTE) and validate_nombre_bool(sender, ID_RESTAURANTE):
-                        send_text_response(sender,"¡Gracias por la información! 😊 ¿Te gustaría ver el menú o ya sabes qué pedir?")
+                        send_text_response(sender,"¡Gracias por la información! 😊 Bienvenido a sierra nevada la cima del sabor")
+                        send_pdf_response(sender)                 
                     return func.HttpResponse("EVENT_RECEIVED", status_code=200)
                 text = obtener_contexto_conversacion(sender)
                 log_message(f"Contexto de conversación obtenido: {text}", "INFO")
