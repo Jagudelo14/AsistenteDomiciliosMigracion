@@ -12,6 +12,8 @@ from utils_registration import validate_direction_first_time
 
 # --- IMPORTS INTERNOS --- #
 from utils import (
+    actualizar_medio_entrega,
+    actualizar_medio_pago,
     extraer_ultimo_mensaje,
     marcar_estemporal_true_en_pedidos,
     obtener_direccion,
@@ -41,8 +43,8 @@ from utils import (
     borrar_intencion_futura,
     normalizar_especificaciones
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, clasificador_consulta_menu,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion,extraer_info_personal
-from utils_database import execute_query, execute_query_columns
+from utils_chatgpt import actualizar_pedido_con_mensaje, clasificador_consulta_menu,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion,extraer_info_personal,clasificar_confirmación_general
+from utils_database import execute_query
 from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
 from utils_registration import     validate_personal_data,save_personal_data_partial,check_and_mark_datos_personales
@@ -155,14 +157,13 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
                         log_message(f"[SubflujoSolicitudPedido] Quick-match aplicado: {qty}x {match['name']} -> pedido auto-completado", "INFO")
             except Exception:
                 logging.exception("Quick-match fallo; continúa flujo normal")
-        
+        pedido_info = guardar_pedido_completo(sender, pedido_dict, es_temporal=True)   
         if not pedido_dict.get("order_complete", False):
             log_message(f"153Pedido incompleto para {sender}.", "INFO")
             no_completo: dict = pedido_incompleto_dynamic(pregunta_usuario, items_menu, str(pedido_dict))
             send_text_response(sender, no_completo.get("mensaje"))
             guardar_intencion_futura(sender, "continuacion_pedido", str(pedido_dict), no_completo.get("mensaje"), pregunta_usuario)
             return
-        pedido_info = guardar_pedido_completo(sender, pedido_dict, es_temporal=True)
         if not pedido_info or not isinstance(pedido_info, dict) or "idpedido" not in pedido_info:
             log_message(f'No se pudo crear el pedido para {sender}. pedido_info={pedido_info}', 'ERROR')
             send_text_response(sender, "Lo siento, no pude guardar tu pedido. Por favor inténtalo de nuevo más tarde.")
@@ -181,7 +182,7 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
                 no_completo: dict = pedido_incompleto_dynamic_promocion(pregunta_usuario, items_menu, str(pedido_dict))
                 send_text_response(sender, no_completo.get("mensaje"))
                 return
-        confirmacion_modificacion_pedido: dict = generar_mensaje_confirmacion_modificacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
+        confirmacion_modificacion_pedido: dict = generar_mensaje_confirmacion_modificacion_pedido(pedido_dict,items_menu, bandera_promocion, info_promociones, eleccion_promocion)
         send_text_response(sender, confirmacion_modificacion_pedido.get("mensaje"))
         #confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
         #send_text_response(sender, confirmacion_pedido.get("mensaje"))
@@ -204,8 +205,15 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
 def subflujo_confirmacion_general(sender: str, respuesta_cliente: str) -> Dict[str, Any]:
     """Maneja el caso en que no se detecta una intención específica, con ayuda de IA."""
     try:
-
-        anterior_intencion = obtener_intencion_futura(sender)
+        items = obtener_menu()
+        intencion = clasificar_confirmación_general(respuesta_cliente,items)
+        if intencion == "solicitud_pedido":
+            pass
+        elif intencion == "confirmar_direccion":
+            pass
+        elif intencion == "sin_intencion":
+            pass
+    
         if anterior_intencion is None:
             send_text_response(sender, "No tengo una acción pendiente. ¿En qué más puedo ayudarte?")
             return {
@@ -552,6 +560,10 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
         """
         result = execute_query(query_pendientes, (sender,))
         codigo_unico = result[0][6] if result else 0
+
+        if result is None:
+            send_text_response(sender, f"{nombre_cliente}, no tengo un pedido pendiente tuyo para modificar. ¿Quieres hacer un nuevo pedido?")
+            return
         if codigo_unico != 0:
             id_pedido = result[0][0] 
             items_menu: list = obtener_menu()
@@ -662,15 +674,15 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
                                             where idpedido = %s """
                 execute_query(query_actualizar_total, (id_pedido, id_pedido))
                 result = execute_query(query_pendientes, (sender,))
-
-                texto = generar_mensaje_confirmacion_modificacion_pedido(result)
-
+                items_menu: list = obtener_menu()
+                texto = generar_mensaje_confirmacion_modificacion_pedido(result,items_menu)
+                guardar_intencion_futura(sender, "confirmar_pedido", codigo_unico)
                 send_text_response(sender,texto.get("mensaje"))
                 return
         else:
             send_text_response(sender, "los sentimos, Tu pedido ya fue creado, se envía al administrador para que verifique si se puede modificar o no, en un momento el admin se comunicara contigo.")
             numero_admin = os.getenv("NUMERO_ADMIN")
-            send_text_response(numero_admin, f"El usuario {nombre_cliente} ({sender}) quiere modificar su pedido. Verificar si se puede modificar.")
+            send_text_response(numero_admin, f"El usuario {nombre_cliente} ({sender}) quiere modificar su pedido el codigo es: {codigo_unico}. Verificar si se puede modificar.")
             return
     except Exception as e:
         log_message(f'Error en <SubflujoModificacionPedido>: {e}.', 'ERROR')
@@ -715,11 +727,13 @@ def subflujo_confirmar_direccion(sender: str, nombre_cliente: str) -> None:
             nombre_cliente,
             codigo_unico,
             "Sierra Nevada",
-            datos_actualizados.get("total_final")
+            datos_actualizados.get("total_final"),
+            sender
         )
         # Enviar solo mensaje como en versión 1
         send_text_response(sender, mensaje_pagar.get("mensaje"))
         # Actualizar intención futura
+        actualizar_medio_entrega(sender, codigo_unico, "domicilio")
         guardar_intencion_futura(sender, "medio_pago", codigo_unico)
         log_message(f'Valor y tiempo de envío calculados correctamente para {sender}.', 'INFO')
 
@@ -770,9 +784,11 @@ def generar_pago_domicilio(sender: str, nombre_cliente: str, codigo_unico: str, 
 def subflujo_recoger_restaurante(sender: str, nombre_cliente: str):
     try:
         log_message("Empieza subflujo recoger restaurante", "INFO")
-        mensaje_sede: str = generar_mensaje_seleccion_sede(nombre_cliente)
-        send_text_response(sender, mensaje_sede)
+        #mensaje_sede: str = generar_mensaje_seleccion_sede(nombre_cliente)
+        #modificacion temporal solo una sede
+        #send_text_response(sender, mensaje_sede)
         codigo_unico = obtener_intencion_futura_observaciones(sender)
+        actualizar_medio_entrega(sender, codigo_unico, "recoger")
         guardar_intencion_futura(sender, "eleccion_sede", codigo_unico)
     except Exception as e:
         log_message(f"Error en subflujo recoger restaurante {e}", "ERROR") 
@@ -782,18 +798,16 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
     try:
         log_message("Empieza subflujo eleccion sede", "INFO")
         codigo_unico: str = obtener_intencion_futura_observaciones(sender)
-        datos_mapeo_sede: dict = mapear_sede_cliente(texto_cliente)
+        #MODIFICACION TEMPORAL SOLO UNA SEDE
+        datos_mapeo_sede: dict = mapear_sede_cliente("caobos")
         if datos_mapeo_sede.get("error"):
             send_text_response(sender, "Disculpa, la sede que escribiste no existe, ¿puedes volver a escribir con mayor claridad?")
             return
         id_sede = datos_mapeo_sede.get("id_sede")
-        id_restaurante = os.environ.get("ID_RESTAURANTE", "5")
-        latitud_cliente = datos_mapeo_sede.get("latitud_sede")
-        longitud_cliente = datos_mapeo_sede.get("longitud_sede")
+        #id_restaurante = os.environ.get("ID_RESTAURANTE", "5")
+        #latitud_cliente = datos_mapeo_sede.get("latitud_sede")
+        #longitud_cliente = datos_mapeo_sede.get("longitud_sede")
         direccion_cliente = datos_mapeo_sede.get("direccion_sede")
-        if not set_sede_cliente(id_sede, sender, id_restaurante) or not set_lat_lon(sender, latitud_cliente, longitud_cliente, id_restaurante) or not set_direccion_cliente(sender, direccion_cliente, id_restaurante):
-            send_text_response(sender, "Hubo un error, escribe Hola y vuelve a intentarlo.")
-            return None
         nombre_sede = datos_mapeo_sede.get("nombre_sede")
         duracion = calcular_tiempo_pedido("0 min", id_sede)
         tiempo_pedido: str = formatear_tiempo_entrega(duracion)
@@ -811,7 +825,7 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
             codigo_pedido=codigo_unico
         )
         send_text_response(sender, mensaje)
-        marcar_estemporal_true_en_pedidos
+        marcar_estemporal_true_en_pedidos(sender,codigo_unico)
         log_message("Termina subflujo eleccion sede", "INFO")
     except Exception as e:
         log_message(f"Error en subflujo eleccion sede {e}", "ERROR")
@@ -875,8 +889,36 @@ def orquestador_subflujos(
         if clasificacion_mensaje == "saludo":
             respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender, pregunta_usuario)
             send_text_response(sender, respuesta_bot)
+            send_pdf_response(sender)
         elif (clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "continuacion_promocion"):
-            subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, id_ultima_intencion)
+            try:
+                # Verificar si existen pedidos pendientes
+                query_pendientes = """
+                        SELECT d.id_pedido,i.nombre,d.cantidad,i.precio,d.total,d.especificaciones, p.codigo_unico
+                            FROM detalle_pedido d
+                            INNER JOIN pedidos p 
+                                ON d.id_pedido = p.idpedido
+                            INNER JOIN items i 
+                                ON i.iditem = d.id_producto
+                            WHERE p.codigo_unico = (
+                                SELECT p2.codigo_unico
+                                FROM pedidos p2
+                                INNER JOIN clientes_whatsapp cw 
+                                    ON p2.id_whatsapp = cw.id_whatsapp
+                                WHERE cw.telefono = %s and p.estado = 'pendiente' and p.es_temporal = true
+                                ORDER BY p2.idpedido DESC
+                                LIMIT 1
+                            );
+                """
+                result = execute_query(query_pendientes, (sender,))
+                codigo_unico = result[0][6] if result else 0
+                if codigo_unico != 0:
+                    subflujo_modificacion_pedido(sender, nombre_cliente, pregunta_usuario)
+                else:
+                    subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, codigo_unico)
+            except Exception as e:
+                log_message(f'Error en <OrquestadorSubflujos> al manejar continuacion_pedido: {e}.', 'ERROR')
+                raise e
         elif clasificacion_mensaje == "confirmacion_general":
             return subflujo_confirmacion_general(sender, pregunta_usuario)
         elif clasificacion_mensaje == "negacion_general":
@@ -937,36 +979,15 @@ def orquestador_subflujos(
                 subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
             else:
                 subflujo_recoger_restaurante(sender, nombre_cliente)
+                subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "eleccion_sede":
             subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
         elif (clasificacion_mensaje == "direccion" or clasificacion_mensaje == "consulta_menu") and obtener_intencion_futura(sender) == "eleccion_sede":
             subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "esperando_confirmacion_pago":
             subflujo_verificación_pago(sender, nombre_cliente, pregunta_usuario)
-        # elif (clasificacion_mensaje == "direccion") and obtener_intencion_futura(sender) == "primera_direccion_domicilio":
-        #     subflujo_confirmar_direccion(sender, nombre_cliente)
         elif (clasificacion_mensaje == "continuacion_pedido") and obtener_intencion_futura(sender) == "eleccion_sede":
             subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
-        elif (clasificacion_mensaje == "continuacion_pedido"):
-            subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, id_ultima_intencion)
-        # elif (clasificacion_mensaje == "direccion") and obtener_intencion_futura(sender) == "confirmar direccion":
-        #     try:
-        #         direccion = obtener_direccion(sender, os.environ.get("ID_RESTAURANTE", "5"))
-        #         log_message(f"Dirección antes de corrección: {direccion}", "INFO")
-        #         direccion = corregir_direccion(direccion,pregunta_usuario)
-        #         log_message(f"Dirección después de corrección: {direccion}", "INFO")
-        #         mensaje = direccion_bd(nombre_cliente, direccion)
-        #         send_text_response(sender, mensaje)
-        #         guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
-        #         execute_query("""
-        #                     UPDATE clientes_whatsapp
-        #                     SET direccion_google = %s
-        #                     WHERE telefono = %s AND id_restaurante = %s;
-        #                         """, (direccion, sender, os.environ.get("ID_RESTAURANTE", "5")))
-        #         log_message(f"Dirección corregida guardada en BD para {sender}", "INFO")
-        #     except Exception as e:
-        #         log_message(f"Error al corregir dirección: {e}", "ERROR")
-        #         send_text_response(sender, "Hubo un error al procesar tu dirección. Por favor, intenta nuevamente.")
         elif clasificacion_mensaje == "direccion":
             try:
                 ultimo_mensaje=extraer_ultimo_mensaje(pregunta_usuario)
