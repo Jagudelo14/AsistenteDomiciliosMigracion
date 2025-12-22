@@ -234,12 +234,16 @@ def subflujo_preguntas_generales(sender: str, pregunta_usuario: str, nombre_clie
         items: list[dict[str, Any]] = obtener_menu()
         clasificacion: dict = clasificar_pregunta_menu_chatgpt(pregunta_usuario,items)
         clasificacion_tipo = clasificacion.get("clasificacion", "no_relacionada")
-        if clasificacion_tipo == "relacionada":   
-            respuesta_llm: dict = responder_pregunta_menu_chatgpt(pregunta_usuario, items)
-            send_text_response(sender, respuesta_llm.get("respuesta"))
-            send_text_response(sender, respuesta_llm.get("productos", ""))
-            if respuesta_llm.get("recomendacion"):
-                guardar_intencion_futura(sender, "solicitud_pedido")
+        if clasificacion_tipo == "relacionada":
+            intencion = clasificacion.get("intencion", "informacion_menu")
+            if intencion == "informacion_menu" or intencion == "informacion_servicios":
+                respuesta_llm: dict = responder_pregunta_menu_chatgpt(pregunta_usuario, items)
+                send_text_response(sender, respuesta_llm.get("respuesta"))
+                send_text_response(sender, respuesta_llm.get("productos", ""))
+                if respuesta_llm.get("recomendacion"):
+                    guardar_intencion_futura(sender, "solicitud_pedido")
+            elif intencion == "informacion_pedido":
+                subflujo_consulta_pedido(sender, nombre_cliente, "", pregunta_usuario)
         else:
             seleccion = random.choice(respuestas_no_relacionadas)
             mensaje = seleccion["mensaje"].format(nombre=nombre_cliente)
@@ -387,6 +391,7 @@ def subflujo_consulta_pedido(sender: str, nombre_cliente: str, entidades: str, p
         """
         result = execute_query(query_pendientes, (sender,))
         codigo_unico = result[0][6] if result else 0
+        #precio_total = [row[4] for row in result] if result else 0
         pedido_info: dict = obtener_estado_pedido_por_codigo(sender, codigo_unico)
         respuesta_consulta_pedido: dict = responder_sobre_pedido(nombre_cliente, "Sierra Nevada", pedido_info, pregunta_usuario)
         send_text_response(sender, respuesta_consulta_pedido.get("mensaje"))
@@ -467,37 +472,37 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
             borrar_intencion_futura(sender)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
             return
-        elif medio_pago_real == "tarjeta":
-            try:
-                monto = float(total_productos)  # por ejemplo 31900.0
-                log_message(f"[SubflujoMedioPago] Generando link de pago para {sender} por monto {monto}.", "INFO")
-                monto_cents = int(round(monto * 100))  # 3190000
-                pago = generar_link_pago(monto_cents,sender)
-                if pago is None:
-                    send_text_response(sender, "No fue posible generar el link de pago ahora mismo.elige otro medio.")
-                    return
-                form_url, order_id = pago
-                # Guardar referencia del pago en la BD (si falla, informar pero continuar)
-                try:
-                    guardar_id_pago_en_db(order_id, codigo_unico)
-                except Exception as e:
-                    log_message(f"Advertencia: no se pudo guardar id_pago en DB: {e}", "WARN")
-                # Enviar link al cliente con instrucciones claras
-                mensaje_pago = (
-                    f"¡Perfecto {nombre_cliente}! Para completar tu pedido ({codigo_unico}) puedes pagar aquí:\n{form_url}\n\n"
-                    "Una vez realices el pago, por favor envíame el pantallazo de la transaccion o avisame que ya pagaste para yo hacer la revisión"
-                )
-                send_text_response(sender, mensaje_pago)
-                guardar_intencion_futura(sender, "esperando_confirmacion_pago", codigo_unico)
-                return
-            except Exception as e:
-                log_message(f"Error generando/enviando link de pago: {e}", "ERROR")
-                send_text_response(sender, "Hubo un problema generando el link de pago. Puedes intentar pagar en el local o probar otro método.")
-                return
+        #elif medio_pago_real == "tarjeta":
+            # try:
+            #     monto = float(total_productos)  # por ejemplo 31900.0
+            #     log_message(f"[SubflujoMedioPago] Generando link de pago para {sender} por monto {monto}.", "INFO")
+            #     monto_cents = int(round(monto * 100))  # 3190000
+            #     pago = generar_link_pago(monto_cents,sender)
+            #     if pago is None:
+            #         send_text_response(sender, "No fue posible generar el link de pago ahora mismo.elige otro medio.")
+            #         return
+            #     form_url, order_id = pago
+            #     # Guardar referencia del pago en la BD (si falla, informar pero continuar)
+            #     try:
+            #         guardar_id_pago_en_db(order_id, codigo_unico)
+            #     except Exception as e:
+            #         log_message(f"Advertencia: no se pudo guardar id_pago en DB: {e}", "WARN")
+            #     # Enviar link al cliente con instrucciones claras
+            #     mensaje_pago = (
+            #         f"¡Perfecto {nombre_cliente}! Para completar tu pedido ({codigo_unico}) puedes pagar aquí:\n{form_url}\n\n"
+            #         "Una vez realices el pago, por favor envíame el pantallazo de la transaccion o avisame que ya pagaste para yo hacer la revisión"
+            #     )
+            #     send_text_response(sender, mensaje_pago)
+            #     guardar_intencion_futura(sender, "esperando_confirmacion_pago", codigo_unico)
+            #     return
+            # except Exception as e:
+            #     log_message(f"Error generando/enviando link de pago: {e}", "ERROR")
+            #     send_text_response(sender, "Hubo un problema generando el link de pago. Puedes intentar pagar en el local o probar otro método.")
+            #     return
         else:
             numero_admin: str = os.getenv("NUMERO_ADMIN")
             send_text_response(numero_admin, f"Atención: Medio de pago no reconocido '{respuesta_usuario}' seleccionado por {nombre_cliente} ({sender}) para el pedido {codigo_unico}.")
-            send_text_response(sender, f"Te transferire a un asesor para que te ayude con el medio de pago. en breves momentos te escribira desde {numero_admin}")
+            send_text_response(sender, f"Te transferire a un asesor ya que por el momento no aceptamos ese medio de pago. en breves momentos te escribira desde {numero_admin}")
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
     except Exception as e:
         log_message(f'Error en <SubflujoMedioPago>: {e}.', 'ERROR')

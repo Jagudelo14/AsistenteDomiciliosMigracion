@@ -72,9 +72,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         #Validación mensaje duplicado###################################
-        if validate_duplicated_message(message_id):
-             logging.info(f"Mensaje duplicado: {message_id}")
-             return func.HttpResponse("Mensaje duplicado", status_code=200)
+        #if validate_duplicated_message(message_id):
+        #     logging.info(f"Mensaje duplicado: {message_id}")
+        #     return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
@@ -121,7 +121,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 conversacion = crear_conversacion(text)
                 log_message(f"Conversación iniciada: {conversacion}", "INFO")          
             send_text_response(sender,"¡Hola! al continuar la conversación entendemos que aceptas el tratamiento de tus datos. \nPuedes saber mas de la política de aqui: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981")
-            send_text_response(sender, "Para continuar, por favor compártenos:\nTu nombre\nTu dirección")
+            send_text_response(sender, "Recuerda que hablas con un asistente virtual 😊 Durante toda la conversación, procura enviar tus solicitudes en un solo mensaje para poder ayudarte mejor.\nPara continuar, envíame:\n• Tu nombre\n• Tu dirección")
             return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
         ####################################
         ########### CLIENTE EXISTENTE ######

@@ -82,7 +82,6 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - consulta_pedido
             - consulta_promociones
             - direccion (Cuando unicamente contiene una direccion o sobre modificaciones en direccion de envio)
-            - info_personal
             - negacion_general (puede ser en otros idiomas: no, non, nein, etc.)
             - preguntas_generales (estas categorias forman parte: formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.),si hacen domicilios o envíos, horarios de atención, dirección o ubicación del local,contacto, pedidos o reservas promociones o descuentos, preguntas sobre reservas-> son preguntas generales)
             - quejas (quejas de menor nivel)
@@ -90,7 +89,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) (modificaciones a pedidos) (cambios a pedidos)(cuando cosas similares a estos pedidos clasificalas como solicitud pedido) (tambien cuando aclare un pedido como: no, son tantos productos o no, son 3 productos o no, es una malteada y una sierra queso)(cuando el cliente aclare cantidades o productos ya mencionados)
             Ejemplo: "quiero agregar una malteada de vainilla", "quiero que la hamburguesa no traiga lechuga", "cambia mi pedido por favor por...", "quitar la malteada", "también quiero una gaseosa coca cola original", "dame también una malteada de chocolate", etc.
             - transferencia (quejas de mayor nivel)
-            - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo)
+            - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo) (cuando el usuario envie sus datos de facturacion correo, documento y tipo de documento)
             - recoger_restaurante   (NUEVA intención: cuando el usuario dice que pasará a recoger, irá al restaurante o lo recoge en tienda o en una de nuestras sedes: Caobos)
             - domicilio             (NUEVA intención: cuando el usuario pide entrega a domicilio, "tráelo", "envíamelo", "a mi casa", etc.)
             - saludo (hola, buenos dias, buenas tardes, buenas noches, saludos, etc.)
@@ -172,10 +171,14 @@ def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = 
     Debes responder con un JSON EXACTO con la siguiente forma:
     {{
         "clasificacion": "relacionada" o "no_relacionada"
+        "intencion": "informacion_menu" o "informacion_servicios" o "informacion_pedido"
     }}
-
+    Intenciones:
+    - informacion_menu: preguntas sobre comidas, bebidas, ingredientes, precios, opciones vegetarianas o cualquier cosa del menú.
+    - informacion_servicios: preguntas sobre formas de pago, domicilios, horarios, ubicación, contacto, promociones.
+    - informacion_pedido: preguntas relacionadas con el estado, costo o seguimiento de un pedido.
     Instrucciones:
-    - Si la pregunta se refiere a comidas, hamburguesas, bebidas, malteadas, ingredientes, precios, combos,
+    - Si la pregunta se refiere a comidas, hamburguesas, bebidas, malteadas, ingredientes, precios,
       opciones vegetarianas o cualquier cosa del menú → "relacionada".
     - También clasifica como "relacionada" si el cliente pregunta sobre:
         • formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.)
@@ -358,7 +361,7 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
         - Evita exageraciones o tono juvenil extremo.
         - Mantén la respuesta en máximo 2 frases si es posible.
         - En este momento no manejamos reservas
-
+        - Si la pregunta es sobre costo de domicilio recuerdale que actualmente dentro del area de cobertura es gratis
         FORMATO OBLIGATORIO DE SALIDA:
         Devuelve SOLO un JSON válido con esta estructura EXACTA:
 
@@ -567,8 +570,10 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - La cantidad NO modifica matched.price.
         - La respuesta debe ser SOLO el JSON.
         - Las adiciones deben ser mapeadas como un modificador del pedido respectivo y como un producto aparte para la suma del precio
-
+        - Cuando el usuario mencione combos, recuerdale que no manejamos combos actualmente pero podemos armarlo a su gusto con los acompañamientos y bebidas del menu
         ======================================================
+        Tono de la conversacion:
+        -Directo,formal,cercano y amable
         MENÚ COMPLETO:
         {json.dumps(menu_items, ensure_ascii=False)}
 
@@ -1239,7 +1244,7 @@ def enviar_menu_digital(nombre: str, nombre_local: str, menu, promociones_list: 
             "mensaje": f"¡{nombre}, ¿qué esperas para pedir en {nombre_local}? ¡Cuéntame qué se te antoja hoy!"
         }
 
-def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: dict, pregunta_usuario: str) -> dict:
+def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: tuple, pregunta_usuario: str) -> dict:
     try:
         pedido_info_serializable = convert_decimals(pedido_info)
         pedido_info_serializable = {
@@ -1283,10 +1288,6 @@ def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: dict, pr
         - Decir que el pedido está "listo", "procesado", "en camino", "confirmado" o cualquier estado NO presente literalmente en el dict.
         - Interpretar o adivinar datos.
         - Inventar palabras relacionadas al estado.
-        INFORMACIÓN PERMITIDA:
-        Solo puedes usar lo que aparece literalmente en este diccionario:
-        {json.dumps(pedido_info_serializable, ensure_ascii=False)}
-        Si algo no está allí, responde "No tengo ese dato exacto".
         """
         client = OpenAI()
         response = client.chat.completions.create(
