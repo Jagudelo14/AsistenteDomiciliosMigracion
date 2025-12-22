@@ -1,6 +1,6 @@
 # function_app.py
-# Last modified: 2025-09-30 by Andrés Bermúdez
-#a15:50 activar validacion
+# Last modified: 2025-12-20 Juan Agudelo
+# ajuste contexto mapear pedido
 import azure.functions as func
 from datetime import datetime
 import logging
@@ -17,6 +17,7 @@ import requests
 from openai import OpenAI
 import io
 from utils_contexto import set_sender,crear_conversacion, actualizar_conversacion,obtener_contexto_conversacion
+import random
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -71,9 +72,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         #Validación mensaje duplicado###################################
-        #if validate_duplicated_message(message_id):
-        #     logging.info(f"Mensaje duplicado: {message_id}")
-        #     return func.HttpResponse("Mensaje duplicado", status_code=200)
+        if validate_duplicated_message(message_id):
+             logging.info(f"Mensaje duplicado: {message_id}")
+             return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
@@ -237,7 +238,24 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                         send_text_response(sender,"¡Gracias por la información! 😊 Bienvenido a sierra nevada la cima del sabor")
                         send_pdf_response(sender)                 
                     return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-                text = obtener_contexto_conversacion(sender)
+                mensajes= obtener_contexto_conversacion(sender)
+                text = str(mensajes)
+                if len(mensajes) > 2:
+                    ultimo = mensajes[-1][0]["rol"]
+                    penultimo = mensajes[-2][0]["rol"]
+
+                    if ultimo == "usuario" and penultimo == "usuario":
+                        mensajes = [
+                            "Recuerda enviar tus solicitudes en un único mensaje.",
+                            "Por favor, envía todas tus solicitudes en un solo mensaje.",
+                            "Ten presente que debes enviar tus solicitudes en un único mensaje.",
+                            "Recuerda enviar tus solicitudes juntas en un solo mensaje.",
+                            "Importante: envía tus solicitudes en un único mensaje."
+                            ]
+
+                        mensaje = random.choice(mensajes)
+                        send_text_response(sender, mensaje)   
+                        return func.HttpResponse("EVENT_RECEIVED", status_code=200)
                 log_message(f"Contexto de conversación obtenido: {text}", "INFO")
                 classification: str
                 type_text: str

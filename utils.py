@@ -12,7 +12,7 @@ from utils_database import execute_query, execute_query_columns
 import inspect
 import traceback
 from typing import Dict, Any, List
-from datetime import datetime, date, time
+from datetime import datetime, date, time,timedelta
 from zoneinfo import ZoneInfo
 import json
 import requests
@@ -1969,3 +1969,59 @@ def actualizar_medio_entrega(sender: str, codigo_unico: str, metodo_entrega: str
         log_message(f'Error en <MarcarPedidoComoDefinitivo>: {e}', 'ERROR')
         logging.error(f'Error en marcar_pedido_como_definitivo: {e}')
         return {"actualizado": False, "error": str(e)}
+
+def calcular_minutos(entrada):
+    ahora = datetime.now()
+    if not entrada:
+        return None
+    try:
+        entrada = str(entrada).lower().strip()
+
+        # 1. Detectar si el usuario ya envió minutos directos (ej: "20 minutos")
+        match_minutos = re.search(r'(\d+)\s*(min|mnut|minuto)', entrada)
+        if match_minutos:
+            return f"{match_minutos.group(1)} minutos"
+
+        # 1a. Detectar 'media hora' o variantes
+        if re.search(r'(media|medio)\s+hora', entrada):
+            return "30 minutos"
+
+        # 1b. Detectar 'un cuarto de hora' o variantes
+        if re.search(r'(un\s+cuarto\s+de\s+hora|cuarto\s+de\s+hora)', entrada):
+            return "15 minutos"
+
+        # 1c. Detectar si el usuario envió horas (ej: "2 horas", "1 hora")
+        match_horas = re.search(r'(\d+)\s*(hora|horas)', entrada)
+        if match_horas:
+            horas = int(match_horas.group(1))
+            minutos = horas * 60
+            return f"{minutos} minutos"
+
+        # 2. Detectar formato de hora (ej: "8:20")
+        match_hora = re.search(r'(\d{1,2}):(\d{2})', entrada)
+        if match_hora:
+            h = int(match_hora.group(1))
+            m = int(match_hora.group(2))
+
+            # Posibilidad A: Formato AM (o 24h directo)
+            opcion_am = ahora.replace(hour=h, minute=m, second=0, microsecond=0)
+
+            # Posibilidad B: Formato PM (Sumamos 12 horas si h < 12)
+            h_pm = h + 12 if h < 12 else h
+            opcion_pm = ahora.replace(hour=h_pm, minute=m, second=0, microsecond=0)
+
+            # Calculamos diferencias absolutas para ver cuál es la más cercana al "ahora"
+            # (Esto maneja si la hora ya pasó o está por venir)
+            diff_am = abs((opcion_am - ahora).total_seconds())
+            diff_pm = abs((opcion_pm - ahora).total_seconds())
+
+            # Seleccionamos la diferencia más pequeña
+            minutos_finales = int(min(diff_am, diff_pm) / 60)
+
+            return f"{minutos_finales} minutos"
+
+        return entrada
+    except Exception as e:
+        log_message(f"Error en calcular_minutos: {e}", "ERROR")
+        return entrada
+    
