@@ -58,6 +58,20 @@ def obtener_contexto_conversacion(telefono: str) -> str:
     mensajes  = execute_query(query, (telefono, 3))
     mensajes = list(reversed(mensajes))
 
-    return str(mensajes)
+    return mensajes
 
+def obtener_x_respuestas(telefono: str, limite: int) -> str:
+    query = """
+    SELECT mensaje
+    FROM conversaciones,
+         jsonb_array_elements(conversacion->'mensajes') WITH ORDINALITY AS m(mensaje, idx)
+    WHERE telefono = %s
+    ORDER BY idx DESC
+    LIMIT %s;
+    """
+
+    mensajes  = execute_query(query, (telefono, limite))
+    mensajes = list(reversed(mensajes))
+
+    return mensajes
     

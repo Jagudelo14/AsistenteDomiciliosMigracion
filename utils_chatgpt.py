@@ -84,18 +84,19 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - consulta_promociones
             - direccion (Cuando unicamente contiene una direccion o sobre modificaciones en direccion de envio)
             - info_personal
-            Ejemplo: "quiero agregar una malteada de vainilla", "quiero que la hamburguesa no traiga lechuga", "cambia mi pedido por favor por...", "quitar la malteada", "también quiero una gaseosa coca cola original", "dame también una malteada de chocolate", etc.
             - negacion_general (puede ser en otros idiomas: no, non, nein, etc.)
             - preguntas_generales (estas categorias forman parte: formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.),si hacen domicilios o envíos, horarios de atención, dirección o ubicación del local,contacto, pedidos o reservas promociones o descuentos, preguntas sobre reservas-> son preguntas generales)
             - quejas (quejas de menor nivel)
-            - saludo
             - sin_intencion (Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, clima, películas, tecnología, etc.) → "sin_intencion".)
-            - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) (modificaciones a pedidos) (cambios a pedidos)(cuando cosas similares a estos pedidos clasificalas como solicitud pedido)
+            - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) (modificaciones a pedidos) (cambios a pedidos)(cuando cosas similares a estos pedidos clasificalas como solicitud pedido) (tambien cuando aclare un pedido como: no, son tantos productos o no, son 3 productos o no, es una malteada y una sierra queso)(cuando el cliente aclare cantidades o productos ya mencionados)
+            Ejemplo: "quiero agregar una malteada de vainilla", "quiero que la hamburguesa no traiga lechuga", "cambia mi pedido por favor por...", "quitar la malteada", "también quiero una gaseosa coca cola original", "dame también una malteada de chocolate", etc.
             - transferencia (quejas de mayor nivel)
             - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo)
             - recoger_restaurante   (NUEVA intención: cuando el usuario dice que pasará a recoger, irá al restaurante o lo recoge en tienda o en una de nuestras sedes: Caobos)
             - domicilio             (NUEVA intención: cuando el usuario pide entrega a domicilio, "tráelo", "envíamelo", "a mi casa", etc.)
             - saludo (hola, buenos dias, buenas tardes, buenas noches, saludos, etc.)
+            - despedida (adios, hasta luego, nos vemos, gracias, etc.) (cuando notes que se da la informacion final al usuario y agradece o se despide)
+            - Tiempo_de_recogida (Cuando el usuario menciona en cuanto tiempo pasará por su pedido)
 
             Instrucciones importantes:
             - No incluyas texto fuera del JSON.
@@ -117,6 +118,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - Si la bebida es agua  se refiere a una Agua normal 600 ml
             - Si la bebida es agua con gas se refiere a una Agua con gas 600 ml
             - Las adiciones debes clasificarlas en el producto que se indica y tambien como un producto aparte a la vez
+            - LAS ADICIONES SIEMPRE DEBES CLASIFICARLAS COMO UN PRODUCTO UNICO CON SU PRECIO Y SU CANTIDAD
 
             Reglas IMPORTANTES:
             - DEBES analizar y clasificar el ÚLTIMO mensaje enviado por el USUARIO.
@@ -470,21 +472,32 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         = CLASIFICACIÓN DE INTENCIÓN =
         ======================================================
         ANTES de mapear los productos debes identificar la INTENCIÓN del mensaje.
-
+ 
         INTENCIONES DISPONIBLES:
-        - ADD_ITEM: el usuario agrega productos al pedido actual.
-        - REMOVE_ITEM: el usuario elimina productos del pedido actual.
-        - REPLACE_ITEM: el usuario reemplaza productos en el pedido actual.
-
+        - ADD_ITEM: el usuario agrega productos al pedido actual ejemplo (Agregar, añadir, poner, sumar, traer, pedir, incluir,También, además, extra, otro, otra, uno más.).
+        - REMOVE_ITEM: El usuario elimina un producto completo.
+            REGLA CRÍTICA: Si el usuario dice "SIN [PRODUCTO]" (ej. sin las aguas, sin la soda), y ese producto existe de forma independiente en el menú, es REMOVE_ITEM.
+            REGLA CRÍTICA 2: Si el usuario menciona un producto general en su mensaje puedes buscar el producto especifico en el contexto comparandolo con el menu por ejemplo el mensaje del agente puede mencionar a que producto se refiere el cliente.
+        - UPDATE_ITEM: El usuario modifica un ingrediente o cantidad de un ítem que SE QUEDA en el pedido, si el usuario pide ajuste en el pedido (solo es una bebida) si los items siguen siendo los mismos luego de la modificacion es UPDATE_ITEM si pide solo x producto pero ya estaba en el pedido es UPDATE_ITEM.
+            REGLA CRÍTICA: Si el usuario dice "SIN [INGREDIENTE]" (ej. sin salsas, sin cebolla), y el ingrediente NO es un producto vendible por sí solo, es UPDATE_ITEM.
+        - REPLACE_ITEM: el usuario quiere cambiar un peoducto por otro ejemplo(Cambiar, sustituir, reemplazar, permutar,X por Y", "en vez de X quiero Y", "mejor cámbiame...).
+        - ACLARACION: el mensaje del usuario no permite identificar de forma clara una acción sobre el pedido, o es ambiguo con dos o mas iintenciones en el pedido, incompleto o confuso.
+ 
         REGLAS ABSOLUTAS:
+        - Si la intención es REMOVE_ITEM, el campo "note" dentro del array "items" DEBE contener exactamente el string "delete"
+        - Es OBLIGATORIO usar REMOVE_ITEM cuando el usuario cancela un producto principal usando la palabra "todas", "sin", "ya no", o "quita".
+        - Ejemplo: "Sin las aguas" -> intent: REMOVE_ITEM, note: "delete"
+        - Si el mensaje contiene palabras de ajuste como "mejor", "solo", "en vez de", o especificaciones de ingredientes ("sin salsas", "con queso"), la intención debe ser UPDATE_ITEM o REPLACE_ITEM, nunca ADD_ITEM.
         - Solo puede existir UNA intención por mensaje.
+        - Si la intención NO es NEW_ORDER, debes identificar los productos afectados en target_items.
         - intent_confidence debe ser un valor entre 0 y 1 según claridad del mensaje.
         - Si la intención detectada es REPLACE_ITEM, debes asignar obligatoriamente el campo note de la siguiente manera:
             -Para el producto que ingresa al pedido, establece el valor exacto: "Producto de reemplazo".
             -Para el producto que sale del pedido, establece el valor exacto: "Producto a reemplazar".
-            -Esta regla es estricta y debe cumplirse siempre que la intención sea REPLACE_ITEM, sin excepciones. 
-        - UNICAMENTE CLASIFICA EL ULTIMO MENSAJE DEL USUARIO A MENOS QUE NO ENCUENTRES PRODUCTOS EN ESE CASO PUEDES USAR EL MENSAJE DEL AGENTE PARA OBTENER CONTEXTO ADICIONAL.
-            
+            -Esta regla es estricta y debe cumplirse siempre que la intención sea REPLACE_ITEM, sin excepciones.
+        - Nunca clasificar como REPLACE_ITEM si no existen dos productos claramente identificables en el mensaje en cambio clasificalo como ACLARACION.
+        - Cuando el cliente pide "platanitos" "platanos" o "plátanos" se refiere a los platanitos maduros el ACOMPAÑAMIENTO DE 7900 a menos que explicitamente mencione sea la adicion en ese caso son los platanos maduros de 2900 el adicional
+        
         ======================================================
         = COMPORTAMIENTO GLOBAL DEL MODELO =
         ======================================================
@@ -542,13 +555,6 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         E) Fuzzy único → FOUND  
         F) 2+ → MULTIPLE_MATCHES  
         G) 0 → NOT_FOUND (máx. 3 sugerencias)
-
-        ======================================================
-        = COMPORTAMIENTO DE COMBOS =
-        ======================================================
-        - Un combo es un producto independiente.
-        - La bebida del combo tiene precio 0.
-        - Si no se especifica bebida, asigna Coca Cola 400 ml por defecto.
 
         ======================================================
         = REGLAS FINALES ABSOLUTAS =
@@ -709,12 +715,26 @@ entonces:
     - Usa un tono cordial estándar: amable, natural y con sabor.
     - Puedes usar un emoji suave si queda orgánico.
 
+= MENSAJE INICIAL PREVENTIVO =
+
+- La recomendación debe ser un RECORDATORIO de comportamiento.
+- Usa verbos como: "recuerda", "ten en cuenta", "procura", "trata de".
+- NO lo formules como una pregunta.
+- El objetivo es que el cliente cuando conteste lo haga en un unico mensaje
+IMPORTANTE:
+- La recomendación debe ser ATEMPORAL, no ligada al siguiente mensaje.
+- NO hagas referencia a "ahora", "en este mensaje", "al responder".
+- Debe entenderse como una regla general para toda la conversación.
+- Evita frases como:
+  "para ayudarte más rápido",
+  "cuando me respondas",
+  "en tu siguiente mensaje".
+
 REGLAS DE ESTILO SIERRA NEVADA:
 - Habla como un buen anfitrión: cálido, claro y con energía positiva.
 - Evita expresiones barriales, sarcasmo o exageraciones.
 - Mantén un lenguaje cotidiano y respetuoso.
 - No inventes productos ni detalles.
-- Puedes mencionar solamente: “menú”, “promociones”, “Hamburguesas”, “recomendaciones”.
 - Incluye siempre el nombre del cliente: {nombre}
 - Incluye siempre el nombre del local: {nombre_local}
 - Responde en máximo 1 o 2 frases.
@@ -1041,313 +1061,6 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             "recomendaciones": recomendaciones_backup,
             "intencion": "consulta_menu"
         }
-    
-def actualizar_pedido_con_mensaje(
-        pedido_actual: Any,
-        mensaje_usuario: str,
-        menu_items: List[Dict],
-        mensaje_chatbot_previo: str = "",
-        mensaje_usuario_previo: str = "",
-        model: str = "gpt-5.1"
-        ) -> Dict:
-    """
-    Función robusta para actualizar pedidos con lógica de fallback y limpieza.
-    Ahora incluye intento de selección directa cuando el usuario nombra una candidate.
-    """
-    try:
-        pedido_actual = _safe_parse_order(pedido_actual)
-
-        # --- NUEVA ETAPA: intentar aplicar selección directa antes de llamar al modelo ---
-        try:
-            pedido_actual = _apply_direct_selection_from_text(pedido_actual, mensaje_usuario)
-        except Exception:
-            logging.exception("Fallo en etapa de selección directa (se continúa normalmente).")
-        # ------------------------------------------------------------------------------
-
-        text_for_replace_check = " ".join([str(mensaje_usuario or ""), str(mensaje_chatbot_previo or ""), str(mensaje_usuario_previo or "")]).lower()
-        replace_all = any(phrase in text_for_replace_check for phrase in REPLACE_PHRASES)
-        pedido_actual_limpio = {
-            **pedido_actual,
-            "items": [
-                it for it in (pedido_actual.get("items") or [])
-                if it and it.get("status") != "not_found"
-            ]
-        }
-        pedido_para_modelo = {
-            **pedido_actual_limpio,
-            "items": [] if replace_all else pedido_actual_limpio.get("items", [])
-        }
-        prompt = f"""
-        Eres un asistente experto actualizando pedidos de comida.
-        TIENES QUE PROCESAR TODOS los productos que el cliente menciona.
-        Devuelve un JSON solo con la estructura: {{ "order_complete": bool, "items":[...], "total_price": number }}
-        === MENSAJE DEL USUARIO ===
-        {mensaje_usuario}
-        === PEDIDO ACTUAL LIMPIO ===
-        {json.dumps(pedido_para_modelo, ensure_ascii=False)}
-        === MENÚ ===
-        {json.dumps(menu_items, ensure_ascii=False)}
-        
-        """
-        client = OpenAI()
-        response = client.responses.create(model=model, input=prompt, temperature=0)
-        
-        tokens_used = _extract_total_tokens(response)
-        if tokens_used is not None:
-            log_message(f"[OpenAI] actualizar_pedido_con_mensaje tokens_used={tokens_used}", "DEBUG")
-
-        raw = ""
-        try:
-            raw = response.output[0].content[0].text.strip()
-        except Exception:
-            raw = ""
-        clean = raw
-        clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
-        clean = re.sub(r'^```', '', clean).strip()
-        clean = re.sub(r'```$', '', clean).strip()
-        parsed = None
-        parse_debug = {"method": None, "raw_excerpt": clean[:1000]}
-        try:
-            parsed = json.loads(clean)
-            parse_debug["method"] = "json.loads"
-        except Exception:
-            try:
-                parsed = ast.literal_eval(clean)
-                parse_debug["method"] = "ast.literal_eval"
-            except Exception as e:
-                try:
-                    candidate = re.search(r'(\{.*\})', clean, flags=re.DOTALL)
-                    if candidate:
-                        parsed = json.loads(candidate.group(1))
-                        parse_debug["method"] = "regex_json_extract"
-                except Exception:
-                    parsed = None
-                    parse_debug["error"] = str(e)
-        if not isinstance(parsed, dict):
-            items_final = pedido_para_modelo.get("items", [])
-            total_price = sum(_price_of_item(it) for it in items_final)
-            order_complete = bool(items_final) and all(it.get("status") == "found" for it in items_final)
-            return {
-                "order_complete": order_complete,
-                "items": items_final,
-                "total_price": round(total_price, 2),
-                "debug": {"parse_ok": False, "raw_model": raw, **parse_debug}
-            }
-        model_items = parsed.get("items") or []
-        if not isinstance(model_items, list):
-            model_items = []
-        model_items = [it for it in model_items if it and it.get("status") != "not_found"]
-        final_items = _merge_items(pedido_para_modelo.get("items", []), model_items, replace_all=replace_all)
-        total_price = sum(_price_of_item(it) for it in final_items)
-        total_price = round(total_price, 2)
-        order_complete = bool(final_items) and all(it.get("status") == "found" for it in final_items)
-        result = {
-            "order_complete": order_complete,
-            "items": final_items,
-            "total_price": total_price
-        }
-        if parsed.get("debug") or parsed.get("warnings"):
-            result["debug_from_model"] = parsed.get("debug") or parsed.get("warnings")
-        log_message(f'Resultado de <actualizar_pedido_con_mensaje>: {result}', 'DEBUG')
-        ##validacion costo
-        result= corregir_total_price_en_result(result)
-        return result
-    except Exception as e:
-        logging.exception("Error en actualizar_pedido_con_mensaje")
-        return {
-            "order_complete": False,
-            "items": [],
-            "total_price": 0,
-            "error": str(e)
-        }
-
-def generar_mensaje_confirmacion_pedido(
-        pedido_json: dict,
-        promocion: bool = False,
-        promociones_info: list = None,
-        pedido_completo_promocion: dict = None,
-        model: str = "gpt-5.1",
-    ) -> dict:
-    """
-    Genera un mensaje de confirmación de pedido.
-    - Si promocion=False → usa el prompt normal con pedido_json.
-    - Si promocion=True → usa un prompt especial basado en promociones_info y pedido_completo_promocion.
-    """
-
-    raw = ""  # para debug si falla
-
-    try:
-        client = OpenAI()
-
-        # ------------------------------------------------------------------
-        # PROMPT NORMAL (sin promoción)
-        # ------------------------------------------------------------------
-        if not promocion:
-            prompt = f"""
-                Eres un asistente de WhatsApp de un restaurante llamado Sierra Nevada, La Cima del Sabor.
-                TU NOMBRE ES PAKO.
-                RECIBES un JSON de pedido ya completo y validado:
-                {json.dumps(pedido_json, ensure_ascii=False)}
-
-                TU MISIÓN:
-                1. Generar un MENSAJE amable y claro para el cliente preguntando por la confirmación de lo que pidió.
-                - Lista cada producto.
-                - Incluye sus modificadores ("sin cebolla", etc.).
-                - Muestra precios individuales.
-                - Muestra el total.
-                - No inventes productos ni precios.
-
-                2. Devuelve un JSON VÁLIDO:
-                {{
-                    "mensaje": "mensaje natural preguntando por la confirmación del pedido",
-                    "intencion_siguiente": "confirmar_pedido"
-                }}
-
-                REGLAS:
-                - No incluyas texto fuera del JSON.
-                - No uses emojis.
-                - Mensaje corto, conversacional, profesional.
-                - Tono cálido y cercano, estilo Sierra Nevada.
-                - Debes cerrar preguntando si desea confirmar: "¿Desea confirmar su pedido?" o "¿Es correcto su pedido?".
-            """
-
-        # ------------------------------------------------------------------
-        # PROMPT ESPECIAL (promoción=True) - CORREGIDO
-        # ------------------------------------------------------------------
-        else:
-            if promociones_info is None or pedido_completo_promocion is None:
-                raise ValueError("Cuando promocion es True, promociones_info y pedido_completo_promocion son obligatorios.")
-
-            # Incluimos tanto el pedido original (pedido_json) como el pedido con la promoción aplicada (pedido_completo_promocion)
-            # IMPORTANTE: escapamos las llaves del JSON de formato con {{ }} donde corresponde.
-            prompt = f"""
-                Eres PAKO, asistente oficial del restaurante Sierra Nevada.
-
-                RECIBES:
-                1) Pedido original detectado (fuente de todos los productos):
-                {json.dumps(pedido_json, ensure_ascii=False)}
-
-                2) Resultado del análisis de promoción (si existe), con precios finales aplicados:
-                {json.dumps(pedido_completo_promocion, ensure_ascii=False)}
-
-                3) Listado de promociones vigentes:
-                {json.dumps(promociones_info, ensure_ascii=False)}
-
-                TU MISIÓN (PROMOCIÓN):
-                - Explicar al cliente en lenguaje natural qué incluye la promoción identificada.
-                - Mostrar claramente QUÉ productos de su pedido entraron en la promoción y cuáles NO.
-                - Para cada producto del pedido (tanto promocionado como no):
-                  * indicar nombre,
-                  * precio original,
-                  * precio final que pagará (después de la promoción),
-                  * marcar si la promoción fue aplicada.
-                - Indicar el precio especial TOTAL de la promoción y el TOTAL FINAL del pedido (suma de todos los final_price).
-                - No inventes nada: usa SOLO la información en los JSON arriba (pedido_json, pedido_completo_promocion, promociones_info).
-
-                FORMATO OBLIGATORIO (JSON sin texto adicional). Usa exactamente estas claves:
-                {{
-                    "mensaje": "Mensaje en lenguaje natural, breve y cálido, explicando la promoción y listando los productos promocionados y no promocionados. Finalizar con pregunta de confirmación.",
-                    "intencion_siguiente": "confirmar_pedido"
-                }}
-
-                REGLAS ESTILÍSTICAS:
-                - Mensaje corto (1-3 frases principales + listado corto).
-                - Tono: cálido, profesional y cercano.
-                - No uses emojis.
-                - No incluyas la "fórmula interna" de cálculo (ej. no explicar cómo se dividió el precio); sí debes mostrar los precios finales por producto.
-                - Final obligatorio: pregunta si desea confirmar la promoción/pedido, por ejemplo: "¿Desea confirmar esta promoción y proceder con el pedido?".
-            """
-
-        # Enviar al modelo
-        response = client.responses.create(
-            model=model,
-            input=prompt,
-            temperature=0
-        )
-
-        raw = response.output[0].content[0].text.strip()
-        tokens_used = _extract_total_tokens(response)
-        if tokens_used is not None:
-            log_message(f"[OpenAI] generar_mensaje_confirmacion_pedido tokens_used={tokens_used}", "DEBUG")
-        # Limpieza de bloques ```json
-        clean = raw
-        clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
-        clean = re.sub(r'^```', '', clean).strip()
-        clean = re.sub(r'```$', '', clean).strip()
-
-        return json.loads(clean)
-
-    except Exception as e:
-        log_message(f'Error en función <generar_mensaje_confirmacion_pedido>: {e}', 'ERROR')
-        return {
-            "mensaje": "Hubo un error generando el mensaje de confirmación.",
-            "intencion_siguiente": "confirmar_pedido",
-            "raw_output": raw
-        }
-
-def generar_mensaje_cancelacion(
-        sender: str,
-        codigo_unico: str,
-        nombre_cliente: str,
-        model: str = "gpt-5.1",
-    ) -> dict:
-    """
-    Genera un JSON con el mensaje de confirmación de pedido.
-    Formato de salida:
-    {
-        "mensaje": "...",
-        "siguiente_intencion": "confirmar_pedido"
-    }
-    """
-    try:
-        dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
-        producto = dict_registro_temp.get("producto", "N/A")
-        total_productos = dict_registro_temp.get("total_productos", "N/A")
-        client = OpenAI()
-        prompt = f"""
-        Eres un asistente de WhatsApp de un restaurante llamado Sierra Nevada, La Cima del Sabor.
-        TU NOMBRE ES PAKO.
-        RECIBES esta información del pedido que el cliente había enviado, pero que no se pudo confirmar porque estaba incompleto, confuso o mal estructurado:
-        - Producto(s): {producto}
-        - Total estimado de productos: {total_productos}
-        - Nombre cliente: {nombre_cliente}
-        TU MISIÓN:
-        1. Generar un MENSAJE claro y amable explicándole al cliente que su pedido no se pudo confirmar porque algo estaba mal.
-        2. Preguntar exactamente: **“¿Qué parte del pedido está mal?”**
-        3. Pedirle que vuelva a escribir su pedido de forma completa y clara.
-        4. Debes sonar cálido, cercano y respetuoso, estilo Sierra Nevada.
-        5. No uses emojis.
-        6. No inventes productos, no supongas nada, no des confirmaciones.
-        7. Devuelve un JSON **válido**:
-        8. no menciones codigo unico no tienes esa información
-        {{
-        "mensaje": "mensaje natural pidiendo al cliente que explique qué está mal y escriba de nuevo su pedido",
-        "siguiente_intencion": "corregir_pedido"
-        }}
-        REGLAS:
-        - No incluyas texto fuera del JSON.
-        - El mensaje debe ser corto, profesional y conversacional.
-        - Incluye el código único del pedido en el mensaje.
-        - No inventes información adicional.
-        """
-        response = client.responses.create(
-            model=model,
-            input=prompt,
-            temperature=0
-        )
-        raw = response.output[0].content[0].text.strip()
-        clean = raw
-        clean = re.sub(r'^```json', '', clean, flags=re.I).strip()
-        clean = re.sub(r'^```', '', clean).strip()
-        clean = re.sub(r'```$', '', clean).strip()
-        return json.loads(clean)
-    except Exception as e:
-        log_message(f'Error en función <generar_mensaje_cancelacion>: {e}', 'ERROR')
-        return {
-            "mensaje": "Hubo un error generando el mensaje de cancelación.",
-            "siguiente_intencion": "confirmar_pedido",
-            "raw_output": raw
-        }
 
 def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str,sender: str) -> dict:
     try:
@@ -1456,11 +1169,13 @@ Estructura final:
         if tokens_used is not None:
             log_message(f"[OpenAI] solicitar_medio_pago tokens_used={tokens_used}", "DEBUG")
         try:
-            data = json.loads(raw_text)
+            # Limpieza de escapes innecesarios que pueden romper el JSON
+            clean_text = raw_text.replace('\\$', '$')
+            data = json.loads(clean_text)
         except json.JSONDecodeError:
             # Fallback si GPT no devuelve JSON válido
             data = {
-                "mensaje": f"¡{nombre}, ese pedido está para antojar a cualquiera! 🤤 Tu orden ({codigo_unico}) en {nombre_local} quedó tremenda. ¿Qué medio de pago prefieres: efectivo, transferencia (Nequi/Daviplata/Bre-B), tarjeta débito o tarjeta crédito?"
+                "mensaje": f"¡{nombre}, ese pedido está para antojar a cualquiera! 🤤 Tu orden ({codigo_unico}) en {nombre_local} quedó tremenda. ¿Qué medio de pago prefieres: efectivo o datafono ambos son contraentrega"
             }
 
         return data
@@ -1837,22 +1552,14 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
         {promociones_str}
 
         LAS HAMBURGESAS SE LLAMAN:
-            "Veggie Queso"
-            "La Insaciable"
+            "Sierra Veggie"
+            "LInsaciable"
             "Sierra Bomba"
-            "Sierra Mulata"
-            "Sierra Pagüer"
-            "Sierra Picante"
             "Sierra Costeña"
             "Sierra Melao"
             "Sierra Clasica"
             "Camino a la cima"
             "Sierra Queso"
-
-        HAY PERROS CALIENTES LLAMADOS:
-            "Super Perro"
-            "Super Chanchita"
-            "Perro Tocineta"
 
         CUANDO PIDAN UN ADICIONAL EN CUALQUIER PRODUCTO, Usa coincidencia aproximada para entender la intención.
         PERO la respuesta final siempre debe ser una salsa EXACTA del menú:
@@ -1876,13 +1583,6 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
 
         CUANDO PIDAN BEBIDAS, Usa coincidencia aproximada para entender la intención.
         PERO la respuesta final siempre debe ser una bebida EXACTA del menú.:
-            "Malteada de Vainilla"
-            "Malteada de Mil0"
-            "Malteada de Frutos Rojos"
-            "Malteada de Chocolate y avellanas"
-            "Malteada de Arequipe"
-            "Malteada Oblea"
-            "Malteada Galleta"
             "Fuze tea de manzana 400 ml"
             "Fuze tea de limón 400 ml"
             "Fuze tea de durazno 400 ml"
@@ -2563,7 +2263,6 @@ Datos:
 - Nombre del cliente: {nombre_cliente}
 - Sede de recogida: {nombre_sede}
 - Dirección de la sede: {direccion_sede}
-- Tiempo estimado de preparación: {tiempo_pedido}
 - Valor total del pedido: {valor_total_pedido}
 - Código del pedido: {codigo_pedido}
 
@@ -2576,6 +2275,8 @@ Instrucciones del mensaje:
 - Menciona claramente el código del pedido.
 - No mencionar domicilio ni distancias porque es recogida en tienda.
 - No inventar información adicional.
+
+Finaliza: Preguntando al cliente en cuanto tiempo pasara por su pedido
 """
 
         response = client.chat.completions.create(
@@ -2615,6 +2316,9 @@ Si te dicen Cedula de ciudadania, responde CC.
 Si te dicen Cedula de extranjeria, responde CE.
 Si te dicen NIT, responde NIT.
 Si te dicen Pasaporte, responde PA.
+Si te dicen Tarjeta de identidad, responde TI.
+Si te dicen Permiso especial de permanencia, responde PEP.
+Si te dicen Registro civil, responde RC.
 - Número de documento
 - Email
 Devuélvelo SOLO en formato JSON EXACTO, sin texto adicional, por ejemplo:
@@ -2955,10 +2659,25 @@ def clasificar_confirmación_general(pregunta_usuario: str, items, model: str = 
         "intencion": "intencion detectada"
     }}
 
+    IMPORTANTE: TENER EN CUENTA EL CONTEXTO DE LOS MENSAJES ANTERIORES PARA DEFINIR LA INTENCION
+
     Las posibles intenciones son:
-    - "solicitud_pedido": si la pregunta del usuario está relacionada con confirmar un pedido, productos del menú, comidas o bebidas.
-    - "confirmar_direccion": si la pregunta del usuario está relacionada con confirmar o cambiar una dirección de envío.
-    - "sin_intencion": Cuando no puedas detectar ninguna de las dos anteriores intenciones.
+    - "solicitud_pedido":
+    * si la pregunta del usuario está relacionada con agregar quitar modificar o solicitar productos del menú de su pedido tenga o no tenga.
+    * cuando el usuario conteste a si a las preguntas del agente sobre probar pedidos va aqui 
+    - "confirmar_direccion":
+    * si la pregunta del usuario está relacionada con confirmar o cambiar una dirección de envío.
+    * si el usuario dice si a la pregunta del agente cuando pregunta direccion va aqui
+    * si el usuario afirma en un contexto con direcciones
+    - "confirmar_pedido" : 
+    * si la pregunta del usuario está relacionada con confirmar o  un pedido existente.
+    * si el usuario confirma un pedido
+    * responde si a la pregunta del agente de confirmar pedido debe clasificarse como confirmar pedido
+    * si responde a la pregunta del agente de si su pedido esta bien con una afirmacion
+    * Cuando el usuario confirme que su pedido esta bien como esta
+    * responde si a la pregunta del agente de confirmar pedido debe clasificarse como confirmar pedido
+    * CUANDO EL MENSAJE ANTERIOR DEL AGENTE TERMINE CON "o ¿tu pedido está bien así?" O "¿Confirmas tu pedido? Y EL USUARIO RESPONDE AFIRMATIVAMENTE VA AQUI
+    - "sin_intencion": Cuando no puedas detectar ninguna de las dos anteriores intenciones. 
 
     Este es el menú completo si la pregunta incluye un producto del menu o se refiere a comidas o bebidas es relacionada:
     {json.dumps(items, ensure_ascii=False)}
@@ -2975,6 +2694,7 @@ def clasificar_confirmación_general(pregunta_usuario: str, items, model: str = 
             input=prompt,
             temperature=0
         )
+        log_message(f'prompt: {prompt}', 'DEBUG')
         text_output = response.output[0].content[0].text.strip()
         # limpiar posibles fences/triple-backticks u otros prefijos
         try:
@@ -3012,3 +2732,105 @@ def clasificar_confirmación_general(pregunta_usuario: str, items, model: str = 
         logging.error(f"Error en <ClasificarPreguntaMenuChatGPT>: {e}")
         log_message(f'Error en <ClasificarPreguntaMenuChatGPT>: {e}.', 'ERROR')
         return {"clasificacion": "no_relacionada"}
+    
+def generar_mensaje_sin_intencion(
+        mensaje: str,
+        items: list,
+        model: str = "gpt-4.1-mini",
+    ) -> str:
+    """
+    Llama a ChatGPT para generar un mensaje cordial que:
+    - Responda a un mensaje sin intención clara.
+    """
+
+    try:
+        prompt = f"""
+Eres un asistente amable de una hamburguesería.
+Genera un mensaje CORTO, cálido y claro para un cliente.
+
+Datos:
+- Mensaje del cliente: {mensaje}
+- Menu {json.dumps(items, ensure_ascii=False)}
+Instrucciones del mensaje:
+- Resume los datos de manera natural.
+- No inventes información adicional.
+- Tono amable, profesional y cercano.
+- Responde la duda del cliente de la mejor manera posible relacionando el contexto entregado en los mensajes.
+- Si no hay una duda pero hay una peticion relacionada al pedido intenta que describa su pedido lo mejor posible
+"""
+            
+        client = OpenAI()
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "Eres un asistente de pedidos experto en atención al cliente."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=200,
+            temperature=0.5
+        )
+        log_message(f'prompt: {prompt}', 'DEBUG')
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] generar_mensaje_invitar_pago tokens_used={tokens_used}", "DEBUG")
+
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        return f"Error al generar mensaje: {str(e)}"
+
+
+def get_tiempo_recogida(text: str) -> str | None:
+    """
+    Extrae el tiempo en el que pasara el cliente por su pedido
+    usando un LLM
+    """
+    try:
+        client = OpenAI(api_key=get_openai_key())
+        prompt = f"""Eres un asistente experto en extraer tiempos de recogida de texto libre.
+Extrae SÓLO el tiempo del siguiente texto y si no encuentras tiempo responde como "No presente".
+Si el usuario menciona una hora especifica regresa la hora en formato h:MM (ejemplo 2:30 )
+Texto: "{text}"
+RESPONDE únicamente con el tiempo cuando puedas convertirlo a minutos hazlo, nada más.
+EJEMPLO:
+2 horas -> 120 minutos
+1 hora  -> 60 minutos
+30 minutos -> 30 minutos
+15 minutos  
+media hora -> 30 minutos
+en una hora -> 60 minutos
+faltando 20 para las 9 -> 8:40
+faltando 15 para las 3 -> 2:45
+a las 7 y 45 -> 7:45
+a las 8 y media -> 8:30
+8:30
+2:15
+7:45
+"""
+        response = client.chat.completions.create(
+        model="gpt-5.1",
+            messages=[
+                {"role": "system", "content": "Eres un extractor preciso de tiempos de recogida."},
+                {"role": "user", "content": prompt}
+            ],
+ #           max_tokens=80,
+            temperature=0
+        )
+        raw = response.choices[0].message.content
+        # Registrar consumo de tokens
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] get_direction tokens_used={tokens_used}", "DEBUG")
+        if raw == "" or raw is None or raw == "No presente":
+            return None
+        # normalizar a string y limpiar backticks
+        if isinstance(raw, dict):
+            raw = json.dumps(raw, ensure_ascii=False)
+        name = str(raw).strip().strip("`").strip()
+        if not name:
+            return None
+        log_message("Nombre extraído: " + name, "INFO")
+        return name
+    except Exception as e:
+        log_message(f"Error en get_name: {e}", "ERROR")
+        return None

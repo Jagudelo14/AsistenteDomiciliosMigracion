@@ -8,18 +8,19 @@ import random
 import logging
 from typing import Any, Dict
 import re
+from utils_contexto import obtener_x_respuestas
 from utils_registration import validate_direction_first_time
 
 # --- IMPORTS INTERNOS --- #
 from utils import (
     actualizar_medio_entrega,
     actualizar_medio_pago,
+    calcular_minutos,
     extraer_ultimo_mensaje,
     marcar_estemporal_true_en_pedidos,
     obtener_direccion,
     actualizar_costos_y_tiempos_pedido,
     actualizar_total_productos,
-    eliminar_pedido,
     guardar_intencion_futura,
     guardar_pedido_completo,
     log_message,
@@ -28,10 +29,8 @@ from utils import (
     match_item_to_menu,
     normalizar_entities_items,
     obtener_datos_cliente_por_telefono,
-    obtener_datos_promocion,
     obtener_estado_pedido_por_codigo,
     obtener_intencion_futura_mensaje_chatbot,
-    obtener_intencion_futura_mensaje_usuario,
     obtener_intencion_futura_observaciones,
     obtener_menu,
     obtener_pedido_por_codigo,
@@ -43,11 +42,11 @@ from utils import (
     borrar_intencion_futura,
     normalizar_especificaciones
 )
-from utils_chatgpt import actualizar_pedido_con_mensaje, clasificador_consulta_menu,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_cancelacion, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, generar_mensaje_seleccion_sede, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,corregir_direccion,extraer_info_personal,clasificar_confirmación_general
+from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida
 from utils_database import execute_query
-from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, set_direccion_cliente, set_lat_lon, set_sede_cliente
+from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
-from utils_registration import     validate_personal_data,save_personal_data_partial,check_and_mark_datos_personales
+from utils_registration import validate_personal_data,save_personal_data_partial,check_and_mark_datos_personales
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
 respuestas_no_relacionadas = [
     {
@@ -109,24 +108,10 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
         bandera_revision: bool = False
         items_menu: list = obtener_menu()
         pedido_dict: dict = {}
-        if obtener_intencion_futura(sender) == "continuacion_pedido":
-            log_message(f"Continuando pedido previo para {sender}.", "INFO")
-            observaciones_pedido = obtener_intencion_futura_observaciones(sender)
-            mensaje_chatbot_intencion_futura: str = obtener_intencion_futura_mensaje_chatbot(sender)
-            mensaje_usuario_intencion_futura: str = obtener_intencion_futura_mensaje_usuario(sender)
-            pedido_dict = actualizar_pedido_con_mensaje(observaciones_pedido, pregunta_usuario, items_menu, mensaje_chatbot_intencion_futura, mensaje_usuario_intencion_futura)
-            bandera_revision = True
-        elif obtener_intencion_futura(sender) == "pregunta_pedido":
-            log_message(f"Revisando pedido previo para {sender}.", "INFO")
-            #recuperamos el mapeado del producto que pregunto que traia
-            observaciones_pedido = obtener_intencion_futura_observaciones(sender)
-            entidades_text = normalizar_entities_items(observaciones_pedido)
-            pedido_dict = mapear_pedido_al_menu(entidades_text, items_menu)
-            bandera_revision = True
         if not bandera_revision:
             log_message(f"Nuevo pedido para {sender}.", "INFO")
             entidades_text = normalizar_entities_items(entidades_text)
-            pedido_dict = mapear_pedido_al_menu(entidades_text, items_menu)
+            pedido_dict = mapear_pedido_al_menu(pregunta_usuario, items_menu)
 
         # --- Intento rápido: si el usuario respondió con "cantidad + producto"
         # y el pedido sigue incompleto, intentar un match directo para no quedar en loop.
@@ -184,8 +169,6 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
                 return
         confirmacion_modificacion_pedido: dict = generar_mensaje_confirmacion_modificacion_pedido(pedido_dict,items_menu, bandera_promocion, info_promociones, eleccion_promocion)
         send_text_response(sender, confirmacion_modificacion_pedido.get("mensaje"))
-        #confirmacion_pedido: dict = generar_mensaje_confirmacion_pedido(pedido_dict, bandera_promocion, info_promociones, eleccion_promocion)
-        #send_text_response(sender, confirmacion_pedido.get("mensaje"))
         datos_promocion = {
             "info_promociones": info_promociones,
             "eleccion_promocion": eleccion_promocion,
@@ -207,27 +190,31 @@ def subflujo_confirmacion_general(sender: str, respuesta_cliente: str) -> Dict[s
     try:
         items = obtener_menu()
         intencion = clasificar_confirmación_general(respuesta_cliente,items)
-        if intencion == "solicitud_pedido":
-            pass
-        elif intencion == "confirmar_direccion":
-            pass
-        elif intencion == "sin_intencion":
-            pass
-    
-        if anterior_intencion is None:
-            send_text_response(sender, "No tengo una acción pendiente. ¿En qué más puedo ayudarte?")
+        log_message(f'Intención general clasificada: {intencion}', 'INFO')
+        if intencion.get("intencion") == "solicitud_pedido":
             return {
-                "intencion_respuesta": "SinIntencion",
-                "continuidad": False,
+                "intencion_respuesta": "solicitud_pedido",
+                "continuidad": True,
                 "observaciones": respuesta_cliente
             }
-        analisis: dict = {
-            "intencion_respuesta": anterior_intencion,
-            "continuidad": True,
-            "observaciones": respuesta_cliente
-        }
-        log_message(f'Respuesta analizada: {analisis}', 'INFO')
-        return analisis
+        elif intencion.get("intencion") == "confirmar_direccion":
+            return {
+                "intencion_respuesta": "confirmar_direccion",
+                "continuidad": True,
+                "observaciones": respuesta_cliente
+            }
+        elif intencion.get("intencion") == "confirmar_pedido":
+            return{
+                "intencion_respuesta": "confirmar_pedido",
+                "continuidad": True,
+                "observaciones": respuesta_cliente
+            }
+        elif intencion.get("intencion") == "sin_intencion":
+            items= obtener_menu()
+            mensaje=generar_mensaje_sin_intencion(respuesta_cliente, items)
+            send_text_response(sender, mensaje)
+            return
+        return
     except Exception as e:
         logging.error(f"Error en <SubflujoConfirmacionGeneral>: {e}")
         log_message(f'Error en <SubflujoConfirmacionGeneral>: {e}.', 'ERROR')
@@ -236,36 +223,10 @@ def subflujo_confirmacion_general(sender: str, respuesta_cliente: str) -> Dict[s
 def subflujo_negacion_general(sender: str, respuesta_cliente: str, nombre_cliente: str) -> Dict[str, Any]:
     """Maneja el caso en que no se detecta una intención específica, con ayuda de IA."""
     try:
-        anterior_intencion = obtener_intencion_futura(sender)
-        if anterior_intencion is None:
-            send_text_response(sender, "    ")
-            return {
-                "intencion_respuesta": "SinIntencion",
-                "continuidad": False,
-                "observaciones": respuesta_cliente
-            }
-        analisis: dict = {
-            "intencion_respuesta": anterior_intencion,
-            "continuidad": False,
-            "observaciones": respuesta_cliente
-        }
-        log_message(f'Respuesta analizada: {analisis}', 'INFO')
-        if anterior_intencion == "confirmar_pedido":
-            codigo_unico_temp: str = obtener_intencion_futura_observaciones(sender)
-            dict_temp_cancelacion: dict = generar_mensaje_cancelacion(sender, codigo_unico_temp, nombre_cliente)
-            #datos_eliminar: dict = eliminar_pedido(sender, codigo_unico_temp)
-            send_text_response(sender, dict_temp_cancelacion.get("mensaje"))
-            borrar_intencion_futura(sender)
-        elif anterior_intencion == "confirmacion_modificacion_pedido":
-            datos_promocion: dict = obtener_datos_promocion(sender)
-            codigo_unico_temp: str = obtener_intencion_futura_observaciones(sender)
-            pedido_dict: str = obtener_intencion_futura_mensaje_chatbot(sender)
-            send_text_response(sender, "Listo, entonces, ¿confirmas el pedido que te envié?")
-            guardar_intencion_futura(sender, "confirmar_pedido", codigo_unico_temp, pedido_dict, "", datos_promocion)
-        else:
-            send_text_response(sender, "Entendido. Si necesitas algo más, no dudes en escribirme. ¡Estoy aquí para ayudarte!")
-            borrar_intencion_futura(sender)
-        return analisis
+        items= obtener_menu()
+        mensaje=generar_mensaje_sin_intencion(respuesta_cliente, items)
+        send_text_response(sender, mensaje)
+        return
     except Exception as e:
         logging.error(f"Error en <SubflujoNegacionGeneral>: {e}")
         log_message(f'Error en <SubflujoNegacionGeneral>: {e}.', 'ERROR')
@@ -422,15 +383,26 @@ def subflujo_consulta_menu(sender: str, nombre_cliente: str, pregunta_usuario: s
 def subflujo_consulta_pedido(sender: str, nombre_cliente: str, entidades: str, pregunta_usuario: str) -> None:
     try:
         """Maneja la consulta del estado del pedido por parte del usuario."""
-        if isinstance(entidades, dict):
-            entidades_dict = entidades
-        else:
-            try:
-                entidades_dict = json.loads(entidades)
-            except:  # noqa: E722
-                entidades_dict = ast.literal_eval(str(entidades))
-        pedido_id: str = entidades_dict.get("pedido_id", "")
-        pedido_info: dict = obtener_estado_pedido_por_codigo(sender, pedido_id)
+        query_pendientes = """
+                SELECT d.id_pedido,i.nombre,d.cantidad,i.precio,d.total,d.especificaciones, p.codigo_unico
+                    FROM detalle_pedido d
+                    INNER JOIN pedidos p 
+                        ON d.id_pedido = p.idpedido
+                    INNER JOIN items i 
+                        ON i.iditem = d.id_producto
+                    WHERE p.codigo_unico = (
+                        SELECT p2.codigo_unico
+                        FROM pedidos p2
+                        INNER JOIN clientes_whatsapp cw 
+                            ON p2.id_whatsapp = cw.id_whatsapp
+                        WHERE cw.telefono = %s and p.estado = 'pendiente' and p.es_temporal = true
+                        ORDER BY p2.idpedido DESC
+                        LIMIT 1
+                    );
+        """
+        result = execute_query(query_pendientes, (sender,))
+        codigo_unico = result[0][6] if result else 0
+        pedido_info: dict = obtener_estado_pedido_por_codigo(sender, codigo_unico)
         respuesta_consulta_pedido: dict = responder_sobre_pedido(nombre_cliente, "Sierra Nevada", pedido_info, pregunta_usuario)
         send_text_response(sender, respuesta_consulta_pedido.get("mensaje"))
         guardar_intencion_futura(sender, respuesta_consulta_pedido.get("futura_intencion", "consulta_menu"))
@@ -480,10 +452,19 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
                 # mapear nombres amigables
                 friendly = {"Tipo_Doc": "tipo de documento", "N_Doc": "número de documento", "email": "correo electrónico"}
                 faltantes = ", ".join(friendly.get(m, m) for m in missing)
+                codigo_unico: str = obtener_intencion_futura_observaciones(sender)
+                medio_pago_real: str = mapear_modo_pago(mensaje)
+                datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
                 send_text_response(sender, f"aún faltan los siguientes datos: {faltantes}. Por favor envíalos para continuar.")
                 return 
         codigo_unico: str = obtener_intencion_futura_observaciones(sender)
         medio_pago_real: str = mapear_modo_pago(mensaje)
+        if medio_pago_real == "desconocido":
+            query="""SELECT metodo_pago
+                    fROM pedidos
+                    wHERE codigo_unico=%s;"""
+            result= execute_query(query,(codigo_unico,))
+            medio_pago_real=result[0][0] if result else "desconocido"
         datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
         dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
         tiempo= dict_registro_temp.get("tiempo_estimado", "N/A")
@@ -567,7 +548,8 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
         if codigo_unico != 0:
             id_pedido = result[0][0] 
             items_menu: list = obtener_menu()
-            txtSolicitud = extraer_ultimo_mensaje(pregunta_usuario)
+            #txtSolicitud = extraer_ultimo_mensaje(pregunta_usuario)
+            txtSolicitud = obtener_x_respuestas(sender, 2)
             productos = mapear_pedido_al_menu(txtSolicitud, items_menu, model="gpt-5.1")
             if productos.get("order_complete", False) is False:
                 log_message(f"Modificación de pedido incompleta para {sender}.", "INFO")
@@ -602,29 +584,35 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
                                 especificaciones_txt = normalizar_especificaciones(item)           
                                 query = """ INSERT INTO detalle_pedido ( id_producto,id_pedido, cantidad, total, especificaciones) VALUES (%s, %s, %s, %s, %s)"""
                                 params = (item.get("matched").get("id"), id_pedido, item.get("cantidad"), (item.get("matched").get("price") * item.get("cantidad", 1)), especificaciones_txt )
-                                res_detalle = execute_query(query, params)                    
+                                res_detalle = execute_query(query, params)
                     case "REMOVE_ITEM":
                         for item in productos.get("items", []):
-                            query = """SELECT id_detalle, cantidad
-                                        FROM detalle_pedido
-                                        WHERE id_pedido = %s AND id_producto = %s"""
-                            params = ( id_pedido, item.get("matched").get("id"))
-                            res_detalle = execute_query(query, params, fetchone=True)
-                            if res_detalle:
-                                id_detalle, cantidad_actual = res_detalle
-                                nueva_cantidad = cantidad_actual - item.get("cantidad", 1)
-                                especificaciones_txt = normalizar_especificaciones(item) 
-                                if nueva_cantidad > 0:
-                                    query = """ UPDATE detalle_pedido SET cantidad = %s, total = %s, especificaciones = CASE
-                                                WHEN %s IS NULL OR %s = '' THEN especificaciones
-                                                ELSE %s END
-                                                WHERE id_detalle = %s"""
-                                    params = ( nueva_cantidad, (item.get("matched").get("price") * nueva_cantidad),especificaciones_txt,especificaciones_txt,especificaciones_txt, id_detalle)
-                                    res_detalle = execute_query(query, params)
-                                else:
-                                    query = """ DELETE FROM detalle_pedido WHERE id_pedido = %s AND id_producto = %s"""
-                                    params = ( id_pedido, item.get("matched").get("id"))
-                                    res_detalle = execute_query(query, params)
+                            cambio = item.get("note")
+                            if cambio == "delete" or item.get("cantidad") == 0:
+                                query = """ DELETE FROM detalle_pedido WHERE id_pedido = %s AND id_producto = %s"""
+                                params = ( id_pedido, item.get("matched").get("id"))
+                                res_detalle = execute_query(query, params)
+                            else:
+                                query = """SELECT id_detalle, cantidad
+                                            FROM detalle_pedido
+                                            WHERE id_pedido = %s AND id_producto = %s"""
+                                params = ( id_pedido, item.get("matched").get("id"))
+                                res_detalle = execute_query(query, params, fetchone=True)
+                                if res_detalle:
+                                    id_detalle, cantidad_actual = res_detalle
+                                    nueva_cantidad = cantidad_actual - item.get("cantidad", 1)
+                                    especificaciones_txt = normalizar_especificaciones(item) 
+                                    if nueva_cantidad > 0:
+                                        query = """ UPDATE detalle_pedido SET cantidad = %s, total = %s, especificaciones = CASE
+                                                    WHEN %s IS NULL OR %s = '' THEN especificaciones
+                                                    ELSE %s END
+                                                    WHERE id_detalle = %s"""
+                                        params = ( nueva_cantidad, (item.get("matched").get("price") * nueva_cantidad),especificaciones_txt,especificaciones_txt,especificaciones_txt, id_detalle)
+                                        res_detalle = execute_query(query, params)
+                                    else:
+                                        query = """ DELETE FROM detalle_pedido WHERE id_pedido = %s AND id_producto = %s"""
+                                        params = ( id_pedido, item.get("matched").get("id"))
+                                        res_detalle = execute_query(query, params)
                     case "REPLACE_ITEM":
                         for item in productos.get("items", []):            
                             cambio = item.get("note")
@@ -665,8 +653,37 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
                                     else:
                                         query = """ DELETE FROM detalle_pedido WHERE id_pedido = %s AND id_producto = %s"""
                                         params = ( id_pedido, item.get("matched").get("id"))
-                                        res_detalle = execute_query(query, params) 
-
+                                        res_detalle = execute_query(query, params)
+                    case "UPDATE_ITEM":
+                        for item in productos.get("items", []):
+                            if item.get("cantidad") == 0:
+                                query = """ DELETE FROM detalle_pedido WHERE id_pedido = %s AND id_producto = %s"""
+                                params = ( id_pedido, item.get("matched").get("id"))
+                                res_detalle = execute_query(query, params)
+                            else:
+                                query = """SELECT id_detalle, cantidad
+                                            FROM detalle_pedido
+                                            WHERE id_pedido = %s AND id_producto = %s"""
+                                params = ( id_pedido, item.get("matched").get("id"))
+                                res_detalle = execute_query(query, params, fetchone=True)
+                                especificaciones_txt = normalizar_especificaciones(item)
+                                if res_detalle:
+                                    id_detalle, cantidad_actual = res_detalle
+                                    query = """ UPDATE detalle_pedido SET cantidad = %s, total = %s, especificaciones = CASE
+                                                        WHEN %s IS NULL OR %s = '' THEN especificaciones
+                                                        ELSE %s END
+                                                        WHERE id_detalle = %s"""
+                                    params = ( item.get("cantidad", 1), (item.get("matched").get("price") * item.get("cantidad", 1)),especificaciones_txt,especificaciones_txt,especificaciones_txt, id_detalle)
+                                    res_detalle = execute_query(query, params)
+                                else:
+                                    query = """ INSERT INTO detalle_pedido ( id_producto,id_pedido, cantidad, total, especificaciones) VALUES (%s, %s, %s, %s, %s)"""
+                                    params = (item.get("matched").get("id"), id_pedido, item.get("cantidad"), (item.get("matched").get("price") * item.get("cantidad", 1)), especificaciones_txt )
+                                    res_detalle = execute_query(query, params)
+                    case "ACLARACION":
+                        items = obtener_menu()
+                        mensaje = generar_mensaje_sin_intencion(pregunta_usuario, items)
+                        send_text_response(sender, mensaje)
+                        return
                 log_message(f'Pedido modificado correctamente: {id_pedido} para {sender}.', 'INFO')
                 query_actualizar_total = """update pedidos set total_productos = 
                                             (select sum(total) from detalle_pedido		
@@ -781,7 +798,7 @@ def generar_pago_domicilio(sender: str, nombre_cliente: str, codigo_unico: str, 
                 send_text_response(os.getenv("NUMERO_ADMIN"), f"No se pudo generar link de pago para {nombre_cliente} ({sender}) por un total de {total_final}. Código único: {codigo_unico}.")
         except Exception as e:
             log_message(f"Advertencia: no se pudo generar link de pago inmediato: {e}", "WARN")
-def subflujo_recoger_restaurante(sender: str, nombre_cliente: str):
+def     subflujo_recoger_restaurante(sender: str, nombre_cliente: str):
     try:
         log_message("Empieza subflujo recoger restaurante", "INFO")
         #mensaje_sede: str = generar_mensaje_seleccion_sede(nombre_cliente)
@@ -870,6 +887,30 @@ def subflujo_verificación_pago(sender: str, nombre_cliente: str, respuesta_usua
         log_message(f'Error en <SubflujoVerificacionPago>: {e}.', 'ERROR')
         raise e
 
+def subflujo_tiempo_recogida(sender: str, respuesta_usuario: str) -> None:
+
+    try:
+        mensaje=extraer_ultimo_mensaje(respuesta_usuario)
+        mensaje = get_tiempo_recogida(mensaje)
+        tiempo_estimado=calcular_minutos(mensaje)
+        if tiempo_estimado == "No presente" or tiempo_estimado is None:
+            send_text_response(sender, "Disculpa, no entendí el tiempo de recogida que me diste. ¿Podrías escribirlo de nuevo, por favor?")
+            return
+        query: str = """
+        UPDATE pedidos
+        SET tiempo_estimado = %s
+        WHERE id_whatsapp = (SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s)
+        AND estado = 'pendiente'
+        """
+        params: tuple = (tiempo_estimado, sender) 
+
+        execute_query(query, params)
+
+
+
+    except Exception as e:
+        log_message(f'Error en <SubflujoTiempoRecogida>: {e}.', 'ERROR')
+        raise e
 # --- ORQUESTADOR DE SUBFLUJOS --- #
 def orquestador_subflujos(
     sender: str,
@@ -930,7 +971,9 @@ def orquestador_subflujos(
         elif clasificacion_mensaje == "preguntas_generales" or (clasificacion_mensaje == "consulta_menu" and (type_text == "pregunta" or type_text == "preguntas_generales")):
             subflujo_preguntas_generales(sender, pregunta_usuario, nombre_cliente)
         elif clasificacion_mensaje == "sin_intencion":
-            subflujo_sin_intencion(sender, nombre_cliente, pregunta_usuario)
+            items = obtener_menu()
+            mensaje = generar_mensaje_sin_intencion(pregunta_usuario, items)
+            send_text_response(sender, mensaje)
         elif clasificacion_mensaje == "quejas":
             subflujo_quejas(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "transferencia":
@@ -975,11 +1018,8 @@ def orquestador_subflujos(
         elif clasificacion_mensaje == "confirmar_direccion":
             subflujo_confirmar_direccion(sender, nombre_cliente)
         elif clasificacion_mensaje == "recoger_restaurante":
-            if obtener_intencion_futura(sender) == "eleccion_sede":
-                subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
-            else:
-                subflujo_recoger_restaurante(sender, nombre_cliente)
-                subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
+            subflujo_recoger_restaurante(sender, nombre_cliente)
+            subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "eleccion_sede":
             subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
         elif (clasificacion_mensaje == "direccion" or clasificacion_mensaje == "consulta_menu") and obtener_intencion_futura(sender) == "eleccion_sede":
@@ -1011,6 +1051,11 @@ def orquestador_subflujos(
             except Exception as e:
                 log_message(f"Error al corregir dirección: {e}", "ERROR")
                 send_text_response(sender, "Hubo un error al procesar tu dirección. Por favor, intenta nuevamente.")
+        elif clasificacion_mensaje == "tiempo_de_recogida":
+            subflujo_tiempo_recogida(sender,pregunta_usuario)
+            send_text_response(sender, "¡Perfecto! Te esperamos. Si necesitas algo más, no dudes en decírmelo.")
+        elif clasificacion_mensaje == "despedida":
+            send_text_response(sender, "¡Perfecto! Te esperamos. Si necesitas algo más, no dudes en decírmelo.")
         return None
     except Exception as e:
         log_message(f"Ocurrió un problema en <OrquestadorSubflujos>: {e}", "ERROR")
