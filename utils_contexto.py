@@ -1,3 +1,4 @@
+# Last modified: 2025-21-12 Juan Agudelo
 import contextvars
 from typing import Optional
 from utils_database import execute_query
