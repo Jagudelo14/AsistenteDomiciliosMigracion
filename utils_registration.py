@@ -45,20 +45,6 @@ def update_datos_personales(sender: str, id_restaurante: str, valor: bool) -> No
         logging.error(f"update_datos_personales error: {e}")
         raise
 
-def save_personal_data(sender: str, id_restaurante: str, tipo_doc: str, n_doc: str, email: str) -> None:
-    try:
-        query = """
-            UPDATE public.clientes_whatsapp
-            SET "Tipo_Doc" = %s, "N_Doc" = %s, email = %s
-            WHERE telefono = %s AND id_restaurante = %s;
-        """
-        params = (tipo_doc or None, n_doc or None, email or None, sender, id_restaurante)
-        execute_query(query, params)
-    except Exception as e:
-        log_message(f"save_personal_data error: {e}", "ERROR")
-        logging.error(f"save_personal_data error: {e}")
-        raise
-
 def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, n_doc: str, email: str) -> None:
     """
     Actualiza solo los campos que traigan valor útil (no None y != "No proporcionado").
@@ -91,8 +77,6 @@ def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, 
         log_message(f"save_personal_data_partial error: {e}", "ERROR")
         logging.error(f"save_personal_data_partial error: {e}")
         raise
-
-
 
 def check_and_mark_datos_personales(sender: str, id_restaurante: str) -> list:
     """

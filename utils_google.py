@@ -1,5 +1,5 @@
 # utils_google.py
-# Last modified: 2025-10-02 by Andrés Bermúdez
+# Last modified: 2025-21-12 Juan Agudelo
 
 import logging
 import googlemaps
@@ -25,22 +25,6 @@ def obtener_cliente_google_maps() -> googlemaps:
         log_message(f"Ocurrió un error al crear cliente, {e}", "ERROR")
         raise e 
         
-def calcular_valor_envio(distancia: float) -> int:
-    try:
-        """Se calcula el valor del envio a razón de la distancia"""
-        log_message(f"Empieza a calcular el valor del envio con distancia {distancia} km.", "INFO")
-        valor: float
-        if distancia <= 2000:
-            valor = 2000
-        else:
-            valor = 2000 + ((distancia -2000)*0.4)
-        valor_redondeado: int = round(valor // 100)*100
-        log_message(f"Valor del envio es de {valor_redondeado} COP.", "INFO")
-        return valor_redondeado
-    except Exception as e:
-        log_message(f"Error en calcular valor envio {e}", "ERROR")
-        raise e
-
 def primera_regla_tiempo(id_sede: str, tiempo_base: int) -> int:
     """
     Regla para calcular el tiempo estimado de pedido basado en la demanda actual.
@@ -369,7 +353,7 @@ def calcular_valor(distancia) -> float:
     if distancia <= 2000:
         valor = 2000
     else:
-        valor = 2000 + ((distancia - 2000) * 0.4)
+        valor = 2000 + ((distancia - 2000) * 0.4)  # noqa: F841
 
     #valor_redondeado = round(valor // 100) * 100
     valor_redondeado = 0.0  # establecer valor del domicilio en 0

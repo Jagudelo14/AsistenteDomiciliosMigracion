@@ -1,8 +1,7 @@
 # utils_database.py
-# Last modified: 2025-09-30 by Andrés Bermúdez
+# Last modified: 2025-21-12 Juan Agudelo
 
 import os
-import psycopg2
 from psycopg2.extensions import connection, cursor
 from psycopg2.pool import ThreadedConnectionPool
 import logging

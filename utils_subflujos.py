@@ -1,7 +1,6 @@
 # utils_subflujos.py
-# Last modified: 2025-11-05 by Andrés Bermúdez
+# Last modified: 2025-21-12 Juan Agudelo
 
-import ast
 import json
 import os
 import random
@@ -27,7 +26,6 @@ from utils import (
     marcar_intencion_como_resuelta,
     marcar_pedido_como_definitivo,
     match_item_to_menu,
-    normalizar_entities_items,
     obtener_datos_cliente_por_telefono,
     obtener_estado_pedido_por_codigo,
     obtener_intencion_futura_mensaje_chatbot,
@@ -42,7 +40,7 @@ from utils import (
     borrar_intencion_futura,
     normalizar_especificaciones
 )
-from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, sin_intencion_respuesta_variable, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida
+from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida
 from utils_database import execute_query
 from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
@@ -110,7 +108,6 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
         pedido_dict: dict = {}
         if not bandera_revision:
             log_message(f"Nuevo pedido para {sender}.", "INFO")
-            entidades_text = normalizar_entities_items(entidades_text)
             pedido_dict = mapear_pedido_al_menu(pregunta_usuario, items_menu)
 
         # --- Intento rápido: si el usuario respondió con "cantidad + producto"
@@ -153,7 +150,6 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
             log_message(f'No se pudo crear el pedido para {sender}. pedido_info={pedido_info}', 'ERROR')
             send_text_response(sender, "Lo siento, no pude guardar tu pedido. Por favor inténtalo de nuevo más tarde.")
             return
-        #items_info = guardar_ordenes(pedido_info["idpedido"], pedido_dict, sender)
         info_promociones = None
         eleccion_promocion = None
         if obtener_intencion_futura(sender) == "continuacion_promocion":
@@ -254,17 +250,6 @@ def subflujo_preguntas_generales(sender: str, pregunta_usuario: str, nombre_clie
     except Exception as e:
         logging.error(f"Error en <SubflujoPreguntasGenerales>: {e}")
         log_message(f'Error en <SubflujoPreguntasGenerales>: {e}.', 'ERROR')
-        raise e
-
-def subflujo_sin_intencion(sender: str, nombre_cliente: str, contenido_usuario: str) -> None:
-    """Maneja el caso en que no se detecta una intención específica usando GPT-3.5-turbo."""
-    try:
-        mensaje: str = sin_intencion_respuesta_variable(contenido_usuario, nombre_cliente)
-        send_text_response(sender, mensaje)
-
-    except Exception as e:
-        logging.error(f"Error en <SubflujoSinIntencion>: {e}")
-        log_message(f'Error en <SubflujoSinIntencion>: {e}.', 'ERROR')
         raise e
 
 def subflujo_quejas(sender: str, nombre_cliente: str, contenido_usuario: str) -> None:
@@ -465,7 +450,7 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
                     wHERE codigo_unico=%s;"""
             result= execute_query(query,(codigo_unico,))
             medio_pago_real=result[0][0] if result else "desconocido"
-        datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
+        datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)  # noqa: F841
         dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
         tiempo= dict_registro_temp.get("tiempo_estimado", "N/A")
         total_productos = dict_registro_temp.get("total_final", "N/A")
@@ -814,7 +799,25 @@ def     subflujo_recoger_restaurante(sender: str, nombre_cliente: str):
 def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
     try:
         log_message("Empieza subflujo eleccion sede", "INFO")
-        codigo_unico: str = obtener_intencion_futura_observaciones(sender)
+        query_pendientes = """
+                    SELECT d.id_pedido,i.nombre,d.cantidad,i.precio,d.total,d.especificaciones, p.codigo_unico
+                        FROM detalle_pedido d
+                        INNER JOIN pedidos p 
+                            ON d.id_pedido = p.idpedido
+                        INNER JOIN items i 
+                            ON i.iditem = d.id_producto
+                        WHERE p.codigo_unico = (
+                            SELECT p2.codigo_unico
+                            FROM pedidos p2
+                            INNER JOIN clientes_whatsapp cw 
+                                ON p2.id_whatsapp = cw.id_whatsapp
+                            WHERE cw.telefono = %s and p.estado = 'pendiente' and p.es_temporal = true
+                            ORDER BY p2.idpedido DESC
+                            LIMIT 1
+                        );
+            """
+        result = execute_query(query_pendientes, (sender,))
+        codigo_unico = result[0][6] if result else 0
         #MODIFICACION TEMPORAL SOLO UNA SEDE
         datos_mapeo_sede: dict = mapear_sede_cliente("caobos")
         if datos_mapeo_sede.get("error"):
@@ -1035,7 +1038,6 @@ def orquestador_subflujos(
                 if not direccion:
                     send_text_response(sender, "Comparteme la dirección a actualizar por favor")
                     return
-                send_text_response(sender, "Validare que estes en nuestra area de cobertura dame un par de minutos")
                 geocode_and_assign(sender, direccion, os.environ.get("ID_RESTAURANTE", "5"))
                 datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, os.environ.get("ID_RESTAURANTE", "5"))
                 latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)

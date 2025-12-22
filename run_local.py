@@ -1,3 +1,4 @@
+# Last modified: 2025-21-12 Juan Agudelo
 from dotenv import load_dotenv
 
 # cargar .env si existe

@@ -1,12 +1,12 @@
 # function_app.py
-# Last modified: 2025-12-20 Juan Agudelo
+# Last modified: 2025-21-12 Juan Agudelo
 # ajuste contexto mapear pedido
 import azure.functions as func
 from datetime import datetime
 import logging
 import os
 import json
-from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, save_message_to_db, get_client_name_database, guardar_clasificacion_intencion,verify_hour_atettion,validate_duplicated_message
+from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, get_client_name_database,verify_hour_atettion,validate_duplicated_message
 from utils_chatgpt import get_classifier, get_openai_key,get_direction,get_name
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign
@@ -72,9 +72,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         #Validación mensaje duplicado###################################
-        if validate_duplicated_message(message_id):
-             logging.info(f"Mensaje duplicado: {message_id}")
-             return func.HttpResponse("Mensaje duplicado", status_code=200)
+        #if validate_duplicated_message(message_id):
+        #     logging.info(f"Mensaje duplicado: {message_id}")
+        #     return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
@@ -177,8 +177,6 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 mime_type = message["image"].get("mime_type", "")
                 log_message(f"Imagen recibida de {sender}: ID {image_id}, Tipo {mime_type}", "INFO")
                 # Guardar un registro sencillo en la base y clasificar como "validacion_pago"
-                save_message_to_db(sender, "[imagen recibida]", "validacion_pago", "image", "{}", tipo_general, ID_RESTAURANTE)
-                guardar_clasificacion_intencion(sender, "validacion_pago", "sin_resolver", "usuario", "[imagen recibida]", "", "image", "{}")
                 # Llamar al manejador de diálogo como si el usuario pidiera validar pago
                 manejar_dialogo(
                     sender=sender,
@@ -265,7 +263,6 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     f"Clasificación: {classification}, Tipo: {type_text}, Entidades: {entities_text}"
                 )
                 # Guardar mensaje en base de datos
-                #save_message_to_db(sender, text, classification, type_text, str(entities_text), tipo_general, ID_RESTAURANTE)
                 manejar_dialogo(
                     sender=sender,
                     clasificacion_mensaje=classification,

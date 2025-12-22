@@ -1,10 +1,9 @@
 # utils.py
-# Last modified: 2025-09-30 by Andrés Bermúdez
+# Last modified: 2025-21-12 Juan Agudelo
 
 from decimal import Decimal
 import logging
 import os
-import unicodedata
 from heyoo import WhatsApp
 import re
 import ast
@@ -12,18 +11,13 @@ from utils_database import execute_query, execute_query_columns
 import inspect
 import traceback
 from typing import Dict, Any, List
-from datetime import datetime, date, time,timedelta
+from datetime import datetime, date, time
 from zoneinfo import ZoneInfo
 import json
 import requests
 import difflib
 from utils_contexto import get_sender,actualizar_conversacion
 
-REPLACE_PHRASES = [
-    "cambia todo", "borra lo que había", "solo quiero esto", "quita lo anterior",
-    "nuevo pedido", "empezar de cero", "anula pedido", "cancelar pedido", "resetear pedido",
-    "empezar from cero", "empezar de 0"
-]
 
 def register_log(mensaje: str, tipo: str, ambiente: str = "Whatsapp", idusuario: int = 1, archivoPy: str = "", function_name: str = "",line_number: int = 0) -> None:
     try:
@@ -189,18 +183,6 @@ def handle_create_client(sender: str, datos: str, id_restaurante: str, es_tempor
         logging.error(f'Error al hacer uso de función <handleCreateClient>: {e}.')
         raise e
 
-def save_message_to_db(sender: str, message: str, classification: str, tipo_clasificacion: str, entidades: str, tipo_mensaje: str, id_restaurante: str) -> None:
-    try:
-        """Guarda el mensaje recibido y su clasificación en la base de datos."""
-        execute_query("""
-            INSERT INTO conversaciones_whatsapp (telefono, mensaje_usuario, clasificacion, tipo_clasificacion, entidades, fecha, tipo_mensaje, idcliente)
-            VALUES (%s, %s, %s, %s, %s, (NOW() AT TIME ZONE 'America/Bogota'), %s, %s);
-        """, (sender, message, classification, tipo_clasificacion, entidades, tipo_mensaje, id_restaurante))
-        logging.info('Mensaje guardado exitosamente.')
-    except Exception as e:
-        log_message(f'Error al hacer uso de función <SaveMessageToDB>: {e}.', 'ERROR')
-        logging.error(f'Error al hacer uso de función <SaveMessageToDB>: {e}.')
-
 def get_client_name_database(sender: str, id_restaurante: str) -> str:
     try:
         """Obtiene el nombre del cliente en la base de datos"""
@@ -308,70 +290,6 @@ def point_in_polygon(lat, lng, poly):
                 inside = not inside
 
     return inside
-
-def guardar_clasificacion_intencion(
-    telefono: str,
-    clasificacion: str,
-    estado: str,
-    emisor: str,
-    pregunta: str,
-    respuesta: str,
-    tipo_mensaje: str,
-    entitites: str
-) -> int | None:
-    """
-    Guarda la clasificación de intención en la base de datos y devuelve el ID insertado.
-    """
-    try:
-        if isinstance(entitites, dict):
-            entitites = json.dumps(entitites)
-        query = """
-            INSERT INTO public.clasificacion_intenciones
-                (telefono, clasificacion, estado, emisor, pregunta, respuesta, tipo_mensaje, entitites)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id;
-        """
-        values = (telefono, clasificacion, estado, emisor, pregunta, respuesta, tipo_mensaje, entitites)
-        result = execute_query(query, values, fetchone=True)
-        inserted_id = result[0] if result else None
-        if inserted_id:
-            logging.info(f"✅ Clasificación guardada con éxito. ID: {inserted_id}")
-            log_message(f"Clasificación de intención guardada exitosamente. ID: {inserted_id}", "INFO")
-            return inserted_id
-        else:
-            raise Exception("No se devolvió ningún ID después del INSERT.")
-    except Exception as e:
-        logging.error(f"Error al guardar la clasificación: {e}")
-        log_message(f"Error al guardar la clasificación de intención: {e}", "ERROR")
-        return None
-
-def obtener_ultima_intencion_no_resuelta(telefono: str) -> dict[str, Any] | None:
-    """
-    Retorna la última intención con estado 'no_resuelto' asociada al teléfono dado.
-    Devuelve un diccionario con los campos principales o None si no hay resultados.
-    """
-    try:
-        query = """
-            SELECT id, telefono, clasificacion, estado, emisor, pregunta, respuesta, tipo_mensaje, entitites
-            FROM public.clasificacion_intenciones
-            WHERE telefono = %s AND estado = 'sin_resolver'
-            ORDER BY id DESC
-            LIMIT 1;
-        """
-        result = execute_query(query, (telefono,), fetchone=True)
-        if result:
-            columnas = ["id", "telefono", "clasificacion", "estado", "emisor", "pregunta", "respuesta", "tipo_mensaje", "entitites"]
-            data = dict(zip(columnas, result))
-            logging.info(f"Última intención no resuelta encontrada para {telefono}: {data['id']}")
-            log_message(f"Última intención no resuelta encontrada para {telefono}: {data['id']}", "INFO")
-            return data
-        else:
-            logging.info(f"No hay intenciones no resueltas para {telefono}.")
-            log_message(f"No hay intenciones no resueltas para {telefono}.", "INFO")
-            return None
-    except Exception as e:
-        logging.error(f"Error al obtener la última intención no resuelta: {e}")
-        return None
 
 def marcar_intencion_como_resuelta(id_intencion: int) -> bool:
     """
@@ -511,31 +429,6 @@ def obtener_menu() -> list[dict[str, Any]]:
         log_message(f"Error al obtener el menú: {e}", "ERROR")
         return []
 
-def normalizar_entities_items(entities: dict) -> dict:
-    try:
-        items = entities.get("items", [])
-        resultado = {}
-        for item in items:
-            producto = item.get("producto", "").strip().lower()
-            modalidad = item.get("modalidad", "")
-            especificaciones = tuple(sorted(item.get("especificaciones", [])))
-            cantidad = item.get("cantidad", 1)
-            key = (producto, especificaciones, modalidad)
-            if key in resultado: # si ya existía, sumamos cantidad
-                resultado[key]["cantidad"] += cantidad
-            else:
-                resultado[key] = {
-                    "producto": producto,
-                    "modalidad": modalidad,
-                    "especificaciones": list(especificaciones),
-                    "cantidad": cantidad }
-        entities["items"] = list(resultado.values())
-        log_message(f'Entities normalizadas: {entities}', 'INFO')
-        return entities
-    except Exception as e:
-        log_message(f"Error en función <NormalizarEntitiesItems>: {e}", "ERROR")
-        return entities
-
 def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = False) -> dict:
     try:
         """ Guarda un pedido completo en la BD y retorna: { "idpedido": X, "codigo_unico": "P-00015" } """
@@ -562,10 +455,10 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
             new_num = 1
         codigo_unico = f"P-{new_num:05d}" 
         # ------------------------------- # 4. Preparar productos y total # ------------------------------- 
-        productos = []
+        productos = []  # noqa: F841
         for item in pedido_dict.get("items", []):
             matched = item.get("matched") or {}
-            nombre = matched.get("name")
+            nombre = matched.get("name")  # noqa: F841
 
             # determinar cantidad: prioridad campos explícitos -> note -> fallback 1
             cantidad = item.get("cantidad") or item.get("quantity") or item.get("qty")
@@ -621,7 +514,7 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
             id=item.get("matched").get("id")
             if id == '' or id is None:
                 continue  # saltar items sin id_producto válido
-            res_detalle = execute_query(query, params)
+            res_detalle = execute_query(query, params)  # noqa: F841
         log_message(f'Detalle de pedido guardado para pedido ID {res[0]}', 'INFO')  
         return {
             "idpedido": res[0],
@@ -654,79 +547,6 @@ def normalizar_especificaciones(item):
     specs_final = [s.capitalize() for s in specs_unicos]
 
     return " | ".join(specs_final)
-
-
-def guardar_ordenes(idpedido: int, pedido_json: dict, sender: str) -> dict:
-    """
-    Guarda cada item del pedido en la tabla 'ordenes'.
-    Estructura esperada de pedido_json:
-    {
-        "order_complete": true/false,
-        "items": [
-            {
-                "requested": {
-                    "producto": "string",
-                    "modalidad": "",
-                    "especificaciones": []
-                },
-                "matched": {
-                    "name": "string",
-                    "id": "",
-                    "price": float
-                },
-                ...
-            }
-        ],
-        "total_price": float
-    }
-    """
-    try:
-        items = pedido_json.get("items", [])
-        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
-        res_idw = execute_query(q_idw, (sender,), fetchone=True)
-        id_whatsapp = res_idw[0] if res_idw else None
-        if not items:
-            raise ValueError("El JSON no contiene items para guardar en ordenes.")
-        inserted_ids = []
-        for item in items:
-            matched = item.get("matched", {})
-            requested = item.get("requested", {})
-            nombre_producto = matched.get("name", requested.get("producto"))
-            precio_producto = matched.get("price", 0)
-            especificaciones_list = requested.get("especificaciones", [])
-            especificaciones_texto = ", ".join(especificaciones_list) if especificaciones_list else ""
-            query = """
-                INSERT INTO ordenes (
-                    desglose_productos,
-                    desglose_precio,
-                    id_whatsapp,
-                    idpedidos,
-                    especificaciones
-                )
-                VALUES (%s, %s, %s, %s, %s)
-                RETURNING idorden;
-            """
-            params = (
-                nombre_producto,
-                precio_producto,
-                id_whatsapp,
-                idpedido,
-                especificaciones_texto
-                )
-            result = execute_query(query, params, fetchone=True)
-            inserted_ids.append(result[0])
-        log_message(f'Ordenes guardadas con IDs: {inserted_ids}', 'INFO')
-        return {
-            "status": "success",
-            "mensaje": f"{len(inserted_ids)} registros insertados en ordenes.",
-            "ordenes_ids": inserted_ids
-        }
-    except Exception as e:
-        log_message(f'Error al hacer uso de función <GuardarOrdenes>: {e}.', 'ERROR')
-        return {
-            "status": "error",
-            "mensaje": str(e)
-        }
 
 def obtener_intencion_futura_observaciones(telefono: str) -> str:
     """
@@ -766,29 +586,6 @@ def obtener_intencion_futura_mensaje_chatbot(telefono: str) -> str:
         """
         resultado = execute_query(query, (telefono,), fetchone=True)
         log_message(f"Intención futura - mensaje_chatbot obtenida para {telefono}: {resultado}", "INFO")
-        if resultado:
-            return resultado[0]
-        else:
-            return None
-    except Exception as e:
-        log_message(f"Error al consultar la base de datos: {e}")
-        return None
-
-def obtener_intencion_futura_mensaje_usuario(telefono: str) -> str:
-    """
-    Retorna el valor de intencion_futura para un teléfono específico
-    desde la tabla public.clasificacion_intenciones_futuras.
-    """
-    try:
-        query = """
-            SELECT mensaje_usuario
-            FROM public.clasificacion_intenciones_futuras
-            WHERE telefono = %s
-            ORDER BY telefono ASC
-            LIMIT 1;
-        """
-        resultado = execute_query(query, (telefono,), fetchone=True)
-        log_message(f"Intención futura - mensaje_usuario obtenida para {telefono}: {resultado}", "INFO")
         if resultado:
             return resultado[0]
         else:
@@ -841,29 +638,6 @@ def _price_of_item(it: Dict) -> float:
     except Exception:
         price_num = 0.0
     return round(price_num * qty_num, 2)
-
-def _merge_items(base_items: List[Dict], new_items: List[Dict], replace_all: bool = False) -> List[Dict]:
-    """Fusiona base_items y new_items evitando duplicados. Si replace_all=True, devuelve solo new_items."""
-    if replace_all:
-        seen = set()
-        out = []
-        for it in new_items:
-            key = _normalize_name(it)
-            if key not in seen:
-                seen.add(key)
-                out.append(it)
-        return out
-    merged = {}
-    for it in base_items or []:
-        key = _normalize_name(it)
-        if key:
-            merged[key] = it
-    for it in new_items or []:
-        key = _normalize_name(it)
-        if not key:
-            key = f"_unknown_{len(merged)}"
-        merged[key] = it
-    return list(merged.values())
 
 def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
     """Marca es_temporal = FALSE en el pedido del cliente."""
@@ -941,52 +715,6 @@ def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
         log_message(f'Error en <MarcarPedidoComoDefinitivo>: {e}', 'ERROR')
         logging.error(f'Error en marcar_pedido_como_definitivo: {e}')
         return {"actualizado": False, "error": str(e)}
-
-def eliminar_pedido(sender: str, codigo_unico: str) -> dict:
-    try:
-        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
-        res_idw = execute_query(q_idw, (sender,), fetchone=True)
-        id_whatsapp = res_idw[0] if res_idw else None
-
-        if id_whatsapp is None:
-            return {
-                "eliminado": False,
-                "msg": "No existe id_whatsapp para este número."
-            }
-        query = """
-            DELETE FROM ordenes
-            WHERE idpedidos = (
-                SELECT idpedido
-                FROM pedidos
-                WHERE codigo_unico = %s
-                AND id_whatsapp = %s
-            );
-        """
-        params = (codigo_unico, id_whatsapp)
-        execute_query(query, params)
-        query_2 = """
-            DELETE FROM pedidos
-            WHERE codigo_unico = %s
-            AND id_whatsapp = %s
-            RETURNING idpedido;
-        """
-        res = execute_query(query_2, params, fetchone=True)
-        log_message(f'Pedido eliminado con código único {codigo_unico}', 'INFO')
-        if res:
-            return {
-                "eliminado": True,
-                "idpedido": res[0],
-                "codigo_unico": codigo_unico
-            }
-        else:
-            return {
-                "eliminado": False,
-                "msg": "No se encontró un pedido con ese código y ese id_whatsapp."
-            }
-    except Exception as e:
-        log_message(f'Error en <EliminarPedido>: {e}', 'ERROR')
-        logging.error(f'Error en eliminar_pedido: {e}')
-        return {"eliminado": False, "error": str(e)}
     
 def obtener_pedido_por_codigo_orignal(sender: str, codigo_unico: str) -> dict:
     try:
@@ -1254,56 +982,6 @@ def obtener_ordenes_por_idpedido(idpedido: int) -> List[dict]:
         })
     return ordenes
 
-# Helper: insertar una orden (retorna idorden)
-def insertar_orden(id_whatsapp: int, idpedido: int, nombre_producto: str, precio: float, especificaciones_texto: str = "") -> int:
-    q = """
-        INSERT INTO ordenes (desglose_productos, desglose_precio, id_whatsapp, idpedidos, especificaciones)
-        VALUES (%s, %s, %s, %s, %s)
-        RETURNING idorden;
-    """
-    res = execute_query(q, (nombre_producto, precio, id_whatsapp, idpedido, especificaciones_texto), fetchone=True)
-    return res[0]
-
-# Helper: eliminar una orden por idorden
-def eliminar_orden_por_idorden(idorden: int) -> None:
-    q = "DELETE FROM ordenes WHERE idorden = %s"
-    execute_query(q, (idorden,))
-
-# Helper: eliminar una orden por nombre (elimina una instancia que más se parezca)
-def eliminar_una_instancia_orden_por_nombre(idpedido: int, nombre_producto: str, especificaciones_texto: str = "") -> bool:
-    ordenes = obtener_ordenes_por_idpedido(idpedido)
-    # buscar coincidencia exacta primero, si no fuzzy match
-    for o in ordenes:
-        if o["producto"].lower() == nombre_producto.lower() and (not especificaciones_texto or o["especificaciones"] == especificaciones_texto):
-            eliminar_orden_por_idorden(o["idorden"])
-            return True
-    # fuzzy match por nombre
-    productos = [o["producto"] for o in ordenes]
-    if productos:
-        match = difflib.get_close_matches(nombre_producto, productos, n=1, cutoff=0.6)
-        if match:
-            # eliminar la primera coincidencia que tenga ese nombre
-            for o in ordenes:
-                if o["producto"] == match[0]:
-                    eliminar_orden_por_idorden(o["idorden"])
-                    return True
-    return False
-
-# Helper: recalcular totales y actualizar tabla pedidos
-def recalcular_y_actualizar_pedido(idpedido: int) -> dict:
-    q = "SELECT desglose_productos, desglose_precio FROM ordenes WHERE idpedidos = %s"
-    rows = execute_query(q, (idpedido,), fetchall=True)
-    productos = [r[0] for r in rows] if rows else []
-    total = sum([float(r[1]) for r in rows]) if rows else 0.0
-    productos_str = " | ".join(productos) if productos else ""
-    q_upd = "UPDATE pedidos SET producto = %s, total_productos = %s WHERE idpedido = %s RETURNING idpedido, codigo_unico, total_productos"
-    res = execute_query(q_upd, (productos_str, total, idpedido), fetchone=True)
-    return {
-        "idpedido": res[0],
-        "codigo_unico": res[1],
-        "total_productos": float(res[2])
-    }
-
 # Helper: buscar producto en el menu (obtiene nombre oficial y precio)
 def match_item_to_menu(product_name: str, items_menu: List[dict]) -> dict:
     # items_menu: lista de dicts; intentamos buscar por keys comunes 'name','price' o 'nombre','precio'
@@ -1325,123 +1003,6 @@ def match_item_to_menu(product_name: str, items_menu: List[dict]) -> dict:
         return {"name": n, "price": float(mapping[n]), "found": True}
     # no encontrado
     return {"name": product_name, "price": 0.0, "found": False}
-
-def obtener_datos_promocion(telefono: str) -> dict | None:
-    """
-    Retorna un diccionario con:
-      - bandera_promocion (bool)
-      - info_promociones (list)
-      - eleccion_promocion (dict)
-    
-    Consultado desde la columna JSONB `datos_promocion` de la tabla
-    public.clasificacion_intenciones_futuras.
-
-    Si no existe el registro o la columna está vacía, retorna None.
-    """
-
-    try:
-        query = """
-            SELECT datos_promocion
-            FROM public.clasificacion_intenciones_futuras
-            WHERE telefono = %s
-            LIMIT 1;
-        """
-
-        resultado = execute_query(query, (telefono,), fetchone=True)
-        log_message(f"Datos de promoción obtenidos para {telefono}: {resultado}", "INFO")
-
-        if not resultado:
-            return None  # No existe el registro
-
-        datos_json = resultado[0]
-
-        if not datos_json:
-            return None  # La columna está vacía o null
-
-        # PostgreSQL → Python: dict automático
-        # Si tu driver ya devuelve JSON como dict (psycopg2 lo hace), puedes usarlo directo.
-        # Si lo devuelve como string JSON, lo parseamos.
-        if isinstance(datos_json, str):
-            datos_json = json.loads(datos_json)
-
-        # Garantizar que retorna las 3 claves aunque falten
-        return {
-            "bandera_promocion": datos_json.get("bandera_promocion"),
-            "info_promociones": datos_json.get("info_promociones"),
-            "eleccion_promocion": datos_json.get("eleccion_promocion"),
-        }
-
-    except Exception as e:
-        log_message(f"Error al consultar datos de promoción: {e}", "ERROR")
-        return None
-
-def _normalize_text(s: str) -> str:
-    if not s:
-        return ""
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    s = s.lower()
-    # dejar solo letras/números/espacios
-    s = re.sub(r'[^a-z0-9\s]', ' ', s)
-    s = re.sub(r'\s+', ' ', s).strip()
-    return s
-
-def _apply_direct_selection_from_text(pedido: dict, mensaje_usuario: str, fuzzy_cutoff: float = 0.78) -> dict:
-    """
-    Busca en cada item con status 'multiple_matches' si el mensaje del usuario
-    menciona claramente alguna candidate. Si la encuentra, actualiza el item en sitio:
-    - matched -> candidate
-    - status -> 'found'
-    - candidates -> []
-    - añade nota explicativa
-    """
-    if not mensaje_usuario:
-        return pedido
-    mensaje_norm = _normalize_text(mensaje_usuario)
-
-    for it in pedido.get("items", []):
-        try:
-            if not it or it.get("status") != "multiple_matches":
-                continue
-            candidates = it.get("candidates") or []
-            # construir lista de nombres normalizados
-            for cand in candidates:
-                # el nombre preferido puede estar en 'name' o 'id'
-                cand_name = str(cand.get("name") or cand.get("id") or "")
-                cand_norm = _normalize_text(cand_name)
-                if not cand_norm:
-                    continue
-                # 1) substring directo (más seguro)
-                if cand_norm in mensaje_norm.split():
-                    # si el usuario solo escribió la palabra clave suelta
-                    it["matched"] = cand
-                    it["status"] = "found"
-                    it["candidates"] = []
-                    it["modifiers_applied"] = it.get("modifiers_applied", [])
-                    it["note"] = f"Seleccionado automáticamente por mención del cliente: '{cand_name}'."
-                    break
-                if cand_norm in mensaje_norm:  # permite 'quiero una sierra clasica'
-                    it["matched"] = cand
-                    it["status"] = "found"
-                    it["candidates"] = []
-                    it["modifiers_applied"] = it.get("modifiers_applied", [])
-                    it["note"] = f"Seleccionado automáticamente por mención del cliente: '{cand_name}'."
-                    break
-                # 2) comparación fuzzy: medir similitud con todo el mensaje
-                # usamos difflib comparando el nombre candidato frente al mensaje normalizado
-                close = difflib.get_close_matches(cand_norm, [mensaje_norm], n=1, cutoff=fuzzy_cutoff)
-                if close:
-                    it["matched"] = cand
-                    it["status"] = "found"
-                    it["candidates"] = []
-                    it["modifiers_applied"] = it.get("modifiers_applied", [])
-                    it["note"] = f"Seleccionado por coincidencia fuzzy con el mensaje del cliente: '{cand_name}'."
-                    break
-        except Exception:
-            # no romper el flujo por un error en un item
-            logging.exception("Error aplicando selección directa en item del pedido")
-            continue
-    return pedido
 
 def obtener_datos_cliente_por_telefono(telefono: str, id_restaurante: str):
     """
@@ -1670,99 +1231,6 @@ def obtener_direccion(sender: str, id_restaurante: str) -> bool:
         logging.error(f"validate_personal_data error: {e}")
         return False
 
-def actualizar_order_complete_en_observaciones(sender: str) -> dict:
-    """
-    Lee la columna `observaciones` (json/jsonb) de public.clasificacion_intenciones_futuras
-    para el telefono=sender, fuerza order_complete = True, recalcula total_price desde
-    los items y actualiza la fila en la base. Retorna dict con el resultado y la nueva observación.
-    """
-    try:
-        query_sel = """
-            SELECT observaciones
-            FROM public.clasificacion_intenciones_futuras
-            WHERE telefono = %s
-            LIMIT 1;
-        """
-        res = execute_query(query_sel, (sender,), fetchone=True)
-        if not res or res[0] is None:
-            log_message(f"No se encontró observaciones para {sender}", "INFO")
-            return {"success": False, "msg": "No existe registro o observaciones vacías."}
-
-        observaciones_raw = res[0]
-
-        # Normalizar a dict
-        if isinstance(observaciones_raw, str):
-            try:
-                observaciones = json.loads(observaciones_raw)
-            except Exception:
-                try:
-                    observaciones = ast.literal_eval(observaciones_raw)
-                except Exception:
-                    observaciones = {"order_complete": False, "items": [], "total_price": 0.0}
-        elif isinstance(observaciones_raw, dict):
-            observaciones = observaciones_raw
-        else:
-            # tipo inesperado -> intentar convertir a str then parse
-            try:
-                observaciones = json.loads(str(observaciones_raw))
-            except Exception:
-                observaciones = {"order_complete": False, "items": [], "total_price": 0.0}
-
-        # Usar estructura segura
-        pedido = _safe_parse_order(observaciones)
-
-        # Forzar order_complete True
-        pedido["order_complete"] = True
-
-        # Recalcular total_price sumando total_price de cada item o unit_price*cantidad
-        total = 0.0
-        for it in pedido.get("items", []) or []:
-            if not isinstance(it, dict):
-                continue
-            tp = None
-            # preferir total_price
-            if "total_price" in it and it.get("total_price") is not None:
-                try:
-                    tp = float(it.get("total_price"))
-                except Exception:
-                    tp = None
-            # si no, intentar unit_price * quantity
-            if tp is None:
-                qty = it.get("quantity") or it.get("cantidad") or it.get("qty") or 1
-                unit = it.get("unit_price") or it.get("price") or it.get("matched", {}).get("price") if isinstance(it.get("matched"), dict) else 0
-                try:
-                    tp = float(unit) * float(qty)
-                except Exception:
-                    tp = 0.0
-            try:
-                total += float(tp or 0.0)
-            except Exception:
-                continue
-
-        pedido["total_price"] = round(total, 2)
-
-        # Serializar y actualizar DB (usar jsonb cast)
-        observaciones_db = json.dumps(pedido, ensure_ascii=False)
-        query_upd = """
-            UPDATE public.clasificacion_intenciones_futuras
-            SET observaciones = %s::jsonb,
-                fecha_actualizacion = CURRENT_TIMESTAMP
-            WHERE telefono = %s
-            RETURNING telefono;
-        """
-        upd_res = execute_query(query_upd, (observaciones_db, sender), fetchone=True)
-        if not upd_res:
-            log_message(f"No se pudo actualizar observaciones para {sender}", "ERROR")
-            return {"success": False, "msg": "Fallo al actualizar la base de datos."}
-
-        log_message(f"Observaciones actualizadas para {sender}", "INFO")
-        return {"success": True, "telefono": sender, "observaciones": pedido}
-    except Exception as e:
-        log_message(f"Error en <actualizar_order_complete_en_observaciones>: {e}", "ERROR")
-        logging.error(f"Error actualizar_order_complete_en_observaciones: {e}")
-        return {"success": False, "error": str(e)}
-    
-
 def corregir_total_price_en_result(result: Dict) -> Dict:
     """
     Recalcula y corrige únicamente el campo 'total_price' en el dict `result`.
@@ -1918,21 +1386,6 @@ def extraer_ultimo_mensaje(mensaje: str) -> str:
     except Exception as e:
         log_message(f"Error en extraer_ultimo_mensaje: {e}", "ERROR")
         return ""
-
-def obtener_dos_mensajes(telefono: str) -> str:
-    query = """
-    SELECT mensaje
-    FROM conversaciones,
-         jsonb_array_elements(conversacion->'mensajes') WITH ORDINALITY AS m(mensaje, idx)
-    WHERE telefono = %s
-    ORDER BY idx DESC
-    LIMIT %s;
-    """
-
-    mensajes  = execute_query(query, (telefono, 2))
-    mensajes = list(reversed(mensajes))
-
-    return str(mensajes)
 
 def actualizar_medio_entrega(sender: str, codigo_unico: str, metodo_entrega: str) -> dict:
     try:

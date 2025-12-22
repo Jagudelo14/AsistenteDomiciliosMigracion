@@ -1,14 +1,13 @@
 # utils_chatgpt.py
-# Last modified: 2025-11-05 by Andrés Bermúdez
+# Last modified: 2025-21-12 Juan Agudelo
 
 import re
 from openai import OpenAI
 import logging
-from typing import Any, List, Optional, Tuple, Dict
+from typing import Any,  Optional, Tuple, Dict
 import os
 import json
-import ast
-from utils import REPLACE_PHRASES, _apply_direct_selection_from_text, obtener_pedido_por_codigo, send_text_response, limpiar_respuesta_json, log_message, _safe_parse_order, _merge_items, _price_of_item, convert_decimals, to_json_safe,corregir_total_price_en_result
+from utils import send_text_response, limpiar_respuesta_json, log_message, convert_decimals, to_json_safe,corregir_total_price_en_result
 from utils_database import execute_query
 from datetime import datetime, date
 
@@ -630,59 +629,6 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
             "total_price": 0,
             "error": str(e)
         }
-  
-def sin_intencion_respuesta_variable(contenido_usuario: str, nombre_cliente: str) -> str:
-    try:
-        PROMPT_SIN_INTENCION = (
-            "Eres el asistente oficial de Sierra Nevada, La Cima del Sabor.\n"
-            "Tu objetivo es responder cuando el cliente envía algo que no tiene sentido, "
-            "como una palabra suelta, emojis sin contexto, números o símbolos.\n\n"
-
-            "TONO DE MARCA:\n"
-            "- Cálido, cercano y respetuoso.\n"
-            "- Puedes usar un toque juguetón o ligero, pero sin sarcasmo ni ironía.\n"
-            "- Lenguaje natural, claro y amable, como un buen anfitrión bogotano.\n"
-            "- Puedes usar 1 emoji suave si queda natural.\n"
-            "- Nunca suenes burlón, defensivo o exagerado.\n\n"
-
-            "REGLAS:\n"
-            "- Si el usuario envía algo aleatorio como 'a', 'su', emojis o símbolos, "
-            "responde con amabilidad y un guiño ligero, manteniendo calidez.\n"
-            "- Si envía banderas, puedes decir algo como: "
-            "\"No estoy seguro cómo se relaciona {contenido}, pero aquí estoy para ayudarte\".\n"
-            "- Termina SIEMPRE con un llamado a la acción invitando al cliente a contarte "
-            "qué desea pedir o consultar.\n"
-            "- Incluye el nombre del cliente: {nombre_cliente}.\n"
-            "- Máximo 1 o 2 frases.\n"
-            "- No inventes productos.\n\n"
-
-            "Contenido del usuario: \"{contenido}\"\n"
-            "Nombre del cliente: \"{nombre_cliente}\"\n\n"
-            "Responde aquí:"
-        )
-        client = OpenAI()
-        prompt = PROMPT_SIN_INTENCION.format(
-            contenido=contenido_usuario,
-            nombre_cliente=nombre_cliente
-        )
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Eres un asistente de un restaurante que responde con humor amable y ligero sarcasmo."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=80,
-            temperature=0.9
-        )
-        mensaje = response.choices[0].message.content
-        tokens_used = _extract_total_tokens(response)
-        if tokens_used is not None:
-            log_message(f"[OpenAI] sin_intencion tokens_used={tokens_used}", "DEBUG")
-        return mensaje.strip()
-    except Exception as e:
-        log_message(f'Error en función <sin_intencion>: {e}', 'ERROR')
-        logging.error(f"Error en función <sin_intencion>: {e}")
-        return "Lo siento, no entendí tu mensaje. ¿Podrías repetirlo de otra forma?"
 
 def saludo_dynamic(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
     try:
@@ -2564,42 +2510,6 @@ BAJO NINGUNA CIRCUSTANCIA PUEDES USAR ALGO DIFERENTE A ESTAS DOS RESPUESTAS Y NO
         return raw
     except Exception as e:
         log_message(f'Error en función <clasificador_consulta_menu>: {e}', 'ERROR')
-        return "error_clasificacion"
-    
-def clasificar_modificacion_pedido(mensaje_cliente: str) -> dict:
-    """
-    Usa ChatGPT para clasificar si el mensaje del cliente indica si desea modificar el pedido o si desea tomarlo asi como está
-    """
-    try:
-
-        prompt = f"""
-eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada, La Cima del Sabor.
-Tu tarea es determinar si el siguiente mensaje del cliente indica que desea modificar su pedido o si desea tomarlo tal como está.
-Mensaje del cliente: "{mensaje_cliente}"
-RESPONDE SOLO CON SOLO UNA DE LAS SIGUIENTES INTENCIONES
-MANTENER PEDIDO
-ACTUALIZAR PEDIDO
-Si el mensaje incluye un producto clasificalo como actualizar pedido"""
-        
-        client = OpenAI()
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Eres PAKO, asistente experto en clasificación de mensajes."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0
-        )
-
-        raw = response.choices[0].message.content.strip()
-        # Registrar consumo de tokens
-        tokens_used = _extract_total_tokens(response)
-        if tokens_used is not None:
-            log_message(f"[OpenAI] clasificador_consulta_menu tokens_used={tokens_used}", "DEBUG")
-        log_message(f'Respuesta de clasificación: {raw}', 'INFO')
-        return raw
-    except Exception as e:
-        log_message(f'Error en función <clasificar_modificacion_pedido>: {e}', 'ERROR')
         return "error_clasificacion"
     
 def get_name(text: str) -> str | None:
