@@ -1011,7 +1011,7 @@ def orquestador_subflujos(
                     guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
                 else:
                     # caso raro: flag indica primera vez pero no hay dirección en BD
-                    send_text_response(sender, "Gracias. Te recuerdo que no estas en el area de cobertura, por favor envia una nueva direeccion donde te entregaremos este pedido.")
+                    send_text_response(sender, "Gracias. Te recuerdo que no estas en el area de cobertura, por favor envia una nueva direccion donde te entregaremos este pedido o puedo ofrecerte recogerlo en el restaurante.")
                     guardar_intencion_futura(sender, "primera_direccion_domicilio", obtener_intencion_futura_observaciones(sender))
             else:
                 # No tiene dirección: solicitarla al usuario
@@ -1045,6 +1045,11 @@ def orquestador_subflujos(
                 resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,os.environ.get("ID_RESTAURANTE", "5"), nombre_cliente)
                 if not resultado:
                     send_text_response(sender, f"Lo siento {nombre_cliente}, pero tu dirección está fuera de nuestra área de cobertura. puedes recogerla en el restaurante o enviarnos otra dirección.")
+                    execute_query("""
+                                            UPDATE clientes_whatsapp
+                                            SET direccion_google = %s
+                                            WHERE telefono = %s AND id_restaurante = %s;
+                                            """, (None, sender, os.environ.get("ID_RESTAURANTE", "5")))
                     return
                 mensaje = direccion_bd(nombre_cliente, direccion)
                 send_text_response(sender, mensaje)
