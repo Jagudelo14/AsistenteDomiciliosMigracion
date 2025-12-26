@@ -10,7 +10,7 @@ import json
 from utils import send_text_response, limpiar_respuesta_json, log_message, convert_decimals, to_json_safe,corregir_total_price_en_result
 from utils_database import execute_query
 from datetime import datetime, date
-
+import json
 from utils_registration import validate_personal_data
 
 def get_openai_key() -> str:
@@ -82,14 +82,16 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - consulta_pedido
             - consulta_promociones
             - direccion (Cuando unicamente contiene una direccion o sobre modificaciones en direccion de envio)
-            - negacion_general (puede ser en otros idiomas: no, non, nein, etc.)
+            - negacion_general (Analiza bien el contexto cuando la persona niegue algo y clasificalo como negacion general)
             - preguntas_generales (estas categorias forman parte: formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.),si hacen domicilios o envíos, horarios de atención, dirección o ubicación del local,contacto, pedidos o reservas promociones o descuentos, preguntas sobre reservas-> son preguntas generales)
             - quejas (quejas de menor nivel)
             - sin_intencion (Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, clima, películas, tecnología, etc.) → "sin_intencion".)
             - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) (modificaciones a pedidos) (cambios a pedidos)(cuando cosas similares a estos pedidos clasificalas como solicitud pedido) (tambien cuando aclare un pedido como: no, son tantos productos o no, son 3 productos o no, es una malteada y una sierra queso)(cuando el cliente aclare cantidades o productos ya mencionados)
             Ejemplo: "quiero agregar una malteada de vainilla", "quiero que la hamburguesa no traiga lechuga", "cambia mi pedido por favor por...", "quitar la malteada", "también quiero una gaseosa coca cola original", "dame también una malteada de chocolate", etc.
-            - transferencia (quejas de mayor nivel)
+            - transferencia (quejas de mayor nivel) (cancelacion de pedido) (cuando el cliente pide cancelar su pedido)
             - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo) (cuando el usuario envie sus datos de facturacion correo, documento y tipo de documento)
+            * el numero de identificacion en colombia no tiene letras y tiene 6 a 10 digitos numericos
+            * Tipos de documento, RC — Registro Civil, TI — Tarjeta de Identidad, CC — Cédula de Ciudadanía, CE — Cédula de Extranjería, PA — Pasaporte, PA — Pasaporte.
             - recoger_restaurante   (NUEVA intención: cuando el usuario dice que pasará a recoger, irá al restaurante o lo recoge en tienda o en una de nuestras sedes: Caobos)
             - domicilio             (NUEVA intención: cuando el usuario pide entrega a domicilio, "tráelo", "envíamelo", "a mi casa", etc.)
             - saludo (hola, buenos dias, buenas tardes, buenas noches, saludos, etc.)
@@ -1244,56 +1246,49 @@ def enviar_menu_digital(nombre: str, nombre_local: str, menu, promociones_list: 
             "mensaje": f"¡{nombre}, ¿qué esperas para pedir en {nombre_local}? ¡Cuéntame qué se te antoja hoy!"
         }
 
-def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: tuple, pregunta_usuario: str) -> dict:
+def responder_sobre_pedido(pregunta_usuario, Tiempo_estimado, Costo_total) -> dict:
     try:
-        pedido_info_serializable = convert_decimals(pedido_info)
-        pedido_info_serializable = {
-            k: to_json_safe(v)
-            for k, v in pedido_info.items()
-        }
         PROMPT = f"""
-        Eres PAKO, la voz oficial y amigable de {nombre_local}.
+        Eres PAKO, la voz oficial y amigable
         Información del pedido:
-        {json.dumps(pedido_info_serializable, ensure_ascii=False)}
+        
         PREGUNTA:
         {pregunta_usuario}
+        Tiempo estimado:{Tiempo_estimado}
+        Costo total:{Costo_total}
+
         REGLAS IMPORTANTES:
         - La respuesta debe basarse SOLO en la información contenida en pedido_info.
         - Si el usuario pregunta por algo que NO está en pedido_info, responde amablemente
           que no tienes ese dato exacto y ofrece revisar menú o promociones.
         - Estilo: cálido, alegre, amable, un poquito divertido, sin sarcasmo y sin exagerar.
         - Máximo 2 frases.
-        - Siempre incluir un llamado a la acción al final para "consultar menú" o "consultar promociones".
-          Debe ser natural, como:
-          "Si quieres, puedo mostrarte el menú o contarte las promociones".
         - No inventes datos adicionales.
         - No mencionar que eres una IA.
         - Respuesta SIEMPRE en JSON.
-        OPCIONES PARA futura_intencion:
-        - "consulta_menu"
-        - "consulta_promociones"
+        - Si el tiempo estimado no existe indica que tardaras en promedio 30 minutos
+        - Solo contesta lo que el usuario pregunta si no te pregunta por tiempo o costo no lo menciones aunque pregunte.
+
         FORMATO DE RESPUESTA OBLIGATORIO:
         {{
           "mensaje": "texto aquí",
-          "futura_intencion": "consulta_menu o consulta_promociones"
         }}
         Nada por fuera del JSON.
         REGLA CRÍTICA:
         NO puedes asumir el estado del pedido. NO puedes decir que está listo, procesado, en preparación, entregado ni nada similar.
         Solo puedes repetir literalmente lo que aparezca en el campo "estado" dentro de pedido_info.
-        Si "estado" no está presente en pedido_info:
-        - debes responder que no tienes el estado exacto del pedido.
-        - y ofrecer consultar menú o promociones.
+
         PROHIBIDO:
-        - Decir que el pedido está "listo", "procesado", "en camino", "confirmado" o cualquier estado NO presente literalmente en el dict.
+        - Decir que el pedido está "listo", "procesado", "en camino", "confirmado" o cualquier estado.
         - Interpretar o adivinar datos.
         - Inventar palabras relacionadas al estado.
+        - Solo usa la informacion que te di
         """
         client = OpenAI()
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1-mini",
             messages=[
-                {"role": "system", "content": f"Eres PAKO, representante alegre de {nombre_local}."},
+                {"role": "system", "content": "Eres PAKO, representante alegre de Sierra Nevada."},
                 {"role": "user", "content": PROMPT}
             ],
             max_tokens=200,
@@ -1303,21 +1298,15 @@ def responder_sobre_pedido(nombre: str, nombre_local: str, pedido_info: tuple, p
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] responder_sobre_pedido tokens_used={tokens_used}", "DEBUG")
-        try:
-            log_message(f'Respuesta cruda de GPT en <ResponderSobrePedido>: {raw}', 'DEBUG')
-            data = json.loads(raw)
-        except:  # noqa: E722
-            data = {
-                "mensaje": f"{nombre}, aquí en {nombre_local} estoy para ayudarte con tu pedido. "
-                           f"Si quieres, puedo mostrarte el menú o contarte nuestras promociones.",
-                "futura_intencion": "consulta_menu"
-            }
-        return data
+        data = json.loads(raw)
+        mensaje = data["mensaje"]
+        log_message(f'Respuesta cruda de GPT en <ResponderSobrePedido>: {mensaje}', 'DEBUG')
+        return mensaje
     except Exception as e:
         log_message(f'Error en función <ResponderSobrePedido>: {e}', 'ERROR')
         logging.error(f"Error en función <ResponderSobrePedido>: {e}")
         return {
-            "mensaje": f"{nombre}, tuve un problema procesando tu solicitud, pero si quieres puedo mostrarte el menú o las promociones.",
+            "mensaje": "Tuve un problema procesando tu solicitud, pero si quieres puedo mostrarte el menú o las promociones.",
             "futura_intencion": "consulta_menu"
         }
     

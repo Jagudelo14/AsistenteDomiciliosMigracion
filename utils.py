@@ -492,7 +492,7 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         idcliente = os.getenv("ID_RESTAURANTE", "5")
         idsede = idsede
         estado = "pendiente"
-        metodo_pago = "efectivo"
+        metodo_pago = "Pendiente"
         # ------------------------------- # 7. Query con RETURNING # -------------------------------
         query = """ INSERT INTO pedidos ( total_productos, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal,direccion ) VALUES ( %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING idpedido, codigo_unico """
         params = (total_price, fecha, hora, idcliente, idsede, estado, persona_nuevo, id_whatsapp, metodo_pago, codigo_unico, es_temporal, direccion )
@@ -753,36 +753,47 @@ def obtener_pedido_por_codigo_orignal(sender: str, codigo_unico: str) -> dict:
         return {"exito": False, "error": str(e)}
 
 def send_pdf_response(sender: str):
+    """
+    Envía hasta 2 PDFs al usuario vía WhatsApp Cloud API usando URLs con SAS.
+    pdfs: lista de dicts con keys 'url' y 'filename'
+    """
+    pdfs = [
+    {"url": "https://menusierra.blob.core.windows.net/menu/menu_pag1.jpg?sp=r&st=2025-12-23T14:56:04Z&se=2027-01-01T23:11:04Z&spr=https&sv=2024-11-04&sr=b&sig=XmbxEJZ54H3byd1vwDIns1NnjDoyQkO44FWh76ltL6U%3D", "filename": "menu_pag1.jpg"},
+    {"url": "https://menusierra.blob.core.windows.net/menu/menu_pag2.jpg?sp=r&st=2025-12-23T14:51:58Z&se=2027-01-01T23:06:58Z&spr=https&sv=2024-11-04&sr=b&sig=oAsO7u7chfQWRRSljNz1hSD6vemGwQrN%2FwQZ2x4T%2Bps%3D", "filename": "menu_pag2.jpg"},
+    ]
+    import time
+    results = []
     try:
-        """
-        Envía un PDF al usuario vía WhatsApp Cloud API usando una URL con SAS.
-        """
         ACCESS_TOKEN = os.environ["WABA_TOKEN"]
         PHONE_ID = os.environ["PHONE_NUMBER_ID"]
         url = f"https://graph.facebook.com/v20.0/{PHONE_ID}/messages"
-        PDF_URL: str = os.environ["PDF_SAS_URL"]
-        FILE_NAME: str = "menu-sierra-nevada.pdf"
-        payload = {
-            "messaging_product": "whatsapp",
-            "to": sender,
-            "type": "document",
-            "document": {
-                "link": PDF_URL,
-                "filename": FILE_NAME
-            }
-        }
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {ACCESS_TOKEN}"
         }
-        res = requests.post(url, json=payload, headers=headers)
-        log_message(f'PDF enviado al usuario {sender} con estado {res.status_code}.', 'INFO')
-        return res.status_code, res.text
+        for idx, pdf in enumerate(pdfs[:2]):  # Solo los primeros 1
+            payload = {
+                "messaging_product": "whatsapp",
+                "to": sender,
+                "type": "image",
+                "image": {
+                    "link": pdf["url"]
+                }
+            }
+            # Si quieres agregar un caption, puedes usar:
+            # payload["image"]["caption"] = pdf.get("filename", "")
+            res = requests.post(url, json=payload, headers=headers)
+            log_message(f'Imagen enviada al usuario {sender} con estado {res.status_code}.', 'INFO')
+            results.append((res.status_code, res.text))
+            # Agregar un pequeño delay para evitar rate limit de WhatsApp
+            if idx == 0:
+                time.sleep(1.5)
+        return results
     except Exception as e:
-        log_message(f'Error en <SendPDFResponse>: {e}', 'ERROR')
-        logging.error(f'Error en send_pdf_response: {e}')
-        return None, str(e)
-
+        log_message(f'Error en <SendMultipleImagesResponse>: {e}', 'ERROR')
+        logging.error(f'Error en send_multiple_images_response: {e}')
+        return [None, str(e)]
+    
 def obtener_estado_pedido_por_codigo(sender: str, codigo_unico: str) -> dict:
     try:
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s;"

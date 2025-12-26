@@ -42,7 +42,7 @@ from utils import (
 )
 from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida
 from utils_database import execute_query
-from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio
+from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, primera_regla_tiempo
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
 from utils_registration import validate_personal_data,save_personal_data_partial,check_and_mark_datos_personales
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
@@ -234,15 +234,15 @@ def subflujo_preguntas_generales(sender: str, pregunta_usuario: str, nombre_clie
         items: list[dict[str, Any]] = obtener_menu()
         clasificacion: dict = clasificar_pregunta_menu_chatgpt(pregunta_usuario,items)
         clasificacion_tipo = clasificacion.get("clasificacion", "no_relacionada")
-        if clasificacion_tipo == "relacionada":
-            intencion = clasificacion.get("intencion", "informacion_menu")
-            if intencion == "informacion_menu" or intencion == "informacion_servicios":
+        if clasificacion_tipo == "relacionada":   
+            clasificacion_intencion = clasificacion.get("intencion", "consulta_menu")
+            if clasificacion_intencion == "informacion_menu" or clasificacion_intencion == "informacion_servicios":
                 respuesta_llm: dict = responder_pregunta_menu_chatgpt(pregunta_usuario, items)
                 send_text_response(sender, respuesta_llm.get("respuesta"))
                 send_text_response(sender, respuesta_llm.get("productos", ""))
                 if respuesta_llm.get("recomendacion"):
                     guardar_intencion_futura(sender, "solicitud_pedido")
-            elif intencion == "informacion_pedido":
+            elif clasificacion_intencion == "informacion_pedido":
                 subflujo_consulta_pedido(sender, nombre_cliente, "", pregunta_usuario)
         else:
             seleccion = random.choice(respuestas_no_relacionadas)
@@ -384,18 +384,24 @@ def subflujo_consulta_pedido(sender: str, nombre_cliente: str, entidades: str, p
                         FROM pedidos p2
                         INNER JOIN clientes_whatsapp cw 
                             ON p2.id_whatsapp = cw.id_whatsapp
-                        WHERE cw.telefono = %s and p.estado = 'pendiente' and p.es_temporal = true
+                        WHERE cw.telefono = '573026467575' and p.estado = 'pendiente' and p.es_temporal = true
                         ORDER BY p2.idpedido DESC
                         LIMIT 1
                     );
         """
         result = execute_query(query_pendientes, (sender,))
         codigo_unico = result[0][6] if result else 0
-        #precio_total = [row[4] for row in result] if result else 0
-        pedido_info: dict = obtener_estado_pedido_por_codigo(sender, codigo_unico)
-        respuesta_consulta_pedido: dict = responder_sobre_pedido(nombre_cliente, "Sierra Nevada", pedido_info, pregunta_usuario)
-        send_text_response(sender, respuesta_consulta_pedido.get("mensaje"))
-        guardar_intencion_futura(sender, respuesta_consulta_pedido.get("futura_intencion", "consulta_menu"))
+        if not codigo_unico:
+            send_text_response(sender, f"Hola {nombre_cliente}, no encontré ningún pedido a tu nombre. ¿Deseas hacer un nuevo pedido?")
+        else:
+            precio_total = sum(fila[4] for fila in result)
+            Tiempo_espera =primera_regla_tiempo("21",10)
+            respuesta_consulta_pedido: dict = responder_sobre_pedido(pregunta_usuario,Tiempo_espera,precio_total)
+            if isinstance(respuesta_consulta_pedido, dict):
+                mensaje = respuesta_consulta_pedido.get("mensaje", "")
+            else:
+                mensaje = str(respuesta_consulta_pedido)
+            send_text_response(sender, mensaje)
         log_message(f'Consulta de pedido respondida correctamente para {sender}.', 'INFO')
     except Exception as e:
         log_message(f'Error en <SubflujoConsultaPedido>: {e}.', 'ERROR')
@@ -422,6 +428,13 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
     try:
         """Maneja la selección del modo de pago por parte del usuario."""
         mensaje=extraer_ultimo_mensaje(respuesta_usuario)
+        codigo_unico: str = obtener_intencion_futura_observaciones(sender)
+        medio_pago_real: str = mapear_modo_pago(mensaje)
+        if medio_pago_real != "desconocido" or "":
+            query="""UPDATE pedidos
+                        SET metodo_pago = %s
+                        WHERE codigo_unico = %s;"""
+            result= execute_query(query,(medio_pago_real,codigo_unico))
         if not validate_personal_data(sender,os.environ.get("ID_RESTAURANTE", "5")):
             datos = extraer_info_personal(mensaje)
             # datos es dict con keys: tipo_documento, numero_documento, email
@@ -443,19 +456,15 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
                 friendly = {"Tipo_Doc": "tipo de documento", "N_Doc": "número de documento", "email": "correo electrónico"}
                 faltantes = ", ".join(friendly.get(m, m) for m in missing)
                 codigo_unico: str = obtener_intencion_futura_observaciones(sender)
-                medio_pago_real: str = mapear_modo_pago(mensaje)
-                datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)
                 send_text_response(sender, f"aún faltan los siguientes datos: {faltantes}. Por favor envíalos para continuar.")
                 return 
-        codigo_unico: str = obtener_intencion_futura_observaciones(sender)
-        medio_pago_real: str = mapear_modo_pago(mensaje)
         if medio_pago_real == "desconocido":
             query="""SELECT metodo_pago
                     fROM pedidos
                     wHERE codigo_unico=%s;"""
             result= execute_query(query,(codigo_unico,))
             medio_pago_real=result[0][0] if result else "desconocido"
-        datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)  # noqa: F841
+        #datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)  # noqa: F841
         dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
         tiempo= dict_registro_temp.get("tiempo_estimado", "N/A")
         total_productos = dict_registro_temp.get("total_final", "N/A")
@@ -499,11 +508,14 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
             #     log_message(f"Error generando/enviando link de pago: {e}", "ERROR")
             #     send_text_response(sender, "Hubo un problema generando el link de pago. Puedes intentar pagar en el local o probar otro método.")
             #     return
-        else:
-            numero_admin: str = os.getenv("NUMERO_ADMIN")
-            send_text_response(numero_admin, f"Atención: Medio de pago no reconocido '{respuesta_usuario}' seleccionado por {nombre_cliente} ({sender}) para el pedido {codigo_unico}.")
-            send_text_response(sender, f"Te transferire a un asesor ya que por el momento no aceptamos ese medio de pago. en breves momentos te escribira desde {numero_admin}")
-            marcar_estemporal_true_en_pedidos(sender,codigo_unico)
+        if medio_pago_real == "desconocido" or "":
+            log_message(f"Medio de pago no reconocido '{respuesta_usuario}' seleccionado por {nombre_cliente} ({sender}) para el pedido {codigo_unico}.", "WARN")
+            send_text_response(sender, f"Lo siento {nombre_cliente}, no reconocí el medio de pago que mencionaste. Por favor repitemelo, recuerda que solo aceptamos efectivo o datafono ambos contraentrega")
+        # else:
+        #     numero_admin: str = os.getenv("NUMERO_ADMIN")
+        #     send_text_response(numero_admin, f"Atención: Medio de pago no reconocido '{respuesta_usuario}' seleccionado por {nombre_cliente} ({sender}) para el pedido {codigo_unico}.")
+        #     send_text_response(sender, f"Te transferire a un asesor ya que por el momento no aceptamos ese medio de pago. en breves momentos te escribira desde {numero_admin}")
+        #     marcar_estemporal_true_en_pedidos(sender,codigo_unico)
     except Exception as e:
         log_message(f'Error en <SubflujoMedioPago>: {e}.', 'ERROR')
         raise e
