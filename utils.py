@@ -11,13 +11,12 @@ from utils_database import execute_query, execute_query_columns
 import inspect
 import traceback
 from typing import Dict, Any, List
-from datetime import datetime, date, time
+from datetime import datetime, date, time,timedelta
 from zoneinfo import ZoneInfo
 import json
 import requests
 import difflib
 from utils_contexto import get_sender,actualizar_conversacion
-
 
 def register_log(mensaje: str, tipo: str, ambiente: str = "Whatsapp", idusuario: int = 1, archivoPy: str = "", function_name: str = "",line_number: int = 0) -> None:
     try:
@@ -1489,3 +1488,7 @@ def calcular_minutos(entrada):
         log_message(f"Error en calcular_minutos: {e}", "ERROR")
         return entrada
     
+def es_menor_24h(fecha_str):
+    fecha = datetime.strptime(fecha_str.split('.')[0], "%Y-%m-%d %H:%M:%S")
+    ahora = datetime.now()
+    return (ahora - fecha) <= timedelta(hours=24)
