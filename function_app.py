@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, List
 import requests
 from openai import OpenAI
 import io
-from utils_contexto import set_sender,crear_conversacion, actualizar_conversacion,obtener_contexto_conversacion
+from utils_contexto import set_id_cliente, set_sender,crear_conversacion, actualizar_conversacion,obtener_contexto_conversacion
 import random
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -72,9 +72,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         #Validación mensaje duplicado###################################
-        if validate_duplicated_message(message_id):
-            logging.info(f"Mensaje duplicado: {message_id}")
-            return func.HttpResponse("Mensaje duplicado", status_code=200)
+        #if validate_duplicated_message(message_id):
+        #    logging.info(f"Mensaje duplicado: {message_id}")
+        #    return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
@@ -90,6 +90,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             log_message(f"Cliente creado en base de datos: {nombre_temp}", "INFO")
             if tipo_general == "text":
                 text: str = message.get("text", {}).get("body", "")
+                set_id_cliente(sender)
                 conversacion = crear_conversacion(text)
                 log_message(f"Conversación iniciada: {conversacion}", "INFO")  
                 if not text:
@@ -118,8 +119,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 text = transcript.text
                 logging.info(f"Transcripción recibida: {text}")
                 log_message(f"Mensaje transcrito {text}", "INFO")
+                set_id_cliente(sender)
                 conversacion = crear_conversacion(text)
-                log_message(f"Conversación iniciada: {conversacion}", "INFO")          
+                log_message(f"Conversación iniciada: {conversacion}", "INFO")
             send_text_response(sender,"¡Hola! al continuar la conversación entendemos que aceptas el tratamiento de tus datos. \nPuedes saber mas de la política de aqui: https://www.funcionpublica.gov.co/eva/gestornormativo/norma.php?i=49981")
             send_text_response(sender, "Recuerda que hablas con un asistente virtual 😊 Durante toda la conversación, procura enviar tus solicitudes en un solo mensaje para poder ayudarte mejor.\nPara continuar, envíame:\n• Tu nombre\n• Tu dirección")
             return func.HttpResponse("Cliente no registrado, esperando datos", status_code=200)
@@ -227,7 +229,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                         log_message(f'Cliente creado o actualizado exitosamente.{nombre}', 'INFO')
                         update_nombre_bool(sender, ID_RESTAURANTE, True)
                     if not validate_direction_first_time(sender, ID_RESTAURANTE):
-                        send_text_response(sender, "Por favor, comparteme tu ubicación para continuar con el pedido.")
+                        send_text_response(sender, "Por favor, comparteme tu dirección para continuar con el pedido.")
                     if not validate_nombre_bool(sender, ID_RESTAURANTE):
                         send_text_response(sender, "Por favor, indícame tu nombre para continuar con el pedido.")
                     if booleano_dir is False:
