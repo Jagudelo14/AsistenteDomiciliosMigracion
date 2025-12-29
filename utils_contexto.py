@@ -4,6 +4,7 @@ from typing import Optional
 from utils_database import execute_query
 from psycopg2.extras import Json
 import os
+from utils import es_menor_24h
 
 _sender_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("sender", default=None)
 _id_cliente_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("id_cliente", default=None)
@@ -73,7 +74,22 @@ def obtener_contexto_conversacion(telefono: str) -> str:
     mensajes  = execute_query(query, (telefono, 3))
     mensajes = list(reversed(mensajes))
 
-    return mensajes
+    query="""SELECT fecha_mensaje
+    FROM conversaciones,
+    WHERE telefono = %s
+    ORDER BY idx DESC
+    LIMIT %s;
+    """
+    ultima_hora  = execute_query(query, (telefono, 1))
+
+    if ultima_hora and es_menor_24h(ultima_hora[0][0]):
+        return mensajes
+    else:
+        execute_query(
+            "UPDATE conversaciones SET fecha_mensaje=NOW() WHERE telefono=%s AND id_cliente=%s",(get_sender(), os.environ.get("ID_RESTAURANTE", "5")))
+        execute_query("""INSERT INTO historico_conversaciones (telefono,primer_mensaje,ultimo_mensaje,cantidad_mensajes,id_cliente) VALUES (%s, NOW(), NOW(), %s,%s)""", (get_sender(), 1, os.environ.get("ID_RESTAURANTE", "5")))
+        return mensajes
+    
 
 def obtener_x_respuestas(telefono: str, limite: int) -> str:
     query = """

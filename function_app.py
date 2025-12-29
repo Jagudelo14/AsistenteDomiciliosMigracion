@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 import os
 import json
-from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, get_client_name_database,verify_hour_atettion,validate_duplicated_message
+from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, get_client_name_database,verify_hour_atettion
 from utils_chatgpt import get_classifier, get_openai_key,get_direction,get_name
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign
