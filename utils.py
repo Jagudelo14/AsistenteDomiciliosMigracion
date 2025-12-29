@@ -158,7 +158,7 @@ def handle_create_client(sender: str, datos: str, id_restaurante: str, es_tempor
     try:
         log_message(f'Datos recibidos para crear/actualizar cliente: {datos}', 'INFO')
         nombre = "Desconocido"
-        id_sede = 21
+        id_sede = 20
         if datos is not None:
             nombre = datos
         logging.info(f'Nombre del cliente: {nombre}')
