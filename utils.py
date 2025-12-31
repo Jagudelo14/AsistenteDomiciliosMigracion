@@ -1488,7 +1488,7 @@ def calcular_minutos(entrada):
         log_message(f"Error en calcular_minutos: {e}", "ERROR")
         return entrada
     
-def es_menor_24h(fecha_str):
-    fecha = datetime.strptime(fecha_str.split('.')[0], "%Y-%m-%d %H:%M:%S")
-    ahora = datetime.now()
-    return (ahora - fecha) <= timedelta(hours=24)
+# def es_menor_24h(fecha_str):
+#     fecha = datetime.strptime(fecha_str.split('.')[0], "%Y-%m-%d %H:%M:%S")
+#     ahora = datetime.now()
+#     return (ahora - fecha) <= timedelta(hours=24)

@@ -4,7 +4,9 @@ from typing import Optional
 from utils_database import execute_query
 from psycopg2.extras import Json
 import os
-from utils import es_menor_24h
+# from utils import es_menor_24h
+from datetime import datetime, timedelta    
+from zoneinfo import ZoneInfo   
 
 _sender_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("sender", default=None)
 _id_cliente_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("id_cliente", default=None)
@@ -31,12 +33,13 @@ def crear_conversacion(mensaje) -> str:
         "mensajes": [
             {
                 "rol": "usuario",
-                "texto": mensaje
+                "texto": mensaje,
+                "fecha": str(datetime.now())
             }
         ]
     })
     execute_query("""INSERT INTO conversaciones (telefono,conversacion,fecha_mensaje,id_cliente) VALUES (%s, %s, NOW(), %s)""", (get_sender(), json_mensaje, os.environ.get("ID_RESTAURANTE", "5")))
-    execute_query("""INSERT INTO historico_conversaciones (telefono,primer_mensaje,ultimo_mensaje,cantidad_mensajes,id_cliente) VALUES (%s, NOW(), NOW(), %s,%s)""", (get_sender(), 1, os.environ.get("ID_RESTAURANTE", "5")))
+    execute_query("""INSERT INTO historico_conversaciones (telefono,primer_mensaje,id_cliente) VALUES (%s, NOW(),%s)""", (get_sender(), os.environ.get("ID_RESTAURANTE", "5")))
     return str(json_mensaje)
 
 def actualizar_conversacion(mensaje, telefono,rol) -> str:
@@ -50,7 +53,8 @@ def actualizar_conversacion(mensaje, telefono,rol) -> str:
         jsonb_build_array(
             jsonb_build_object(
                 'rol', %s,
-                'texto', %s
+                'texto', %s,
+                'fecha', NOW()
             )
         ),
         true
@@ -75,22 +79,35 @@ def obtener_contexto_conversacion(telefono: str) -> str:
     mensajes = list(reversed(mensajes))
 
     query="""SELECT fecha_mensaje
-    FROM conversaciones,
+    FROM conversaciones
     WHERE telefono = %s
-    ORDER BY idx DESC
+    ORDER BY id_conversaciones DESC
     LIMIT %s;
     """
-    ultima_hora  = execute_query(query, (telefono, 1))
+    ultima_hora  = execute_query(query, (get_sender(), 1))
+    ahora = datetime.now(tz=ZoneInfo("America/Bogota"))
+    diferencia = (ahora - ultima_hora[0][0]) 
+    print(diferencia)
 
-    if ultima_hora and es_menor_24h(ultima_hora[0][0]):
-        return mensajes
-    else:
-        execute_query(
-            "UPDATE conversaciones SET fecha_mensaje=NOW() WHERE telefono=%s AND id_cliente=%s",(get_sender(), os.environ.get("ID_RESTAURANTE", "5")))
-        execute_query("""INSERT INTO historico_conversaciones (telefono,primer_mensaje,ultimo_mensaje,cantidad_mensajes,id_cliente) VALUES (%s, NOW(), NOW(), %s,%s)""", (get_sender(), 1, os.environ.get("ID_RESTAURANTE", "5")))
-        return mensajes
-    
+    if ultima_hora and diferencia >= timedelta(hours=24):
+        query = """BEGIN;
 
+                update conversaciones set fecha_mensaje = NOW()
+                WHERE telefono = %s;
+
+                update historico_conversaciones 
+                set ultimo_mensaje = NOW(), cantidad_mensajes = 1
+                where ultimo_mensaje is null and telefono = %s;
+
+                INSERT INTO historico_conversaciones (telefono,primer_mensaje,id_cliente) 
+                VALUES (%s, NOW(),5);
+
+                COMMIT;"""
+        execute_query(query, (get_sender(),get_sender(),get_sender()))
+
+    return mensajes
+
+ 
 def obtener_x_respuestas(telefono: str, limite: int) -> str:
     query = """
     SELECT mensaje
@@ -105,4 +122,4 @@ def obtener_x_respuestas(telefono: str, limite: int) -> str:
     mensajes = list(reversed(mensajes))
 
     return mensajes
-    
+  
