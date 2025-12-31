@@ -239,7 +239,7 @@ def subflujo_preguntas_generales(sender: str, pregunta_usuario: str, nombre_clie
             if clasificacion_intencion == "informacion_menu" or clasificacion_intencion == "informacion_servicios":
                 respuesta_llm: dict = responder_pregunta_menu_chatgpt(pregunta_usuario, items)
                 send_text_response(sender, respuesta_llm.get("respuesta"))
-                send_text_response(sender, respuesta_llm.get("productos", ""))
+                #send_text_response(sender, respuesta_llm.get("productos", ""))
                 if respuesta_llm.get("recomendacion"):
                     guardar_intencion_futura(sender, "solicitud_pedido")
             elif clasificacion_intencion == "informacion_pedido":
