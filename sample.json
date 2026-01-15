@@ -8,25 +8,25 @@
           "value": {
             "messaging_product": "whatsapp",
             "metadata": {
-              "display_phone_number": "573142796747",
-              "phone_number_id": "1234567890"
+              "display_phone_number": "573113177466",
+              "phone_number_id": "933978746445922"
             },
             "contacts": [
               {
                 "profile": {
                   "name": "Juan Perez"
                 },
-                "wa_id": "573165314685"
+                "wa_id": "573113177466"
               }
             ],
             "messages": [
               {
-                "from": "573165314685",
+                "from": "573026467575",
                 "id": "wamid.HBgLMzE5MTU0GDQ1NTY2FQIAEhgUM0UxRjczQzVEMjE1NkJCMzZBRTMA",
                 "timestamp": "1731255555",
                 "type": "text",
                 "text": {
-                  "body": "Que mas me recomiendas"
+                  "body": "Juan Agudelo Cra. 56 # 152-42, apt 506"
                 }
               }
             ]

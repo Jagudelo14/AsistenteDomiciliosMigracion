@@ -536,3 +536,93 @@ def geocode_and_assign(numero_cliente: str, direccion: str, id_restaurante: str)
         log_message(f"geocode_and_assign: excepción general: {e}", "ERROR")
         return None
 
+def buscar_sede_mas_cercana(
+    latitud_cliente: float,
+    longitud_cliente: float,
+    id_restaurante: str = os.environ.get("ID_RESTAURANTE", "5")
+):
+    try:
+        log_message(
+            f"Buscando sede más cercana para coordenadas ({latitud_cliente}, {longitud_cliente})",
+            "INFO"
+        )
+
+        # ------------------------------------
+        # 1. Obtener sedes activas
+        # ------------------------------------
+        sedes = execute_query("""
+            SELECT id_sede, nombre, ciudad, latitud, longitud
+            FROM sedes
+            WHERE estado = TRUE
+              AND id_restaurante = %s
+              AND latitud IS NOT NULL
+              AND longitud IS NOT NULL;
+        """, (id_restaurante,))
+
+        if not sedes:
+            return None
+
+        for s in sedes:
+            logging.info(f"Sede encontrada: {s}")
+
+        # ------------------------------------
+        # 2. Preparar origen y destinos
+        # ------------------------------------
+        origen = (latitud_cliente, longitud_cliente)
+        destinos = [(s[3], s[4]) for s in sedes]  # latitud, longitud
+
+        gmaps = obtener_cliente_google_maps()
+
+        try:
+            resultado = gmaps.distance_matrix(
+                origins=[origen],
+                destinations=destinos,
+                mode="driving",
+                language="es"
+            )
+        except ApiError as ae:
+            log_message(f"Google Maps ApiError: {ae}", "ERROR")
+            logging.error(ae)
+            return None
+        except Exception as ex:
+            log_message(f"Error llamando Google Maps: {ex}", "ERROR")
+            logging.error(ex)
+            return None
+
+        # ------------------------------------
+        # 3. Construir opciones válidas
+        # ------------------------------------
+        opciones = []
+        elements = resultado.get("rows", [])[0].get("elements", [])
+
+        for i, elem in enumerate(elements):
+            if elem.get("status") != "OK":
+                continue
+
+            distancia_m = elem["distance"]["value"]
+            duracion_s = elem["duration"]["value"]
+            sede = sedes[i]
+
+            opciones.append({
+                "id": sede[0],
+                "nombre": sede[1],
+                "ciudad": sede[2],
+                "lat": sede[3],
+                "lon": sede[4],
+                "distancia_km": round(distancia_m / 1000, 2),
+                "tiempo_min": round(duracion_s / 60, 1)
+            })
+
+        if not opciones:
+            return None
+
+        # ---------------------------
+        # 4. Retornar la más cercana
+        # ---------------------------
+        opciones.sort(key=lambda x: x["distancia_km"])
+        return opciones[0]
+
+    except Exception as e:
+        logging.error(f"Error en buscar_sede_mas_cercana: {e}")
+        log_message(f"Ocurrió un error al buscar sede más cercana: {e}", "ERROR")
+        return None

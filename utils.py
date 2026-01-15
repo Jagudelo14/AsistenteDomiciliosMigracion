@@ -157,7 +157,7 @@ def handle_create_client(sender: str, datos: str, id_restaurante: str, es_tempor
     try:
         log_message(f'Datos recibidos para crear/actualizar cliente: {datos}', 'INFO')
         nombre = "Desconocido"
-        id_sede = 20
+        id_sede = 21  # Valor por defecto
         if datos is not None:
             nombre = datos
         logging.info(f'Nombre del cliente: {nombre}')
@@ -438,6 +438,9 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
         id_whatsapp = res_idw[0] if res_idw else None
         idsede = res_idw[11] if res_idw else 17
         direccion = res_idw[5] if res_idw else None
+        observaciones = res_idw[19] if res_idw else None
+        if direccion is not None:
+            direccion= direccion + (" | " + observaciones if observaciones else "")
         logging.info(f"[GuardarPedidoCompleto] id_whatsapp para {sender}: {id_whatsapp}")
         # ------------------------------- # 2. Determinar si es persona nueva # -------------------------------
         q_prev = "SELECT COUNT(*) FROM pedidos WHERE id_whatsapp = %s"

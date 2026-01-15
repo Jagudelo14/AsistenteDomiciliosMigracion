@@ -740,7 +740,7 @@ def subflujo_confirmar_direccion(sender: str, nombre_cliente: str) -> None:
             distancia
         )
         if not datos_actualizados.get("actualizado"):
-            send_text_response(sender, f"Lo siento, no pude confirmar tu dirección {direccion_envio}")
+            send_text_response(sender, "No tienes un pedido abierto en este momento,si tienes un pedido abierto es probable que haya tenido un error con la direccion vuelvela a enviar")
             return
         mensaje_pagar: dict = solicitar_medio_pago(
             nombre_cliente,
@@ -1023,7 +1023,7 @@ def orquestador_subflujos(
             if validate_direction_first_time(sender, id_restaurante=id_restaurante):
                 direccion = obtener_direccion(sender, id_restaurante)
                 if direccion:
-                    mensaje = direccion_bd(nombre_cliente, direccion)
+                    mensaje = direccion_bd(nombre_cliente, direccion,sender)
                     send_text_response(sender, mensaje)
                     guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
                 else:
@@ -1050,25 +1050,41 @@ def orquestador_subflujos(
             subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "direccion":
             try:
-                ultimo_mensaje=extraer_ultimo_mensaje(pregunta_usuario)
-                direccion=get_direction(ultimo_mensaje)
+                #ultimo_mensaje=extraer_ultimo_mensaje(pregunta_usuario)
+                ultimo_mensaje=obtener_x_respuestas(sender,2)
+                direccion_json = get_direction(ultimo_mensaje)
+                direccion = None
+                observaciones = None
+                if isinstance(direccion_json, dict):
+                    direccion = direccion_json.get("direccion")
+                    observaciones = direccion_json.get("observaciones")
+                else:
+                    direccion = direccion_json
                 if not direccion:
                     send_text_response(sender, "Comparteme la dirección a actualizar por favor")
                     return
-                geocode_and_assign(sender, direccion, os.environ.get("ID_RESTAURANTE", "5"))
-                datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, os.environ.get("ID_RESTAURANTE", "5"))
-                latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
-                longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
-                resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,os.environ.get("ID_RESTAURANTE", "5"), nombre_cliente)
-                if not resultado:
-                    send_text_response(sender, f"Lo siento {nombre_cliente}, pero tu dirección está fuera de nuestra área de cobertura. puedes recogerla en el restaurante o enviarnos otra dirección.")
+                if direccion != "No presente":
+                    geocode_and_assign(sender, direccion, os.environ.get("ID_RESTAURANTE", "5"))
+                    datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, os.environ.get("ID_RESTAURANTE", "5"))
+                    latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
+                    longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
+                    resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,os.environ.get("ID_RESTAURANTE", "5"), nombre_cliente)
+                    if not resultado:
+                        send_text_response(sender, f"Lo siento {nombre_cliente}, pero tu dirección está fuera de nuestra área de cobertura. puedes recogerla en el restaurante o enviarnos otra dirección.")
+                        execute_query("""
+                                                UPDATE clientes_whatsapp
+                                                SET direccion_google = %s
+                                                WHERE telefono = %s AND id_restaurante = %s;
+                                                """, (None, sender, os.environ.get("ID_RESTAURANTE", "5")))
+                        return
+                if observaciones != "":
                     execute_query("""
-                                            UPDATE clientes_whatsapp
-                                            SET direccion_google = %s
-                                            WHERE telefono = %s AND id_restaurante = %s;
-                                            """, (None, sender, os.environ.get("ID_RESTAURANTE", "5")))
-                    return
-                mensaje = direccion_bd(nombre_cliente, direccion)
+                                    UPDATE clientes_whatsapp
+                                    SET observaciones_dir = %s
+                                    WHERE telefono = %s AND id_restaurante = %s;
+                                    """, (observaciones, sender, os.environ.get("ID_RESTAURANTE", "5")))
+                    log_message(f'observacones creadas en la base .{observaciones}', 'INFO')
+                mensaje = direccion_bd(nombre_cliente, direccion,sender)
                 send_text_response(sender, mensaje)
                 guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
                 log_message(f"Dirección corregida guardada en BD para {sender}", "INFO")

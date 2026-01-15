@@ -2324,11 +2324,16 @@ Si no encuentras un campo coloca exactamente "No proporcionado" como valor para 
             "nombre": "No proporcionado"
         }
     
-def direccion_bd(nombre_cliente: str, direccion_google: str):
+def direccion_bd(nombre_cliente: str, direccion_google: str, sender: str) -> str:
     """
     Genera un mensaje amable para confirmar la dirección guardada
     """
     try:
+        resultado=execute_query("""SELECT observaciones_dir 
+                                   FROM clientes_whatsapp
+                                   WHERE telefono= %s
+                                   LIMIT 1""", (sender,))
+        indicaciones=resultado[0][0] if resultado and resultado[0] and resultado[0][0] else ""
         client = OpenAI()
         prompt = f"""
 Eres PAKO, la voz oficial de Sierra Nevada, La Cima del Sabor.
@@ -2339,6 +2344,7 @@ Generar un mensaje cálido, claro y corto para un cliente que confirmara la dire
 Datos:
 - Nombre del cliente: {nombre_cliente}
 - Dirección del cliente: {direccion_google}
+- Indicaciones adicionales u observaciones: {indicaciones}
 
 Instrucciones del mensaje:
 - Si la ciudad se repite simplificalo a una vez
@@ -2367,19 +2373,38 @@ Instrucciones del mensaje:
         logging.error(f"<direccion_bd>Error en generar mensaje confirmación {e}")
         return f"Error al generar mensaje: {e}"
 
-def get_direction(text: str) -> str | None:
+def get_direction(text: tuple) -> str | None:
     """
     Extrae una dirección del texto del cliente usando el LLM.
     Retorna la dirección como string (si se encontró) o None.
     """
     try:
-        if not text or not isinstance(text, str):
-            return None
+        #if not text or not isinstance(text, str):
+        #    return None
         client = OpenAI(api_key=get_openai_key())
         prompt = f"""Eres un asistente experto en extraer direcciones de texto libre.
 Extrae SÓLO la dirección del siguiente texto y si no encuentras dirección responde como "No presente".
 Texto: "{text}"
-RESPONDE únicamente con la dirección, nada más."""
+Si encuentras una direccion agrega al final Bogota, Colombia
+Las observaciones pueden ser indicaciones del lugar como numero de apartamento nombre del conjunto residencial referencias etc si no tiene observaciones un string vacio devuelve
+RESPONDE únicamente con un json con la dirección extraída y las observaciones, por ejemplo:
+{{
+    "direccion": "Calle 123 #45-67 Barrio Centro Bogota, Colombia",
+    "observaciones": "Cerca a la iglesia principal"
+}}
+{{
+    "direccion": "Cr 20 # 137 -48 Bogota, Colombia",
+    "observaciones": ""
+}}
+{{
+    "direccion": "Cr 57 #153-52 Bogota, Colombia",
+    "observaciones": "Torre Farfala"
+}}
+{{
+    "direccion": "No presente",
+    "observaciones": "Studio 30"
+}}
+"""
         response = client.chat.completions.create(
         model="gpt-5.1",
             messages=[
@@ -2396,16 +2421,38 @@ RESPONDE únicamente con la dirección, nada más."""
             log_message(f"[OpenAI] get_direction tokens_used={tokens_used}", "DEBUG")
         if raw == "" or raw is None or raw == "No presente":
             return None
-        # normalizar a string y limpiar backticks
-        if isinstance(raw, dict):
-            raw = json.dumps(raw, ensure_ascii=False)
-        addr = str(raw).strip().strip("`").strip()
-        if not addr:
+        # Intentar parsear el JSON devuelto
+        direccion = None
+        observaciones = None
+        try:
+            # Limpieza básica de bloques ```json``` o ``` alrededor
+            raw_str = str(raw).strip().strip("`").strip()
+            if raw_str.lower().startswith("json"):
+                raw_str = raw_str[4:].lstrip()
+            # Intentar parsear JSON directo
+            data = json.loads(raw_str)
+            direccion = data.get("direccion")
+            observaciones = data.get("observaciones")
+        except Exception:
+            # fallback: intentar extraer primer objeto JSON con regex
+            import re
+            m = re.search(r'(\{[\s\S]*\})', str(raw))
+            if m:
+                try:
+                    data = json.loads(m.group(1))
+                    direccion = data.get("direccion")
+                    observaciones = data.get("observaciones")
+                except Exception:
+                    direccion = None
+            else:
+                direccion = None
+        if not direccion or direccion == "No presente":
             return None
-        if "bogota" not in addr.lower():
-            addr = addr + " BOGOTA, COLOMBIA"
-        log_message("Dirección extraída: " + addr, "INFO")
-        return addr
+        # Si la dirección no contiene "bogota", añadirlo
+        if "bogota" not in direccion.lower():
+            direccion = direccion + " BOGOTA, COLOMBIA"
+        log_message(f"Dirección extraída: {direccion} | Observaciones: {observaciones}", "INFO")
+        return data
     except Exception as e:
         log_message(f"Error en get_direction: {e}", "ERROR")
         return None

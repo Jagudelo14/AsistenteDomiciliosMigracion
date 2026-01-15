@@ -6,10 +6,10 @@ from datetime import datetime
 import logging
 import os
 import json
-from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, get_client_name_database,verify_hour_atettion
+from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, get_client_name_database,verify_hour_atettion,validate_duplicated_message
 from utils_chatgpt import get_classifier, get_openai_key,get_direction,get_name
 from utils_subflujos import manejar_dialogo
-from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign
+from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign,buscar_sede_mas_cercana_dentro_area
 from utils_registration import  update_dir_primera_vez, update_nombre_bool, validate_nombre_bool,  validate_direction_first_time
 from utils_database import execute_query
 from typing import Any, Dict, Optional, List
@@ -71,7 +71,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         tipo_general = message["type"]
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
-        #Validación mensaje duplicado###################################
+        # Validación mensaje duplicado
         #if validate_duplicated_message(message_id):
         #    logging.info(f"Mensaje duplicado: {message_id}")
         #    return func.HttpResponse("Mensaje duplicado", status_code=200)
@@ -83,6 +83,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         ####################################
         ############ CLIENTE NUEVO  ############
         ####################################
+        #Juan= "573026467575"
+        #send_text_response(Juan,f"el numero {sender} está iniciando conversación")
         if not get_client_database(sender, ID_RESTAURANTE):
             log_message("Cliente nuevo detectado", "INFO")
             datos: str = None
@@ -200,7 +202,14 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             log_message(f"Empieza a clasificar con text {text}", "INFO")
             if text:
                 if not validate_direction_first_time(sender, ID_RESTAURANTE) or not validate_nombre_bool(sender, ID_RESTAURANTE):
-                    direccion=get_direction(text)
+                    direccion_json = get_direction(text)
+                    direccion = None
+                    observaciones = None
+                    if isinstance(direccion_json, dict):
+                        direccion = direccion_json.get("direccion")
+                        observaciones = direccion_json.get("observaciones")
+                    else:
+                        direccion = direccion_json
                     nombre=get_name(text)
                     booleano_dir: bool = True
                     if direccion and not validate_direction_first_time(sender, ID_RESTAURANTE):
@@ -212,14 +221,24 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                         latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
                         longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
                         resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,ID_RESTAURANTE, nombre_cliente)
+                        sede=buscar_sede_mas_cercana_dentro_area(latitud_cliente,longitud_cliente,ID_RESTAURANTE)
+                        id_sede = sede["id"] if sede and "id" in sede else None
+                        nombre_sede = sede["nombre"] if sede and "nombre" in sede else "Caobos"
                         update_dir_primera_vez(sender, ID_RESTAURANTE, True)
                         if resultado is None:
                             execute_query("""
                                             UPDATE clientes_whatsapp
-                                            SET direccion_google = %s
+                                            SET direccion_google = %s, id_sede= %s
                                             WHERE telefono = %s AND id_restaurante = %s;
-                                            """, (None, sender, ID_RESTAURANTE))
+                                            """, (None, id_sede, sender, ID_RESTAURANTE))
                             booleano_dir = False
+                        else :
+                            execute_query("""
+                                            UPDATE clientes_whatsapp
+                                            SET observaciones_dir = %s, id_sede= %s
+                                            WHERE telefono = %s AND id_restaurante = %s;
+                                            """, (observaciones, id_sede, sender, ID_RESTAURANTE))
+                            log_message(f'observaciones creadas en la base .{observaciones}', 'INFO')
                     if nombre and not validate_nombre_bool(sender, ID_RESTAURANTE):
                         execute_query("""
                                         UPDATE clientes_whatsapp
@@ -233,7 +252,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     if not validate_nombre_bool(sender, ID_RESTAURANTE):
                         send_text_response(sender, "Por favor, indícame tu nombre para continuar con el pedido.")
                     if booleano_dir is False:
-                        send_text_response(sender, "No estas dentro de nuestra area de operación, puedes hacer tu pedido para recoger en tienda")
+                        send_text_response(sender, "No estas dentro de nuestra area de operación, puedes hacer tu pedido para recoger en tienda, la sede mas cercana a ti es "+nombre_sede)
                     if validate_direction_first_time(sender, ID_RESTAURANTE) and validate_nombre_bool(sender, ID_RESTAURANTE):
                         send_text_response(sender,"¡Gracias por la información! 😊 Bienvenido a sierra nevada la cima del sabor")
                         send_pdf_response(sender)                 
