@@ -40,7 +40,7 @@ from utils import (
     borrar_intencion_futura,
     normalizar_especificaciones
 )
-from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida
+from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida,clasificar_negacion_general
 from utils_database import execute_query
 from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, primera_regla_tiempo
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
@@ -219,9 +219,20 @@ def subflujo_confirmacion_general(sender: str, respuesta_cliente: str) -> Dict[s
 def subflujo_negacion_general(sender: str, respuesta_cliente: str, nombre_cliente: str) -> Dict[str, Any]:
     """Maneja el caso en que no se detecta una intención específica, con ayuda de IA."""
     try:
-        items= obtener_menu()
-        mensaje=generar_mensaje_sin_intencion(respuesta_cliente, items)
-        send_text_response(sender, mensaje)
+        items = obtener_menu()
+        intencion = clasificar_negacion_general(respuesta_cliente,items)
+        log_message(f'Intención general clasificada: {intencion}', 'INFO')
+        if intencion.get("intencion") == "confirmar_pedido":
+            return{
+                "intencion_respuesta": "confirmar_pedido",
+                "continuidad": True,
+                "observaciones": respuesta_cliente
+            }
+        elif intencion.get("intencion") == "sin_intencion":
+            items= obtener_menu()
+            mensaje=generar_mensaje_sin_intencion(respuesta_cliente, items)
+            send_text_response(sender, mensaje)
+            return
         return
     except Exception as e:
         logging.error(f"Error en <SubflujoNegacionGeneral>: {e}")
@@ -476,7 +487,7 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
             return
         elif medio_pago_real == "datafono":
-            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar con tarjeta (datafono) al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es  de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar con Datafono al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es  de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
@@ -983,7 +994,7 @@ def orquestador_subflujos(
         elif clasificacion_mensaje == "confirmacion_general":
             return subflujo_confirmacion_general(sender, pregunta_usuario)
         elif clasificacion_mensaje == "negacion_general":
-            subflujo_negacion_general(sender, pregunta_usuario, nombre_cliente)
+            return subflujo_negacion_general(sender, pregunta_usuario, nombre_cliente)
         elif clasificacion_mensaje == "consulta_promociones":
             subflujo_promociones(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "consulta_menu" and type_text != "pregunta" and obtener_intencion_futura(sender) != "eleccion_sede":
@@ -1036,7 +1047,34 @@ def orquestador_subflujos(
                 codigo_unico: str = obtener_intencion_futura_observaciones(sender)
                 guardar_intencion_futura(sender, "primera_direccion_domicilio", codigo_unico)
         elif clasificacion_mensaje == "confirmar_direccion":
-            subflujo_confirmar_direccion(sender, nombre_cliente)
+            try:
+                # Verificar si existen pedidos pendientes
+                query_pendientes = """
+                        SELECT d.id_pedido,i.nombre,d.cantidad,i.precio,d.total,d.especificaciones, p.codigo_unico
+                            FROM detalle_pedido d
+                            INNER JOIN pedidos p 
+                                ON d.id_pedido = p.idpedido
+                            INNER JOIN items i 
+                                ON i.iditem = d.id_producto
+                            WHERE p.codigo_unico = (
+                                SELECT p2.codigo_unico
+                                FROM pedidos p2
+                                INNER JOIN clientes_whatsapp cw 
+                                    ON p2.id_whatsapp = cw.id_whatsapp
+                                WHERE cw.telefono = %s and p.estado = 'pendiente' and p.es_temporal = true
+                                ORDER BY p2.idpedido DESC
+                                LIMIT 1
+                            );
+                """
+                result = execute_query(query_pendientes, (sender,))
+                codigo_unico = result[0][6] if result else 0
+                if codigo_unico != 0:
+                    subflujo_confirmar_direccion(sender, nombre_cliente)
+                else:
+                    send_text_response(sender, "Hemos actualizado tu dirección,¿te gustaria pedir algo?")
+            except Exception as e:
+                log_message(f'Error en <OrquestadorSubflujos> al manejar confirmacion_direccion: {e}.', 'ERROR')
+                raise e
         elif clasificacion_mensaje == "recoger_restaurante":
             subflujo_recoger_restaurante(sender, nombre_cliente)
             subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)

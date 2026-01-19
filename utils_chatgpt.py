@@ -501,7 +501,7 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
             -Esta regla es estricta y debe cumplirse siempre que la intención sea REPLACE_ITEM, sin excepciones.
         - Nunca clasificar como REPLACE_ITEM si no existen dos productos claramente identificables en el mensaje en cambio clasificalo como ACLARACION.
         - Cuando el cliente pide "platanitos" "platanos" o "plátanos" se refiere a los platanitos maduros el ACOMPAÑAMIENTO DE 7900 a menos que explicitamente mencione sea la adicion en ese caso son los platanos maduros de 2900 el adicional
-        
+        - Si colocas order_complete en true debes colocar la coincidencia mas aproximada en el campo matched de los candidatos
         ======================================================
         = COMPORTAMIENTO GLOBAL DEL MODELO =
         ======================================================
@@ -639,8 +639,6 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
 
 def saludo_dynamic(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
     try:
-
-
         PROMPT_SALUDO_DYNAMIC = """
 Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
 Tu tarea es generar un saludo personalizado según el tono que use el cliente.
@@ -1044,10 +1042,7 @@ def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedi
 # """
         if not validate_personal_data(sender,os.environ.get("ID_RESTAURANTE", "5")):
             PROMPT_MEDIOS_PAGO = f"""
-Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
-Tu nombre es PAKO.
-
-El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
+El cliente {nombre} ya confirmó su pedido.
 Pedido realizado:
 "{pedido_str}"
 
@@ -1055,7 +1050,6 @@ OBJETIVO:
 Generar un ÚNICO mensaje breve, cálido y entusiasta.
 
 INSTRUCCIONES OBLIGATORIAS:
-- Haz un comentario alegre y sabroso sobre el pedido.
 - Pide al cliente que elija un método de pago.
 - Menciona únicamente estas opciones de pago:
   * Efectivo
@@ -1063,7 +1057,9 @@ INSTRUCCIONES OBLIGATORIAS:
 - Solicita los datos personales listados abajo.
 - La solicitud de datos DEBE tener EXACTAMENTE esta estructura y este orden,
   sin agregar texto intermedio ni variaciones:
-
+- Usa saltos de línea reales usando \n
+- Trata de acortar el mensaje lo antes posbile para que quepa en un solo mensaje de WhatsApp.
+Datos personales requeridos:
 -Metodo de pago
 -Documento
 -Tipo de documento
@@ -1083,7 +1079,7 @@ Estructura final:
 Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
 Tu nombre es PAKO.
 
-El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
+El cliente {nombre} ya confirmó su pedido.
 Pedido realizado:
 "{pedido_str}"
 
@@ -1096,7 +1092,8 @@ INSTRUCCIONES OBLIGATORIAS:
 - Menciona únicamente estas opciones de pago:
   * Efectivo
   * Datáfono
-
+- El mensaje final debe ser muy corto
+- Usa saltos de línea reales usando \n.
 FORMATO DE RESPUESTA:
 - Responde ÚNICA Y EXCLUSIVAMENTE con un JSON válido.
 - No agregues texto antes ni después del JSON.
@@ -1701,22 +1698,20 @@ def solicitar_metodo_recogida(nombre: str, codigo_unico: str, nombre_local: str,
 Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
 Te llamas PAKO.
 
-El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
+El cliente {nombre} ya confirmó su pedido
 Este es el pedido que hizo:
 "{pedido_str}"
 
 TAREA:
-- Haz un comentario alegre, sabroso y un poquito divertido sobre el pedido.
 - Estilo: cálido, entusiasta.
-- Máximo 1 frase en tres lineas.
+- Máximo 1 frase en dos lineas.
 Después:
 - Pregunta amablemente dónde quiere recibir su pedido.
-- Menciona el local: {nombre_local}.
 - No saludes estamos en medio de una conversación
 - Lista ambas opciones:
   • Recoger en tienda
   • Envío a domicilio (depende de la zona).
-Incluye el código único del pedido en el mensaje.
+- Usa saltos de línea reales usando '\n'
 FORMATO ESTRICTO:
 {{
   "mensaje": "texto aquí"
@@ -2781,3 +2776,86 @@ a las 8 y media -> 8:30
     except Exception as e:
         log_message(f"Error en get_name: {e}", "ERROR")
         return None
+    
+def clasificar_negacion_general(pregunta_usuario: str, items, model: str = "gpt-4o") -> dict:
+    """
+    Usa ChatGPT para clasificar si la pregunta del usuario está relacionada con el menú
+    de la hamburguesería o no.
+    """
+
+    client: OpenAI = OpenAI()
+
+    prompt: str = f"""
+    Eres un asistente que clasifica preguntas de clientes de una hamburguesería.
+
+    Debes responder con un JSON EXACTO con la siguiente forma:
+    {{
+        "intencion": "intencion detectada"
+    }}
+
+    IMPORTANTE: TENER EN CUENTA EL CONTEXTO DE LOS MENSAJES ANTERIORES PARA DEFINIR LA INTENCION
+
+    Las posibles intenciones son:
+    - "confirmar_pedido" : 
+    * si la pregunta del usuario está relacionada con confirmar o  un pedido existente.
+    * si el usuario confirma un pedido
+    * responde no, asi esta bien o no quiero cambiar o no a la pregunta del agente de confirmar pedido debe clasificarse como confirmar pedido
+    * si responde a la pregunta del agente de si su pedido esta bien con una afirmacion
+    * Cuando el usuario confirme que su pedido esta bien como esta
+    * responde si a la pregunta del agente de confirmar pedido debe clasificarse como confirmar pedido
+    * CUANDO EL MENSAJE ANTERIOR DEL AGENTE TERMINE CON "o ¿tu pedido está bien así?" O "¿Confirmas tu pedido? Y EL USUARIO RESPONDE NEGATIVAMENTE A LOS CAMBIOS O SUGERENCIAS VA AQUI
+    - "sin_intencion": Cuando no puedas detectar una confirmacion de pedido 
+
+    Este es el menú completo si la pregunta incluye un producto del menu o se refiere a comidas o bebidas es relacionada:
+    {json.dumps(items, ensure_ascii=False)}
+    
+    Ahora clasifica la siguiente pregunta del usuario:
+    "{pregunta_usuario}"
+
+    Devuelve SOLO el JSON, sin explicación adicional.
+    """
+
+    try:
+        response = client.responses.create(
+            model=model,
+            input=prompt,
+            temperature=0
+        )
+        log_message(f'prompt: {prompt}', 'DEBUG')
+        text_output = response.output[0].content[0].text.strip()
+        # limpiar posibles fences/triple-backticks u otros prefijos
+        try:
+            text_output = _clean_model_output(text_output)
+        except Exception:
+            pass
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] clasificar_confirmacion_general_chatgpt tokens_used={tokens_used}", "DEBUG")
+        # Extraer JSON dentro de fences ```json ... ``` o buscar primer objeto JSON
+        clean = text_output or ""
+        m = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", clean, flags=re.IGNORECASE)
+        if m:
+            clean = m.group(1).strip()
+        else:
+            clean = clean.strip()
+        if not clean.startswith('{'):
+            m2 = re.search(r"(\{[\s\S]*\})", clean)
+            if m2:
+                clean = m2.group(1)
+
+        try:
+            result = json.loads(clean)
+            return result
+        except json.JSONDecodeError:
+            logging.error(f"Error al parsear JSON en clasificar_pregunta_menu_chatgpt: {clean!r}")
+            log_message(f'Error al parsear JSON en <ClasificarPreguntaMenuChatGPT>: {clean}', 'ERROR')
+            return {"clasificacion": "no_relacionada"}
+
+    except json.JSONDecodeError:
+        logging.error(f"Error al parsear JSON: {text_output}")
+        log_message(f'Error al parsear JSON en <ClasificarPreguntaMenuChatGPT>: {text_output}', 'ERROR')
+        return {"clasificacion": "no_relacionada"}
+    except Exception as e:
+        logging.error(f"Error en <ClasificarPreguntaMenuChatGPT>: {e}")
+        log_message(f'Error en <ClasificarPreguntaMenuChatGPT>: {e}.', 'ERROR')
+        return {"clasificacion": "no_relacionada"}

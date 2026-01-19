@@ -563,7 +563,7 @@ def buscar_sede_mas_cercana(
             return None
 
         for s in sedes:
-            logging.info(f"Sede encontrada: {s}")
+            print(f"Sede encontrada: {s}")
 
         # ------------------------------------
         # 2. Preparar origen y destinos
