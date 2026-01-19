@@ -83,8 +83,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         ####################################
         ############ CLIENTE NUEVO  ############
         ####################################
-        #Juan= "573026467575"
-        #send_text_response(Juan,f"el numero {sender} está iniciando conversación")
+        Juan= "573026467575"
+        send_text_response(Juan,f"el numero {sender} está iniciando conversación")
         if not get_client_database(sender, ID_RESTAURANTE):
             log_message("Cliente nuevo detectado", "INFO")
             datos: str = None

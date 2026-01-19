@@ -11,7 +11,7 @@ import json
 import os
 
 CANTIDAD_TIEMPO_PEDIDO: int = 5 # Cantidad de tiempo por pedido en cola en minutos
-TIEMPO_TOLERANCIA: int = 5 # Cantidad de minutos de tolerancia para tiempo total de domicilio
+TIEMPO_TOLERANCIA: int = 15 # Cantidad de minutos de tolerancia para tiempo total de domicilio
 UMBRAL_TIEMPO: int = 150 # Cantidad de minutos de umbral máximo para un domicilio (2 horas y 30 minutos)
 API_KEY_GOOGLE_MAPS: str = os.environ.get("API_KEY_GOOGLE_MAPS", "")
 
