@@ -18,11 +18,15 @@ def get_sender() -> Optional[str]:
     return _sender_var.get()
 
 def set_id_cliente(sender: str) -> None:
-    query = """SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s LIMIT 1"""
-    result = execute_query(query, (sender,))
-    id_cliente = result[0][0] if result else None
-    print(f'ID cliente obtenido: {id_cliente}', 'INFO')
-    _id_cliente_var.set(id_cliente)
+    try:
+        query = """SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s LIMIT 1"""
+        result = execute_query(query, (sender,))
+        id_cliente = result[0][0] if result else None
+        print(f'ID cliente obtenido: {id_cliente}', 'INFO')
+        _id_cliente_var.set(id_cliente)
+    except Exception as e:
+        print(f'Error al obtener ID cliente: {e}', 'ERROR')
+        _id_cliente_var.set(None)
 
 def get_id_cliente() -> Optional[str]:
     print(f'ID cliente recuperado: {_id_cliente_var.get()}', 'INFO')

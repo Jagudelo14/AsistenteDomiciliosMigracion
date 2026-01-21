@@ -1,5 +1,5 @@
 # function_app.py
-# Last modified: 2026-01-14 Juan Agudelo
+# Last modified: 2026-01-21 Juan Agudelo
 # ajsute efectivo
 import azure.functions as func
 from datetime import datetime
@@ -72,9 +72,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         # Validación mensaje duplicado
-        #if validate_duplicated_message(message_id):
-        #    logging.info(f"Mensaje duplicado: {message_id}")
-        #    return func.HttpResponse("Mensaje duplicado", status_code=200)
+        if validate_duplicated_message(message_id):
+            logging.info(f"Mensaje duplicado: {message_id}")
+            return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
@@ -223,8 +223,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                         latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
                         longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
                         resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,ID_RESTAURANTE, nombre_cliente)
-                        sede=buscar_sede_mas_cercana_dentro_area(latitud_cliente,longitud_cliente,ID_RESTAURANTE)
-                        #sede=buscar_sede_mas_cercana(latitud_cliente,longitud_cliente,ID_RESTAURANTE)
+                        #sede=buscar_sede_mas_cercana_dentro_area(latitud_cliente,longitud_cliente,ID_RESTAURANTE)
+                        sede=buscar_sede_mas_cercana(latitud_cliente,longitud_cliente,ID_RESTAURANTE)
                         id_sede = sede["id"] if sede and "id" in sede else None
                         nombre_sede = sede["nombre"] if sede and "nombre" in sede else "Caobos"
                         update_dir_primera_vez(sender, ID_RESTAURANTE, True)

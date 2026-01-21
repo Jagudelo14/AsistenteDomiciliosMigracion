@@ -2377,27 +2377,82 @@ def get_direction(text: tuple) -> str | None:
         #if not text or not isinstance(text, str):
         #    return None
         client = OpenAI(api_key=get_openai_key())
-        prompt = f"""Eres un asistente experto en extraer direcciones de texto libre.
-Extrae SÓLO la dirección del siguiente texto y si no encuentras dirección responde como "No presente".
+        prompt = f"""Eres un asistente experto en extraer direcciones de texto libre en Colombia.
+
+Extrae SÓLO la dirección del siguiente texto y si no encuentras una dirección responde como "No presente".
+
+REGLAS ESTRICTAS:
+- La "direccion" debe incluir:
+  • Tipo de vía + número + complemento (#)
+  • Barrio o sector si está presente (ej: Cedritos, Suba, Chapinero)
+  • Al final SIEMPRE: "Bogota, Colombia"
+
+- Las "observaciones" deben incluir ÚNICAMENTE:
+  • Apartamento (apt, apartamento, apto)
+  • Torre
+  • Interior
+  • Conjunto residencial
+  • Bloque
+  • Piso
+  • Etapa
+  • Casa
+  • Oficina
+  • Villa
+  • Referencias adicionales
+
+- Los barrios o sectores NUNCA van en "observaciones".
+
+- Si no hay observaciones, devuelve un string vacío "".
+
 Texto: "{text}"
-Si encuentras una direccion agrega al final Bogota, Colombia
-Las observaciones pueden ser indicaciones del lugar como numero de apartamento nombre del conjunto residencial referencias etc si no tiene observaciones un string vacio devuelve
-RESPONDE únicamente con un json con la dirección extraída y las observaciones, por ejemplo:
+
+RESPONDE únicamente con un JSON con la dirección extraída y las observaciones.
+
+EJEMPLOS:
+
+Entrada:
+"Calle 123 #45-67 Barrio Centro cerca a la iglesia principal"
+
+Salida:
 {{
-    "direccion": "Calle 123 #45-67 Barrio Centro Bogota, Colombia",
-    "observaciones": "Cerca a la iglesia principal"
+  "direccion": "Calle 123 #45-67 Barrio Centro Bogota, Colombia",
+  "observaciones": "Cerca a la iglesia principal"
 }}
+
+Entrada:
+"Cr 20 # 137 -48"
+
+Salida:
 {{
-    "direccion": "Cr 20 # 137 -48 Bogota, Colombia",
-    "observaciones": ""
+  "direccion": "Cr 20 # 137 -48 Bogota, Colombia",
+  "observaciones": ""
 }}
+
+Entrada:
+"Cr 57 #153-52 Torre Farfala"
+
+Salida:
 {{
-    "direccion": "Cr 57 #153-52 Bogota, Colombia",
-    "observaciones": "Torre Farfala"
+  "direccion": "Cr 57 #153-52 Bogota, Colombia",
+  "observaciones": "Torre Farfala"
 }}
+
+Entrada:
+"Studio 30"
+
+Salida:
 {{
-    "direccion": "No presente",
-    "observaciones": "Studio 30"
+  "direccion": "No presente",
+  "observaciones": "Studio 30"
+}}
+
+Entrada:
+"Cr 145 #19-13 cedritos apt 508"
+
+Salida:
+{{
+  "direccion": "Cr 145 #19-13 Cedritos Bogota, Colombia",
+  "observaciones": "Apto 508"
 }}
 """
         response = client.chat.completions.create(
