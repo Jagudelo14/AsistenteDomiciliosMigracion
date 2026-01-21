@@ -1495,3 +1495,26 @@ def calcular_minutos(entrada):
 #     fecha = datetime.strptime(fecha_str.split('.')[0], "%Y-%m-%d %H:%M:%S")
 #     ahora = datetime.now()
 #     return (ahora - fecha) <= timedelta(hours=24)
+
+def formatear_conversacion(contenido_usuario):
+    mensajes = []
+    try:
+        if isinstance(contenido_usuario, str):
+            try:
+                contenido_usuario = ast.literal_eval(contenido_usuario)
+            except Exception:
+                return str(contenido_usuario)
+        for item in contenido_usuario:
+            # Si es tupla, toma el primer elemento
+            mensaje = item[0] if isinstance(item, tuple) and len(item) > 0 else item
+            if isinstance(mensaje, dict):
+                rol = mensaje.get('rol', 'desconocido').capitalize()
+                texto = mensaje.get('texto', '')
+                mensajes.append(f"{rol}: {texto}")
+            elif isinstance(mensaje, str):
+                # Si es string, solo lo agrega
+                mensajes.append(mensaje)
+        return '\n'.join(mensajes)
+    except Exception as e:
+        log_message(f"Error en formatear_conversacion_sin_fecha: {e}", "ERROR")
+        return ""

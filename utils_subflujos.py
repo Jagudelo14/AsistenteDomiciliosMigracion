@@ -16,6 +16,7 @@ from utils import (
     actualizar_medio_pago,
     calcular_minutos,
     extraer_ultimo_mensaje,
+    formatear_conversacion,
     marcar_estemporal_true_en_pedidos,
     obtener_direccion,
     actualizar_costos_y_tiempos_pedido,
@@ -40,7 +41,7 @@ from utils import (
     borrar_intencion_futura,
     normalizar_especificaciones
 )
-from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida,clasificar_negacion_general
+from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida,clasificar_negacion_general,respuesta_transferencia
 from utils_database import execute_query
 from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, primera_regla_tiempo
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
@@ -318,11 +319,15 @@ def subflujo_transferencia(sender: str, nombre_cliente: str, contenido_usuario: 
             respuesta_grave.get("accion_recomendada"),
             respuesta_grave.get("resumen_ejecutivo")
         )
+        print(contenido_usuario)
         execute_query(query, params)
+        print(contenido_usuario)
         send_text_response(sender, respuesta_grave.get("respuesta_cordial"))
         numero_admin: str = os.getenv("NUMERO_ADMIN")
         log_message(f"Notificando al administrador {numero_admin} sobre queja grave de {nombre_cliente} ({sender}).", "INFO")
-        send_text_response(numero_admin, f"Nuevo caso de solicitud de transferencia de {nombre_cliente} ({sender}): {contenido_usuario}")
+        texto_limpio = formatear_conversacion(contenido_usuario)
+        print(texto_limpio)
+        send_text_response(numero_admin, f"Nuevo caso de solicitud de transferencia de {nombre_cliente} ({sender}): {texto_limpio}")
         send_text_response(numero_admin, f"Resumen ejecutivo: {respuesta_grave.get('resumen_ejecutivo')}")
         log_message('Registro de queja grave guardado correctamente.', 'INFO')
     except Exception as e:
@@ -380,42 +385,20 @@ def subflujo_consulta_menu(sender: str, nombre_cliente: str, pregunta_usuario: s
         log_message(f'Error en <SubflujoConsultaMenu>: {e}.', 'ERROR')
         raise e
 
-def subflujo_consulta_pedido(sender: str, nombre_cliente: str, entidades: str, pregunta_usuario: str) -> None:
+def subflujo_consulta_pedido(sender: str, nombre_cliente: str, contenido_usuario: str) -> None:
+    """Maneja la transferencia a un agente humano."""
     try:
-        """Maneja la consulta del estado del pedido por parte del usuario."""
-        query_pendientes = """
-                SELECT d.id_pedido,i.nombre,d.cantidad,i.precio,d.total,d.especificaciones, p.codigo_unico
-                    FROM detalle_pedido d
-                    INNER JOIN pedidos p 
-                        ON d.id_pedido = p.idpedido
-                    INNER JOIN items i 
-                        ON i.iditem = d.id_producto
-                    WHERE p.codigo_unico = (
-                        SELECT p2.codigo_unico
-                        FROM pedidos p2
-                        INNER JOIN clientes_whatsapp cw 
-                            ON p2.id_whatsapp = cw.id_whatsapp
-                        WHERE cw.telefono = '573026467575' and p.estado = 'pendiente' and p.es_temporal = true
-                        ORDER BY p2.idpedido DESC
-                        LIMIT 1
-                    );
-        """
-        result = execute_query(query_pendientes, (sender,))
-        codigo_unico = result[0][6] if result else 0
-        if not codigo_unico:
-            send_text_response(sender, f"Hola {nombre_cliente}, no encontré ningún pedido a tu nombre. ¿Deseas hacer un nuevo pedido?")
-        else:
-            precio_total = sum(fila[4] for fila in result)
-            Tiempo_espera =primera_regla_tiempo("21",10)
-            respuesta_consulta_pedido: dict = responder_sobre_pedido(pregunta_usuario,Tiempo_espera,precio_total)
-            if isinstance(respuesta_consulta_pedido, dict):
-                mensaje = respuesta_consulta_pedido.get("mensaje", "")
-            else:
-                mensaje = str(respuesta_consulta_pedido)
-            send_text_response(sender, mensaje)
-        log_message(f'Consulta de pedido respondida correctamente para {sender}.', 'INFO')
+        respuesta_grave: dict = respuesta_transferencia(contenido_usuario, nombre_cliente, "Sierra Nevada")
+        send_text_response(sender, respuesta_grave.get("respuesta_cordial"))
+        numero_admin: str = os.getenv("NUMERO_ADMIN")
+        log_message(f"Notificando al administrador {numero_admin} sobre queja grave de {nombre_cliente} ({sender}).", "INFO")
+        texto_limpio = formatear_conversacion(contenido_usuario)
+        print(texto_limpio)
+        send_text_response(numero_admin, f"Nuevo caso de solicitud de transferencia de {nombre_cliente} ({sender}): {texto_limpio}")
+        send_text_response(numero_admin, f"Resumen ejecutivo: {respuesta_grave.get('resumen_ejecutivo')}")
+        log_message('Registro de queja grave guardado correctamente.', 'INFO')
     except Exception as e:
-        log_message(f'Error en <SubflujoConsultaPedido>: {e}.', 'ERROR')
+        log_message(f'Error en <SubflujoTransferencia>: {e}.', 'ERROR')
         raise e
 
 def subflujo_promociones(sender: str, nombre_cliente: str, pregunta_usuario: str) -> None:
@@ -1012,7 +995,7 @@ def orquestador_subflujos(
         elif clasificacion_mensaje == "confirmar_pedido":
             subflujo_confirmacion_pedido(sender, nombre_cliente)
         elif clasificacion_mensaje == "consulta_pedido":
-            subflujo_consulta_pedido(sender, nombre_cliente, entidades_text, pregunta_usuario)
+            subflujo_consulta_pedido(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "validacion_pago":
             intent_futura = obtener_intencion_futura(sender)
             # Si estamos en el paso de elegir medio de pago, procesar selección

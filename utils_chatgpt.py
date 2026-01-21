@@ -2859,3 +2859,84 @@ def clasificar_negacion_general(pregunta_usuario: str, items, model: str = "gpt-
         logging.error(f"Error en <ClasificarPreguntaMenuChatGPT>: {e}")
         log_message(f'Error en <ClasificarPreguntaMenuChatGPT>: {e}.', 'ERROR')
         return {"clasificacion": "no_relacionada"}
+    
+def respuesta_transferencia(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
+    try:
+        PROMPT_QUEJA_GRAVE = """
+            Eres el asistente oficial de servicio al cliente de Sierra Nevada, La Cima del Sabor.
+            Esta vez atenderás transferencias,donde el cliente expresa algo que debe ser escalado
+            ***OBJETIVO GENERAL***
+            - Indicarle al cliente que su caso ha sido escalado a un administrador y pronto se comunicarán con él.
+            - Asumir responsabilidad sin culpas excesivas.
+            - Dar una ACCIÓN clara y concreta que el asistente realizará.
+            - Preparar un resumen ejecutivo para un administrador humano.
+            - NO escalar directamente en el mensaje al cliente (solo en el resumen interno).
+            - Máximo 2 frases, tono cálido, humano, cercano, estilo Sierra Nevada, colombiano neutro.
+            - La respuesta_cordial DEBE incluir explícitamente la frase:
+            "Ya pregunte al administrador del punto se comunicara contigo pronto."
+            - Si la frase no aparece, la respuesta es inválida.
+            ***DEBES ENTREGAR ESTOS CAMPOS***
+            1. "respuesta_cordial": Mensaje calmado, empático y con acción concreta 
+            (ej: “reviso ya mismo con cocina y logística”, “activo seguimiento con el punto”).
+            2. "resumen_queja": Descripción breve de lo que reclama el cliente.
+            3. "accion_recomendada": Acción clara que el sistema/administrador debe hacer 
+            (ej: verificar estado del pedido, contactar punto, revisar domiciliario).
+            4. "resumen_ejecutivo": Resumen para administrador (breve, objetivo, sin adornos).
+            5. "intencion": Siempre "queja_grave".
+            ***TONO***
+            - Cálido y responsable.
+            - Sin tecnicismos ni sarcasmo.
+            - Evita respuestas robóticas.
+            - Máximo un emoji, si fluye natural.
+
+            Cliente llamado {nombre} escribió:
+            "{mensaje_usuario}"
+            ***FORMATO OBLIGATORIO***
+            Devuelve SOLO un JSON válido:
+            {{
+                "respuesta_cordial": "",
+                "resumen_queja": "",
+                "accion_recomendada": "",
+                "resumen_ejecutivo": "",
+                "intencion": "queja_grave"
+            }}
+        """
+        client = OpenAI()
+        prompt = PROMPT_QUEJA_GRAVE.format(
+            mensaje_usuario=mensaje_usuario,
+            nombre=nombre
+        )
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Eres un generador de respuestas para quejas graves de clientes."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=220,
+            temperature=0.6
+        )
+        raw = response.choices[0].message.content.strip()
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] respuesta_quejas_graves_ia tokens_used={tokens_used}", "DEBUG")
+        try:
+            data = json.loads(raw)
+        except:  # noqa: E722
+            data = {
+                "respuesta_cordial": f"{nombre}, ya reviso lo ocurrido con tu experiencia en {nombre_local} y activo el seguimiento de inmediato.",
+                "resumen_queja": "Queja grave del cliente sobre servicio o pedido.",
+                "accion_recomendada": "Revisión urgente con el punto y estado del pedido.",
+                "resumen_ejecutivo": "Cliente reporta una queja grave; requiere revisión del punto y logística.",
+                "intencion": "queja_grave"
+            }
+        return data
+    except Exception as e:
+        log_message(f'Error en función <respuesta_quejas_graves_ia>: {e}', 'ERROR')
+        logging.error(f"Error en función <respuesta_quejas_graves_ia>: {e}")
+        return {
+            "respuesta_cordial": f"{nombre}, reviso de inmediato lo que pasó con tu experiencia en {nombre_local}.",
+            "resumen_queja": "Queja grave del cliente.",
+            "accion_recomendada": "Verificar con el punto y logística.",
+            "resumen_ejecutivo": "Error en el proceso automático, requiere revisión manual.",
+            "intencion": "queja_grave"
+        }
