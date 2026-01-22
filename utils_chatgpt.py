@@ -1933,6 +1933,7 @@ def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> di
         - Tono: amable, cercano, estilo “¡Hola {cliente_nombre}! Qué alegría tenerte por aquí 🙌”.
         - Máximo 1 o 2 frases antes de la pregunta.
         - No uses groserías ni sarcasmo.
+        - Indicale que si envia una nueva dirección agregue el barrio y cualquier referencia 
 
         FORMATO DE RESPUESTA (OBLIGATORIO):
         {{
@@ -2348,6 +2349,8 @@ Instrucciones del mensaje:
 - Di el nombre del cliente.
 - Confirma la dirección que tenemos guardada la cual se usará para el domicilio.
 - No inventar información adicional.
+- Recuerdale al usuario que si va a actualizar su direccion indique su barrio y cualquier referencia necesaria
+- El mensaje debe ser muy corto
 """
 
         response = client.chat.completions.create(

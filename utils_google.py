@@ -492,6 +492,7 @@ def geocode_address(direccion: str) -> dict | None:
             return None
         gmaps = obtener_cliente_google_maps()
         resultados = gmaps.geocode(direccion, language="es")
+        print(resultados)
         if not resultados:
             log_message(f"geocode_address: no se encontró resultado para '{direccion}'", "INFO")
             return None

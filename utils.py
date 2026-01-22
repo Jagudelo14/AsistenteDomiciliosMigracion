@@ -16,7 +16,8 @@ from zoneinfo import ZoneInfo
 import json
 import requests
 import difflib
-from utils_contexto import get_sender,actualizar_conversacion
+from utils_contexto import get_sender,actualizar_conversacion,get_id_sede
+
 
 def register_log(mensaje: str, tipo: str, ambiente: str = "Whatsapp", idusuario: int = 1, archivoPy: str = "", function_name: str = "",line_number: int = 0) -> None:
     try:
@@ -398,19 +399,25 @@ def borrar_intencion_futura(telefono: str) -> bool:
 
 def obtener_menu() -> list[dict[str, Any]]:
     try:
+        id_sede=get_id_sede()
+        print(f"ID sede para obtener menú: {id_sede}")
         query = """
-                SELECT
-                    iditem,
-                    nombre, 
-                    tipo_comida, 
-                    descripcion, 
-                    observaciones, 
-                    precio
-                FROM public.items
-                WHERE estado = true
-                ORDER BY tipo_comida, nombre;
-                """
-        items_data = execute_query(query)
+            SELECT
+                i.iditem,
+                i.nombre, 
+                i.tipo_comida, 
+                i.descripcion, 
+                i.observaciones, 
+                i.precio
+            FROM public.items i
+            INNER JOIN public.disponibilidad_items d
+                ON i.iditem = d.id_item
+            WHERE i.estado = true
+                AND d.disponible = true
+                AND d.id_sede = %s
+            ORDER BY i.tipo_comida, i.nombre;
+        """
+        items_data = execute_query(query, (id_sede,))
         items = [
             {   
                 "iditem": row[0],
@@ -423,6 +430,7 @@ def obtener_menu() -> list[dict[str, Any]]:
             for row in items_data
             ]
         log_message("Menú obtenido exitosamente.", "INFO")
+        print(items)
         return items
     except Exception as e:
         log_message(f"Error al obtener el menú: {e}", "ERROR")

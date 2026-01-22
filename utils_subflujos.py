@@ -794,7 +794,7 @@ def generar_pago_domicilio(sender: str, nombre_cliente: str, codigo_unico: str, 
                 send_text_response(os.getenv("NUMERO_ADMIN"), f"No se pudo generar link de pago para {nombre_cliente} ({sender}) por un total de {total_final}. Código único: {codigo_unico}.")
         except Exception as e:
             log_message(f"Advertencia: no se pudo generar link de pago inmediato: {e}", "WARN")
-def     subflujo_recoger_restaurante(sender: str, nombre_cliente: str):
+def subflujo_recoger_restaurante(sender: str, nombre_cliente: str):
     try:
         log_message("Empieza subflujo recoger restaurante", "INFO")
         #mensaje_sede: str = generar_mensaje_seleccion_sede(nombre_cliente)
@@ -1022,7 +1022,7 @@ def orquestador_subflujos(
                     guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
                 else:
                     # caso raro: flag indica primera vez pero no hay dirección en BD
-                    send_text_response(sender, "Gracias. Te recuerdo que no estas en el area de cobertura, por favor envia una nueva direccion donde te entregaremos este pedido o puedo ofrecerte recogerlo en el restaurante.")
+                    send_text_response(sender, "Gracias. Te recuerdo que no estas en el area de cobertura, por favor envia una direccion donde te entregaremos este pedido no olvides incluir tu barrio y cualquier otra referencia. También puedo ofrecerte recogerlo en el restaurante.")
                     guardar_intencion_futura(sender, "primera_direccion_domicilio", obtener_intencion_futura_observaciones(sender))
             else:
                 # No tiene dirección: solicitarla al usuario
@@ -1091,7 +1091,7 @@ def orquestador_subflujos(
                     longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
                     resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,os.environ.get("ID_RESTAURANTE", "5"), nombre_cliente)
                     if not resultado:
-                        send_text_response(sender, f"Lo siento {nombre_cliente}, pero tu dirección está fuera de nuestra área de cobertura. puedes recogerla en el restaurante o enviarnos otra dirección.")
+                        send_text_response(sender, f"Lo siento {nombre_cliente}, pero tu dirección está fuera de nuestra área de cobertura. puedes recogerla en el restaurante o enviarnos otra dirección no olvides incluir tu barrio y cualquier referencia.")
                         execute_query("""
                                                 UPDATE clientes_whatsapp
                                                 SET direccion_google = %s
