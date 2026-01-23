@@ -1526,3 +1526,36 @@ def formatear_conversacion(contenido_usuario):
     except Exception as e:
         log_message(f"Error en formatear_conversacion_sin_fecha: {e}", "ERROR")
         return ""
+
+def send_template_response(to: str, template_name: str, language: str = "es") -> str:
+    try:
+        log_message(
+            f"Enviando plantilla '{template_name}' a {to}",
+            "INFO"
+        )
+
+        token: str = api_whatsapp()
+        PHONE_ID: str = os.environ["PHONE_NUMBER_ID"]
+        whatsapp: WhatsApp = WhatsApp(token, PHONE_ID)
+
+        # 👇 components es obligatorio aunque no haya variables
+        whatsapp.send_template(
+            template_name,
+            to,
+            [],
+            language
+        )
+
+        log_message(
+            f"Plantilla '{template_name}' enviada correctamente a {to}",
+            "INFO"
+        )
+        return "OK"
+
+    except Exception as e:
+        log_message(
+            f"Error al hacer uso de función <send_template_response>: {e}.",
+            "ERROR"
+        )
+        logging.error(f"Error al enviar plantilla de WhatsApp: {e}")
+        return f"Error {e}"

@@ -119,7 +119,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - Si la bebida es agua con gas se refiere a una Agua con gas 600 ml
             - Las adiciones debes clasificarlas en el producto que se indica y tambien como un producto aparte a la vez
             - LAS ADICIONES SIEMPRE DEBES CLASIFICARLAS COMO UN PRODUCTO UNICO CON SU PRECIO Y SU CANTIDAD
-
+            - Si el cliente esta contestando a una pregunta de eleccion de sede debes clasifificarlo como eleccion_sede
             Reglas IMPORTANTES:
             - DEBES analizar y clasificar el ÚLTIMO mensaje enviado por el USUARIO.
             - Todos los mensajes anteriores son SOLO CONTEXTO y NO deben usarse para inferir intención.
@@ -1998,7 +1998,7 @@ def generar_mensaje_invitar_pago(
         direccion_envio: str,
         codigo_pedido: str,
         valor_total_pedido: str,
-        model: str = "gpt-3.5-turbo"
+        model: str = "gpt-4o-mini"
     ) -> str:
     """
     Llama a ChatGPT para generar un mensaje cordial que:
@@ -2048,31 +2048,53 @@ Instrucciones del mensaje:
     except Exception as e:
         return f"Error al generar mensaje: {str(e)}"
 
-def generar_mensaje_seleccion_sede(nombre_cliente: str, model: str = "gpt-3.5-turbo") -> str:
+def generar_mensaje_seleccion_sede(nombre_cliente: str,sender: str, model: str = "gpt-4o-mini") -> str:
     """
     Genera un mensaje personalizado con ChatGPT invitando al cliente
     a seleccionar una de las sedes disponibles.
     """
     try:
+        # Obtener id_sede más cercana y su info
+        query = """SELECT id_sede FROM clientes_whatsapp WHERE telefono = %s LIMIT 1"""
+        result = execute_query(query, (sender,))
+        id_sede_cercana = result[0][0] if result else None
+
+        query = """SELECT nombre, direccion FROM sedes WHERE id_sede = %s LIMIT 1"""
+        result = execute_query(query, (id_sede_cercana,))
+        sede_cercana = result[0] if result else ("", "")
+
+        # Obtener todas las sedes
+        query = """SELECT nombre, direccion FROM sedes WHERE estado = true"""
+        result = execute_query(query)
+        sedes = [{"nombre": row[0], "direccion": row[1]} for row in result]
+
+        # Formatear sedes para el prompt
+        sedes_str = "\n".join([f"- {s['nombre']}: {s['direccion']}" for s in sedes])
+
         prompt = f"""
 Eres PAKO, la voz oficial de Sierra Nevada, La Cima del Sabor.
 Tu misión es hablar de manera cálida, confiable y amigable.
 
 El cliente se llama: {nombre_cliente}
+La sede más cercana al cliente es: {sede_cercana[0]} ({sede_cercana[1]})
 
 Genera un mensaje corto y amable invitándolo a escoger una de las siguientes sedes:
 
 📍 **Sedes disponibles**
-- Caobos: Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca
+{sedes_str}
 
 Instrucciones:
 - Habla como asistente conversacional (no en formato técnico).
 - Menciona su nombre.
 - Invita a seleccionar una sede.
 - No inventes sedes nuevas.
-- Se detallado con las direcciones de cada una
-- No enumeres
-- Pide que escriban el nombre de la sede para recoger
+- Sé detallado con las direcciones de cada una.
+- No enumeres.
+- Pide que escriban el nombre de la sede para recoger.
+- Siempre ofrece recogerlo en la sede más cercana primero y luego lista las otras como opciones.
+- De las direcciones obtenidas no menciones ni la ciudad ni el pais solo la direccion y el barrio si aplica.
+- No saludes al cliente estas en medio de una conversacion
+- Haz el mensaje lo mas corto que puedas
 """
         client = OpenAI()
         response = client.chat.completions.create(
@@ -2084,6 +2106,7 @@ Instrucciones:
             max_tokens=200,
             temperature=0.7
         )
+        print(prompt)
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] generar_mensaje_seleccion_sede tokens_used={tokens_used}", "DEBUG")

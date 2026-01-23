@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 import os
 import json
-from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, get_client_name_database,verify_hour_atettion,validate_duplicated_message
+from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, get_client_name_database,verify_hour_atettion,validate_duplicated_message,send_template_response
 from utils_chatgpt import get_classifier, get_openai_key,get_direction,get_name
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign,buscar_sede_mas_cercana_dentro_area,buscar_sede_mas_cercana
@@ -37,6 +37,8 @@ def wpp(req: func.HttpRequest) -> func.HttpResponse:
     - POST → Recepción de mensajes y clasificación con OpenAI.
     """
     logging.info("📩 Webhook WhatsApp recibido.")
+    logging.info(f"Request details: {req}")
+    log_message(f"Request details: {req}")
     if req.method == "GET":
         return _verify_webhook(req)
     if req.method == "POST":
@@ -71,7 +73,13 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         tipo_general = message["type"]
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
-        # Validación mensaje duplicado
+        #mensaje= True
+        #if mensaje is True:
+            #Juan= "573222837565"
+            #send_text_response(Juan,"Oscar escriba al teams si le llego el mensaje")
+            #send_template_response(Juan,"suscripcion")
+            #return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+        #Validación mensaje duplicado
         if validate_duplicated_message(message_id):
             logging.info(f"Mensaje duplicado: {message_id}")
             return func.HttpResponse("Mensaje duplicado", status_code=200)

@@ -7,7 +7,7 @@ import random
 import logging
 from typing import Any, Dict
 import re
-from utils_contexto import obtener_x_respuestas
+from utils_contexto import obtener_x_respuestas, set_id_sede
 from utils_registration import validate_direction_first_time
 
 # --- IMPORTS INTERNOS --- #
@@ -41,7 +41,7 @@ from utils import (
     borrar_intencion_futura,
     normalizar_especificaciones
 )
-from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida,clasificar_negacion_general,respuesta_transferencia
+from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida,clasificar_negacion_general,respuesta_transferencia,generar_mensaje_seleccion_sede
 from utils_database import execute_query
 from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, primera_regla_tiempo
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
@@ -797,9 +797,8 @@ def generar_pago_domicilio(sender: str, nombre_cliente: str, codigo_unico: str, 
 def subflujo_recoger_restaurante(sender: str, nombre_cliente: str):
     try:
         log_message("Empieza subflujo recoger restaurante", "INFO")
-        #mensaje_sede: str = generar_mensaje_seleccion_sede(nombre_cliente)
-        #modificacion temporal solo una sede
-        #send_text_response(sender, mensaje_sede)
+        mensaje_sede: str = generar_mensaje_seleccion_sede(nombre_cliente,sender)
+        send_text_response(sender, mensaje_sede)
         codigo_unico = obtener_intencion_futura_observaciones(sender)
         actualizar_medio_entrega(sender, codigo_unico, "recoger")
         guardar_intencion_futura(sender, "eleccion_sede", codigo_unico)
@@ -830,7 +829,7 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
         result = execute_query(query_pendientes, (sender,))
         codigo_unico = result[0][6] if result else 0
         #MODIFICACION TEMPORAL SOLO UNA SEDE
-        datos_mapeo_sede: dict = mapear_sede_cliente("caobos")
+        datos_mapeo_sede: dict = mapear_sede_cliente(texto_cliente)
         if datos_mapeo_sede.get("error"):
             send_text_response(sender, "Disculpa, la sede que escribiste no existe, ¿puedes volver a escribir con mayor claridad?")
             return
@@ -940,6 +939,7 @@ def orquestador_subflujos(
     """Activa el subflujo correspondiente según la intención detectada."""
     try:
         log_message(f"Empieza <OrquestadorSubflujos> con sender {sender} y tipo {clasificacion_mensaje}", "INFO")
+        set_id_sede(sender)
         clasificacion_mensaje = clasificacion_mensaje.strip().lower()
         if clasificacion_mensaje == "saludo":
             respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender, pregunta_usuario)
@@ -1060,7 +1060,6 @@ def orquestador_subflujos(
                 raise e
         elif clasificacion_mensaje == "recoger_restaurante":
             subflujo_recoger_restaurante(sender, nombre_cliente)
-            subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
         elif clasificacion_mensaje == "eleccion_sede":
             subflujo_eleccion_sede(sender, nombre_cliente, pregunta_usuario)
         elif (clasificacion_mensaje == "direccion" or clasificacion_mensaje == "consulta_menu") and obtener_intencion_futura(sender) == "eleccion_sede":

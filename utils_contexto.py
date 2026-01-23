@@ -21,15 +21,15 @@ def set_id_sede(sender: str) -> None:
     try:
         query = """SELECT id_sede FROM clientes_whatsapp WHERE telefono = %s LIMIT 1"""
         result = execute_query(query, (sender,))
-        id_cliente = result[0][0] if result else None
-        print(f'ID cliente obtenido: {id_cliente}', 'INFO')
-        _id_cliente_var.set(id_cliente)
+        id_sede = result[0][0] if result else None
+        print(f'ID sede obtenido: {id_sede}', 'INFO')
+        _id_cliente_var.set(id_sede)
     except Exception as e:
         print(f'Error al obtener ID cliente: {e}', 'ERROR')
         _id_cliente_var.set(None)
 
 def get_id_sede() -> Optional[str]:
-    print(f'ID cliente recuperado: {_id_cliente_var.get()}', 'INFO')
+    print(f'ID sede recuperado: {_id_cliente_var.get()}', 'INFO')
     return _id_cliente_var.get()
 
 def crear_conversacion(mensaje) -> str:
