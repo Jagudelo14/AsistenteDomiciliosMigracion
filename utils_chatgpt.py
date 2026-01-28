@@ -97,7 +97,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - saludo (hola, buenos dias, buenas tardes, buenas noches, saludos, etc.)
             - despedida (adios, hasta luego, nos vemos, gracias, etc.) (cuando notes que se da la informacion final al usuario y agradece o se despide)
             - Tiempo_de_recogida (Cuando el usuario menciona en cuanto tiempo pasará por su pedido)
-
+            - esperando_confirmacion_pago (Cuando el usuario confirma que ya realizó el pago)
             Instrucciones importantes:
             - No incluyas texto fuera del JSON.
             - No uses comentarios, explicaciones o saltos de línea innecesarios.
@@ -321,13 +321,25 @@ def _extract_text_from_response(response) -> str:
     except Exception:
         return ""
 
-def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "gpt-4o") -> dict:
+def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, model: str = "gpt-4o") -> dict:
     """
     Responde preguntas del usuario sobre el menú o servicios del restaurante Sierra Nevada 🍔.
     Incluye información sobre horarios, sedes y medios de pago.
     Devuelve: (result: dict, prompt: str)
     """
-
+    # Obtener id_sede del cliente usando el teléfono
+    telefono = sender  # Asumiendo que 'sender' es el teléfono
+    query_id_sede = f"SELECT id_sede FROM clientes_whatsapp WHERE telefono = '{telefono}'"
+    result_id_sede = execute_query(query_id_sede)
+    id_sede = None
+    if result_id_sede and len(result_id_sede) > 0:
+        id_sede = result_id_sede[0][0]
+    direccion = None
+    if id_sede:
+        query_direccion = f"SELECT direccion FROM sedes WHERE id_sede = '{id_sede}'"
+        result_direccion = execute_query(query_direccion)
+        if result_direccion and len(result_direccion) > 0:
+            direccion = result_direccion[0][0]
     # Prompt unificado
     prompt = f"""
         Eres PAKO, el asistente cálido y cercano de Sierra Nevada, La Cima del Sabor 🏔️🍔.
@@ -338,9 +350,13 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = "
         🕐 Horario: Todos los días de 12:00 p.m. a 7:00 p.m.
         📍 Sedes:
         - Caobos Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca
+        - Centro Internacional Ac. 32 # 18-7, Teusaquillo, Bogotá, D.C.
+        - Chicó 2.0 Ac 100 #9A-45, Bogotá, Colombia
+        - Centro Mayor  Cl. 38A Sur #34, Bogotá, Colombia
         💳 Medios de pago: solo contraentrega efectivo y datafono.
 
         El cliente preguntó: "{pregunta_usuario}"
+        La sede asignada del cliente es: "{direccion if direccion else 'No asignada'}".
 
         Este es el menú completo:
         {json.dumps(items, ensure_ascii=False)}
@@ -967,6 +983,7 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             - Si el cliente menciona algo NO presente en el menú, dilo explícitamente.
             - No respondas como asistente conversacional. Solo JSON.
             - No agregues explicaciones fuera del JSON.
+            - Nunca menciones que no esta en el menu di amablemente que no lo tenemos disponible en este momento.
             Aquí está el menú disponible:
             {menu_str}
             
@@ -1054,6 +1071,7 @@ INSTRUCCIONES OBLIGATORIAS:
 - Menciona únicamente estas opciones de pago:
   * Efectivo
   * Datáfono
+  * Tarjeta debito o credito 
 - Solicita los datos personales listados abajo.
 - La solicitud de datos DEBE tener EXACTAMENTE esta estructura y este orden,
   sin agregar texto intermedio ni variaciones:
@@ -1092,6 +1110,7 @@ INSTRUCCIONES OBLIGATORIAS:
 - Menciona únicamente estas opciones de pago:
   * Efectivo
   * Datáfono
+  * Tarjeta debito o credito
 - El mensaje final debe ser muy corto
 - Usa saltos de línea reales usando \n.
 FORMATO DE RESPUESTA:
@@ -2956,6 +2975,7 @@ def respuesta_transferencia(mensaje_usuario: str, nombre: str, nombre_local: str
             - La respuesta_cordial DEBE incluir explícitamente la frase:
             "Ya pregunte al administrador del punto se comunicara contigo pronto."
             - Si la frase no aparece, la respuesta es inválida.
+            - Debes indicar que pronto se comunicaran con el
             ***DEBES ENTREGAR ESTOS CAMPOS***
             1. "respuesta_cordial": Mensaje calmado, empático y con acción concreta 
             (ej: “reviso ya mismo con cocina y logística”, “activo seguimiento con el punto”).

@@ -1,5 +1,5 @@
 # function_app.py
-# Last modified: 2026-01-21 Juan Agudelo
+# Last modified: 2026-01-23 Juan Agudelo
 # ajsute efectivo
 import azure.functions as func
 from datetime import datetime
@@ -37,8 +37,6 @@ def wpp(req: func.HttpRequest) -> func.HttpResponse:
     - POST → Recepción de mensajes y clasificación con OpenAI.
     """
     logging.info("📩 Webhook WhatsApp recibido.")
-    logging.info(f"Request details: {req}")
-    log_message(f"Request details: {req}")
     if req.method == "GET":
         return _verify_webhook(req)
     if req.method == "POST":
@@ -61,6 +59,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         """Procesa los mensajes recibidos desde WhatsApp Business API."""
         req_body: Dict[str, Any] = json.loads(req.get_body().decode("utf-8"))
         logging.info(f"Cuerpo recibido: {json.dumps(req_body, indent=2)}")
+        log_message(f'Cuerpo recibido: {json.dumps(req_body, indent=2)}', 'INFO')
         entry: Dict[str, Any] = req_body.get("entry", [{}])[0]
         change: Dict[str, Any] = entry.get("changes", [{}])[0]
         value: Dict[str, Any] = change.get("value", {})
@@ -75,9 +74,15 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         message_id = message["id"]
         #mensaje= True
         #if mensaje is True:
-            #Juan= "573222837565"
+            #Juan= "573026467575"
             #send_text_response(Juan,"Oscar escriba al teams si le llego el mensaje")
-            #send_template_response(Juan,"suscripcion")
+            #variables_list = [
+            #    "Cancelacion",  # Evento
+            #    "573026467575", # Cliente
+            #    "Usuario: quiero agregar unas papas a mis hamburguesas Agente: tengo en tu pedido 3 hamburguesas en combo Usuario: deseo cancelar mi pedido", # Contexto
+            #    "El cliente desea cancelar su pedido de 3 hamburguesas en combo" # Resumen
+            #]
+            #send_template_response(Juan, "evento_notificacion", variables_list)
             #return func.HttpResponse("EVENT_RECEIVED", status_code=200)
         #Validación mensaje duplicado
         if validate_duplicated_message(message_id):
@@ -264,7 +269,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     if booleano_dir is False:
                         send_text_response(sender, f"No estas dentro de nuestra area de operación, puedes hacer tu pedido para recoger en tienda, la sede mas cercana a ti es {nombre_sede} o tambien puedes usar otra direccion para la entrega")
                     if validate_direction_first_time(sender, ID_RESTAURANTE) and validate_nombre_bool(sender, ID_RESTAURANTE):
-                        send_text_response(sender,"¡Gracias por la información! 😊 Bienvenido a sierra nevada la cima del sabor")
+                        send_text_response(sender,f"¡Gracias por la información! 😊 Bienvenido a sierra nevada la cima del sabor la sede mas cercana a ti es {nombre_sede}")
                         send_pdf_response(sender)                 
                     return func.HttpResponse("EVENT_RECEIVED", status_code=200)
                 mensajes= obtener_contexto_conversacion(sender)

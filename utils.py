@@ -1527,7 +1527,7 @@ def formatear_conversacion(contenido_usuario):
         log_message(f"Error en formatear_conversacion_sin_fecha: {e}", "ERROR")
         return ""
 
-def send_template_response(to: str, template_name: str, language: str = "es") -> str:
+def send_template_response(to: str, template_name: str,variables: list , language: str = "es") -> str:
     try:
         log_message(
             f"Enviando plantilla '{template_name}' a {to}",
@@ -1538,11 +1538,18 @@ def send_template_response(to: str, template_name: str, language: str = "es") ->
         PHONE_ID: str = os.environ["PHONE_NUMBER_ID"]
         whatsapp: WhatsApp = WhatsApp(token, PHONE_ID)
 
-        # 👇 components es obligatorio aunque no haya variables
+        # Construir components para variables
+        components = []
+        if variables:
+            components = [{
+                "type": "body",
+                "parameters": [{"type": "text", "text": str(v)} for v in variables]
+            }]
+
         whatsapp.send_template(
             template_name,
             to,
-            [],
+            components,
             language
         )
 
@@ -1559,3 +1566,10 @@ def send_template_response(to: str, template_name: str, language: str = "es") ->
         )
         logging.error(f"Error al enviar plantilla de WhatsApp: {e}")
         return f"Error {e}"
+
+def limpiar_param_whatsapp(texto):
+    # Elimina saltos de línea y tabulaciones
+    texto = re.sub(r'[\n\r\t]', ' ', texto)
+    # Reduce espacios múltiples a uno solo
+    texto = re.sub(r' {2,}', ' ', texto)
+    return texto.strip()
