@@ -1071,7 +1071,6 @@ INSTRUCCIONES OBLIGATORIAS:
 - Menciona únicamente estas opciones de pago:
   * Efectivo
   * Datáfono
-  * Tarjeta debito o credito 
 - Solicita los datos personales listados abajo.
 - La solicitud de datos DEBE tener EXACTAMENTE esta estructura y este orden,
   sin agregar texto intermedio ni variaciones:
@@ -1110,7 +1109,6 @@ INSTRUCCIONES OBLIGATORIAS:
 - Menciona únicamente estas opciones de pago:
   * Efectivo
   * Datáfono
-  * Tarjeta debito o credito
 - El mensaje final debe ser muy corto
 - Usa saltos de línea reales usando \n.
 FORMATO DE RESPUESTA:
@@ -1378,7 +1376,6 @@ def responder_sobre_promociones(nombre: str, nombre_local: str, promociones_info
                 {"role": "system", "content": f"Eres PAKO, representante alegre y amigable de {nombre_local}, experto en promociones."},
                 {"role": "user", "content": PROMPT}
             ],
-#            max_completion_tokens=350,
             temperature=0.85
         )
 
@@ -1449,11 +1446,10 @@ def interpretar_eleccion_promocion(pregunta_usuario: str, info_promociones_str: 
     response = client.responses.create(
         model="gpt-5.1",
         input=prompt,
-#        max_output_tokens=500,
         temperature=0
     )
     try:
-        raw = response.output_text   # ← ESTE ES EL CORRECTO
+        raw = response.output_text   
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] interpretar_eleccion_promocion tokens_used={tokens_used}", "DEBUG")
@@ -1571,7 +1567,6 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
                 {"role": "system", "content": "Eres PAKO, asistente oficial de Sierra Nevada."},
                 {"role": "user", "content": prompt}
             ],
-#            max_completion_tokens=200,
             temperature=0.8
         )
         raw = response.choices[0].message.content.strip()
@@ -1650,10 +1645,8 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
         if tokens_used is not None:
             log_message(f"[OpenAI] mapear_modo_pago tokens_used={tokens_used}", "DEBUG")
 
-        # Normalizar y sanear la respuesta: eliminar fences de código y espacios
         try:
             clean = str(raw or "").strip()
-            # eliminar bloque ```json ... ``` o ``` ... ``` si existen
             clean = re.sub(r'^```json\s*', '', clean, flags=re.I)
             clean = re.sub(r'^```', '', clean, flags=re.I).strip()
             clean = re.sub(r'```$', '', clean, flags=re.I).strip()
@@ -1662,11 +1655,9 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
                 log_message("mapear_modo_pago: respuesta vacía después de sanear", "WARN")
                 return "desconocido"
 
-            # Intentar parsear directamente
             try:
                 data = json.loads(clean)
             except Exception:
-                # Buscar primer objeto JSON en el texto
                 m = re.search(r'\{.*\}', clean, flags=re.DOTALL)
                 if m:
                     try:
@@ -1681,7 +1672,6 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
                 metodo = data.get("metodo", "desconocido")
                 log_message(f"mapear_modo_pago: metodo detectado desde JSON -> {metodo}", "DEBUG")
                 return metodo
-
             # Fallback por keywords si no hay JSON parseable
             text = clean.lower()
             if "nequi" in text or "neki" in text:
@@ -1795,10 +1785,6 @@ def generar_mensaje_confirmacion_modificacion_pedido(
 
     try:
         client = OpenAI()
-
-        # ------------------------------------------------------------------
-        # PROMPT NORMAL
-        # ------------------------------------------------------------------
         if not promocion:
             prompt = f"""
 Eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada, La Cima del Sabor.
@@ -1856,9 +1842,6 @@ REGLAS:
 - Si el cliente pide papitas se refiere a una porcion de papas francesas.
 """
 
-        # ------------------------------------------------------------------
-        # PROMPT PROMOCIONES
-        # ------------------------------------------------------------------
         else:
             if promociones_info is None or pedido_completo_promocion is None:
                 raise ValueError("promociones_info y pedido_completo_promocion son obligatorios cuando promocion=True.")
@@ -1897,7 +1880,6 @@ REGLAS:
 - Tono cálido y profesional.
 """
 
-        # ------------------ Llamado al modelo ------------------
         response = client.responses.create(
             model=model,
             input=prompt,
@@ -1947,12 +1929,12 @@ def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> di
 
         TAREA:
         - Envíale un mensaje cálido, alegre y amigable al cliente llamándolo por su nombre.
-        - Dale un contexto breve de que ya tenemos la dirección detectada.
         - Pregunta SIEMPRE si esa dirección está correcta para realizar el envío.
-        - Tono: amable, cercano, estilo “¡Hola {cliente_nombre}! Qué alegría tenerte por aquí 🙌”.
+        - Tono: amable, cercano, estilo.
         - Máximo 1 o 2 frases antes de la pregunta.
         - No uses groserías ni sarcasmo.
-        - Indicale que si envia una nueva dirección agregue el barrio y cualquier referencia 
+        - Pregunta si confirma su direccion guardada
+        - Lo mas puntual posible
 
         FORMATO DE RESPUESTA (OBLIGATORIO):
         {{
@@ -1972,7 +1954,7 @@ def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> di
 
         client = OpenAI()
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Eres PAKO, generador oficial de mensajes cálidos y profesionales de Sierra Nevada."},
                 {"role": "user", "content": prompt}
@@ -1980,7 +1962,7 @@ def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> di
             max_tokens=150,
             temperature=0.85
         )
-
+        print
         raw = response.choices[0].message.content.strip()
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
@@ -2182,7 +2164,6 @@ Sedes disponibles (datos reales):
         Devuelve SOLO el nombre EXACTO de la sede, sin explicaciones.
         """
 
-    # 3. Llamada a GPT-5.1
     completion = client.chat.completions.create(
         model="gpt-5.1",
         messages=[
@@ -2190,7 +2171,6 @@ Sedes disponibles (datos reales):
             {"role": "user", "content": prompt}
         ]
     )
-    # Registrar consumo de tokens
 
     nombre_predicho = completion.choices[0].message.content
     tokens_used = _extract_total_tokens(nombre_predicho)
@@ -2385,18 +2365,21 @@ Datos:
 - Indicaciones adicionales u observaciones: {indicaciones}
 
 Instrucciones del mensaje:
+- Comienza con confirmas la siguiente direccion: {direccion_google} ?
 - Si la ciudad se repite simplificalo a una vez
 - No saludes al cliente probablemente este en mitad de la conversacion
 - Habla con tono amable y profesional.
 - Di el nombre del cliente.
-- Confirma la dirección que tenemos guardada la cual se usará para el domicilio.
+- Pregunta si confirma su direccion guardada
+- Comienza el mensaje con la pregunta de confirmacion
 - No inventar información adicional.
 - Recuerdale al usuario que si va a actualizar su direccion indique su barrio y cualquier referencia necesaria
 - El mensaje debe ser muy corto
+-
 """
 
         response = client.chat.completions.create(
-        model="gpt-5.1",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "Eres un asistente experto redactando mensajes cordiales y personalizados para clientes."},
             {"role": "user", "content": prompt}

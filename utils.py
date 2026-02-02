@@ -670,7 +670,19 @@ def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
         """
         params = (codigo_unico, id_whatsapp)
         res = execute_query(query, params, fetchone=True)
-        
+        variables_list = [
+                "Confirmación de pedido",  # Evento
+                sender, # Cliente
+                "El cliente ha hecho un pedido por favor revisa la pagina", # Contexto
+                "Pedido confirmado" # Resumen
+            ]
+        query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
+        result = execute_query(query, (get_id_sede(),))
+        numero_admin = result[0][0] if result else os.getenv("NUMERO_ADMIN")
+        send_template_response(numero_admin, "evento_notificacion", variables_list)
+        send_template_response(os.getenv("NUMERO_ADMIN"), "evento_notificacion", variables_list)
+        Juan="3026467575"
+        send_template_response(Juan, "evento_notificacion", variables_list)
         if res:
             log_message(f'Pedido actualizado con código único {codigo_unico}', 'INFO')
             return {
@@ -690,7 +702,7 @@ def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
         return {"actualizado": False, "error": str(e)}
     
 def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
-    """MARCA UN PEDIDO COMO FALSE EN ES_TEMPORAL Y RETORNA INFO DEL PEDIDO ACTUALIZADO."""
+    """MARCA UN PEDIDO COMO TRUE EN ES_TEMPORAL Y RETORNA INFO DEL PEDIDO ACTUALIZADO."""
     try:
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
@@ -1231,6 +1243,49 @@ def verify_hour_atettion(sender: str, ID_RESTAURANTE: int) -> bool:
             return False
     except Exception as e:
         log_message(f"Error al verificar horario de atención: {e}", "ERROR")
+        return True
+
+# Segunda versión: horario especial por día de semana
+def verify_hour_atettion_v2(sender: str) -> bool:
+    """
+    Verifica si el mensaje fue enviado dentro del horario de atención:
+    - Lunes a sábado: 11:30 a 19:00
+    - Domingo: 11:30 a 18:30
+    Usa la hora de America/Bogota.
+    """
+    try:
+        ahora = datetime.now(ZoneInfo("America/Bogota"))
+        dia_semana = ahora.weekday()  # 0=lunes, 6=domingo
+        hora_actual = ahora.hour
+        minuto_actual = ahora.minute
+
+        # Definir rangos
+        inicio_hora = 11
+        inicio_minuto = 30
+        if dia_semana == 6:  # domingo
+            fin_hora = 18
+            fin_minuto = 30
+        else:  # lunes a sábado
+            fin_hora = 19
+            fin_minuto = 0
+
+        # Convertir hora actual y rangos a minutos desde medianoche
+        actual_minutos = hora_actual * 60 + minuto_actual
+        inicio_minutos = inicio_hora * 60 + inicio_minuto
+        fin_minutos = fin_hora * 60 + fin_minuto
+
+        dentro = inicio_minutos <= actual_minutos < fin_minutos
+
+        if dentro:
+            return True
+        else:
+            send_text_response(
+                sender,
+                "¡Hola! 👋✨Por ahora estamos fuera de horario 🕐, pero abrimos de nuevo a las 11:30 AM ⏰. ¡Te esperamos pronto!"
+            )
+            return False
+    except Exception as e:
+        log_message(f"Error al verificar horario de atención v2: {e}", "ERROR")
         return True
 
 

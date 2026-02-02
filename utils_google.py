@@ -348,12 +348,15 @@ def set_direccion_cliente(numero_cliente: str, direccion: str, id_restaurante: s
         log_message(f"Error al actualizar dirección del cliente: {e}", "ERROR")
         raise e
 
-def calcular_valor(distancia) -> float: 
+def calcular_valor(distancia, sender) -> float: 
+    """Calcula el valor del domicilio basado en la distancia en metros"""
+    log_message(f"Calculando valor del domicilio para distancia {distancia} metros", "INFO")
     #calcular valor del domicilio   
-    if distancia <= 2000:
-        valor = 2000
-    else:
-        valor = 2000 + ((distancia - 2000) * 0.4)  # noqa: F841
+    #if distancia <= 2000:
+    #    valor = 2000
+    #else:
+    #    valor = 2000 + ((distancia - 2000) * 0.4)  # noqa: F841
+
 
     #valor_redondeado = round(valor // 100) * 100
     valor_redondeado = 0.0  # establecer valor del domicilio en 0
@@ -387,7 +390,7 @@ def calcular_distancia_y_tiempo(origen: tuple, destino: tuple, numero_telefono: 
         distancia_metros = resultado['rows'][0]['elements'][0]['distance']['value']
         duracion = calcular_tiempo_pedido(duracion, id_sede)
         tiempo_pedido: str = formatear_tiempo_entrega(duracion)
-        valor = calcular_valor(distancia_metros)
+        valor = calcular_valor(distancia_metros,numero_telefono)
         log_message("Termina de calcular distancia y tiempo", "INFO")
         return valor, tiempo_pedido, float(distancia_metros), direccion_envio
     except Exception as e:

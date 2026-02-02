@@ -1,5 +1,5 @@
 # function_app.py
-# Last modified: 2026-01-23 Juan Agudelo
+# Last modified: 2026-01-28 Juan Agudelo
 # ajsute efectivo
 import azure.functions as func
 from datetime import datetime
@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, List
 import requests
 from openai import OpenAI
 import io
-from utils_contexto import set_id_sede, set_sender,crear_conversacion, actualizar_conversacion,obtener_contexto_conversacion
+from utils_contexto import set_sender,crear_conversacion, actualizar_conversacion,obtener_contexto_conversacion
 import random
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -84,6 +84,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
             #]
             #send_template_response(Juan, "evento_notificacion", variables_list)
             #return func.HttpResponse("EVENT_RECEIVED", status_code=200)
+        
         #Validación mensaje duplicado
         if validate_duplicated_message(message_id):
             logging.info(f"Mensaje duplicado: {message_id}")
@@ -91,8 +92,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
-        if not verify_hour_atettion(sender, ID_RESTAURANTE):
-            return func.HttpResponse("Fuera de horario de atención", status_code=200)
+        #if not verify_hour_atettion(sender, ID_RESTAURANTE):
+        #    return func.HttpResponse("Fuera de horario de atención", status_code=200)
         ####################################
         ############ CLIENTE NUEVO  ############
         ####################################
