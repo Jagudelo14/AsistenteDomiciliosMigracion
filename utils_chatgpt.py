@@ -83,7 +83,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - consulta_promociones
             - direccion (Cuando unicamente contiene una direccion o sobre modificaciones en direccion de envio)
             - negacion_general (Analiza bien el contexto cuando la persona niegue algo y clasificalo como negacion general)
-            - preguntas_generales (estas categorias forman parte: formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.),si hacen domicilios o envíos, horarios de atención, dirección o ubicación del local,contacto, pedidos o reservas promociones o descuentos, preguntas sobre reservas-> son preguntas generales)
+            - preguntas_generales (estas categorias forman parte: formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.),si hacen domicilios o envíos, horarios de atención, dirección o ubicación del local,contacto, pedidos o reservas promociones o descuentos, preguntas sobre reservas-> son preguntas generales, preguntas sobre ingredientes de los productos, preguntas sobre productos, tipo de proteina)
             - quejas (quejas de menor nivel)
             - sin_intencion (Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, clima, películas, tecnología, etc.) → "sin_intencion".)
             - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) (modificaciones a pedidos) (cambios a pedidos)(cuando cosas similares a estos pedidos clasificalas como solicitud pedido) (tambien cuando aclare un pedido como: no, son tantos productos o no, son 3 productos o no, es una malteada y una sierra queso)(cuando el cliente aclare cantidades o productos ya mencionados)
@@ -98,6 +98,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - despedida (adios, hasta luego, nos vemos, gracias, etc.) (cuando notes que se da la informacion final al usuario y agradece o se despide)
             - Tiempo_de_recogida (Cuando el usuario menciona en cuanto tiempo pasará por su pedido)
             - esperando_confirmacion_pago (Cuando el usuario confirma que ya realizó el pago)
+
             Instrucciones importantes:
             - No incluyas texto fuera del JSON.
             - No uses comentarios, explicaciones o saltos de línea innecesarios.
@@ -349,12 +350,15 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
         Información del restaurante:
         🕐 Horario: Todos los días de 12:00 p.m. a 7:00 p.m.
         📍 Sedes:
-        - Caobos Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca
-        - Centro Internacional Ac. 32 # 18-7, Teusaquillo, Bogotá, D.C.
-        - Chicó 2.0 Ac 100 #9A-45, Bogotá, Colombia
-        - Centro Mayor  Cl. 38A Sur #34, Bogotá, Colombia
+        - Caobos Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca el numero de caobos es 3134827171
+        - Centro Internacional Ac. 32 # 18-7, Teusaquillo, Bogotá, D.C. el numero de centro internacional es 3160107705
+        - Chicó 2.0 Ac 100 #9A-45, Bogotá, Colombia el numero de chico es 3134827229
+        - Centro Mayor  Cl. 38A Sur #34, Bogotá, Colombia el numero de centro mayor es 3228144839
         💳 Medios de pago: solo contraentrega efectivo y datafono.
-
+        - Tenemos domicilios siempre y cuando esten en el area de cobertura si no esta no podria entregar a domicilio.
+        - Si el cliente menciona que no le gusta un ingrediente dile que puede quitarlo del producto
+        - Si preguntan por hamburguesas sierras diles que hubo un cambio en el menu
+        
         El cliente preguntó: "{pregunta_usuario}"
         La sede asignada del cliente es: "{direccion if direccion else 'No asignada'}".
 
@@ -501,6 +505,7 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - UPDATE_ITEM: El usuario modifica un ingrediente o cantidad de un ítem que SE QUEDA en el pedido, si el usuario pide ajuste en el pedido (solo es una bebida) si los items siguen siendo los mismos luego de la modificacion es UPDATE_ITEM si pide solo x producto pero ya estaba en el pedido es UPDATE_ITEM.
             REGLA CRÍTICA: Si el usuario dice "SIN [INGREDIENTE]" (ej. sin salsas, sin cebolla), y el ingrediente NO es un producto vendible por sí solo, es UPDATE_ITEM.
         - REPLACE_ITEM: el usuario quiere cambiar un peoducto por otro ejemplo(Cambiar, sustituir, reemplazar, permutar,X por Y", "en vez de X quiero Y", "mejor cámbiame...).
+        - REESCRIBIR_PEDIDO: el usuario quiere que el pedido se reescriba completamente con los productos mencionados en el mensaje, "solo quiero este producto", "quiero que mi pedido sea solo...", "quiero que mi pedido incluya únicamente...", "quiero que mi pedido tenga solamente...", "quiero solo esto no lo demas", "ya no quiero lo demas solo esto".
         - ACLARACION: el mensaje del usuario no permite identificar de forma clara una acción sobre el pedido, o es ambiguo con dos o mas iintenciones en el pedido, incompleto o confuso.
  
         REGLAS ABSOLUTAS:
@@ -518,6 +523,13 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - Nunca clasificar como REPLACE_ITEM si no existen dos productos claramente identificables en el mensaje en cambio clasificalo como ACLARACION.
         - Cuando el cliente pide "platanitos" "platanos" o "plátanos" se refiere a los platanitos maduros el ACOMPAÑAMIENTO DE 7900 a menos que explicitamente mencione sea la adicion en ese caso son los platanos maduros de 2900 el adicional
         - Si colocas order_complete en true debes colocar la coincidencia mas aproximada en el campo matched de los candidatos
+        - En las hamburguesas que se puedan elegir proteina si el cliente no elige proteina pon de res SOLO CUANDO EL CLIENTE NO ELIJA
+        - Si la intención es REESCRIBIR_PEDIDO:
+            - Debes ignorar completamente todos los productos y modificadores previos del pedido.
+            - Solo deben existir en "items" los productos mencionados explícitamente en el mensaje actual.
+            - No heredes modificadores, bebidas ni adicionales anteriores.
+            - No mantengas adiciones pagas previas si el usuario no las menciona nuevamente.
+
         ======================================================
         = COMPORTAMIENTO GLOBAL DEL MODELO =
         ======================================================
@@ -589,6 +601,14 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - La respuesta debe ser SOLO el JSON.
         - Las adiciones deben ser mapeadas como un modificador del pedido respectivo y como un producto aparte para la suma del precio
         - Cuando el usuario mencione combos, recuerdale que no manejamos combos actualmente pero podemos armarlo a su gusto con los acompañamientos y bebidas del menu
+        - Si un modificador tiene precio mayor a 0, DEBES crear un item adicional en el array "items" con ese producto como producto independiente, manteniendo también su presencia en modifiers_applied.
+        - Las adiciones pagas (precio > 0) SIEMPRE deben existir como item independiente en el array "items".
+        - No es opcional. Es obligatorio.
+        - Los objetos dentro de "modifiers_applied" NUNCA deben contener precio, id ni información monetaria.
+        - "modifiers_applied" es únicamente descriptivo.
+        - Si un modificador tiene costo, debe agregarse obligatoriamente como un item independiente dentro del array "items".
+        - El precio SOLO puede existir dentro del objeto "matched" de los items principales o adicionales independientes.
+        - Está estrictamente prohibido incluir precio dentro de "modifiers_applied".
         ======================================================
         Tono de la conversacion:
         -Directo,formal,cercano y amable
@@ -609,7 +629,7 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
  #           max_completion_tokens = 500,
             temperature=0
         )
-
+        
         text_output = response.output[0].content[0].text.strip()
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
@@ -992,7 +1012,7 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
         
         log_message(f'Prompt generado en <pedido_incompleto_dynamic>: {PROMPT_PEDIDO_INCOMPLETO}', 'DEBUG')
         prompt = PROMPT_PEDIDO_INCOMPLETO.format(
-            mensaje_usuario=mensaje_usuario.lower(),
+            mensaje_usuario=mensaje_usuario,
             menu_str=menu_str,
             json_pedido=json_pedido
         )
@@ -1821,6 +1841,7 @@ RECOMENDACIONES (SI APLICA):
    - Si ya hay bebidas no recomiendes más bebidas.
    - Si ya hay acompañamientos no recomiendes más acompañamientos.
    - Si ya hay adiciones no recomiendes más adiciones.
+3. Si la proteina del producto (res,cerdo y pollo) no ha sido definida preguntale al cliente que proteina quiere
 
 CIERRE:
 - Si das recomendaciones, finaliza exactamente con:
@@ -1959,7 +1980,7 @@ def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> di
                 {"role": "system", "content": "Eres PAKO, generador oficial de mensajes cálidos y profesionales de Sierra Nevada."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=150,
+            #max_tokens=150,
             temperature=0.85
         )
         print
@@ -2782,6 +2803,8 @@ Instrucciones del mensaje:
 - Tono amable, profesional y cercano.
 - Responde la duda del cliente de la mejor manera posible relacionando el contexto entregado en los mensajes.
 - Si no hay una duda pero hay una peticion relacionada al pedido intenta que describa su pedido lo mejor posible
+- Si el cliente menciona que no le gusta un ingrediente dile que puede quitarlo del producto
+- Si el cliente pregunta por domicilios si los tenemos siempre y cuando esten bajo el area de cobertura
 """
             
         client = OpenAI()
@@ -2888,7 +2911,7 @@ def clasificar_negacion_general(pregunta_usuario: str, items, model: str = "gpt-
     * responde si a la pregunta del agente de confirmar pedido debe clasificarse como confirmar pedido
     * CUANDO EL MENSAJE ANTERIOR DEL AGENTE TERMINE CON "o ¿tu pedido está bien así?" O "¿Confirmas tu pedido? Y EL USUARIO RESPONDE NEGATIVAMENTE A LOS CAMBIOS O SUGERENCIAS VA AQUI
     - "sin_intencion": Cuando no puedas detectar una confirmacion de pedido 
-
+    - Si el cliente menciona que no le gusta un ingrediente dile que puede quitarlo del producto
     Este es el menú completo si la pregunta incluye un producto del menu o se refiere a comidas o bebidas es relacionada:
     {json.dumps(items, ensure_ascii=False)}
     

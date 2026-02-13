@@ -282,7 +282,7 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
                 "lat": candidatos[i][1],
                 "lon": candidatos[i][2],
                 "area": area_usada,
-                "direccion_envio": direccion_destino  # <-- agregado
+                "direccion_envio": direccion_destino 
             })
         if not opciones_validas:
             return None
@@ -295,6 +295,115 @@ def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente
         logging.error(f"Error en buscar_sede_mas_cercana_dentro_area: {e}")
         log_message(f"Ocurrió un error al buscar sede más cercana: {e}", "ERROR")
         return None
+
+
+# def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente: float, id_restaurante: str):
+#     try:
+#         log_message(
+#             f"[V2] Buscando sede dentro de área para coordenadas ({latitud_cliente}, {longitud_cliente})",
+#             "INFO"
+#         )
+
+#         # ------------------------------------------------
+#         # 1. Buscar sede cuyo polígono contenga el punto
+#         # ------------------------------------------------
+#         query = """
+#             SELECT 
+#                 s.id_sede, 
+#                 s.nombre,
+#                 s.ciudad,
+#                 s.latitud,
+#                 s.longitud,
+#                 sa.geom,
+#                 sa.costo_domicilio,
+#                 sa.prioridad
+#             FROM sedes s
+#             JOIN sedes_areas sa ON s.id_sede = sa.id_sede
+#             WHERE s.id_restaurante = %s
+#               AND s.estado = TRUE
+#               AND ST_Contains(
+#                     sa.geom,
+#                     ST_SetSRID(ST_Point(%s, %s), 4326)
+#               )
+#             ORDER BY sa.prioridad DESC, sa.costo_domicilio ASC
+#             LIMIT 1;
+#         """
+
+#         resultado = execute_query(
+#             query,
+#             (
+#                 id_restaurante,
+#                 longitud_cliente,  # X
+#                 latitud_cliente    # Y
+#             )
+#         )
+
+#         if not resultado:
+#             return None
+
+#         (
+#             id_sede,
+#             nombre,
+#             ciudad,
+#             lat_sede,
+#             lon_sede,
+#             geom,
+#             costo_domicilio,
+#             prioridad
+#         ) = resultado[0]
+
+#         # ------------------------------------------------
+#         # 2. Calcular distancia y tiempo con Google
+#         # ------------------------------------------------
+#         gmaps = obtener_cliente_google_maps()
+
+#         origen = (latitud_cliente, longitud_cliente)
+#         destino = (lat_sede, lon_sede)
+
+#         try:
+#             resultado_google = gmaps.distance_matrix(
+#                 origins=[origen],
+#                 destinations=[destino],
+#                 mode="driving",
+#                 language="es"
+#             )
+#         except Exception as e:
+#             log_message(f"Google error en V2: {e}", "ERROR")
+#             return None
+
+#         rows = resultado_google.get("rows", [])
+#         if not rows:
+#             return None
+
+#         elements = rows[0].get("elements", [])
+#         if not elements or elements[0].get("status") != "OK":
+#             return None
+
+#         distancia_m = elements[0]["distance"]["value"]
+#         duracion_s = elements[0]["duration"]["value"]
+
+#         direccion_destino = resultado_google.get("destination_addresses", [""])[0]
+
+#         # ------------------------------------------------
+#         # 3. Construir mismo diccionario que V1
+#         # ------------------------------------------------
+#         return {
+#             "id": id_sede,
+#             "nombre": nombre,
+#             "ciudad": ciudad,
+#             "distancia_km": round(distancia_m / 1000, 2),
+#             "tiempo_min": round(duracion_s / 60, 1),
+#             "lat": lat_sede,
+#             "lon": lon_sede,
+#             "area": geom,  # devolvemos el geom igual que v1 devolvía el polígono
+#             "direccion_envio": direccion_destino
+#         }
+
+#     except Exception as e:
+#         logging.error(f"Error en buscar_Sede_mas_cercana_dentro_area_v2: {e}")
+#         log_message(f"Ocurrió un error en V2: {e}", "ERROR")
+#         return None
+
 
 def set_sede_cliente(id_sede: str, numero_cliente, id_restaurante: str) -> bool:
     try:
@@ -351,14 +460,7 @@ def set_direccion_cliente(numero_cliente: str, direccion: str, id_restaurante: s
 def calcular_valor(distancia, sender) -> float: 
     """Calcula el valor del domicilio basado en la distancia en metros"""
     log_message(f"Calculando valor del domicilio para distancia {distancia} metros", "INFO")
-    #calcular valor del domicilio   
-    #if distancia <= 2000:
-    #    valor = 2000
-    #else:
-    #    valor = 2000 + ((distancia - 2000) * 0.4)  # noqa: F841
 
-
-    #valor_redondeado = round(valor // 100) * 100
     valor_redondeado = 0.0  # establecer valor del domicilio en 0
     return valor_redondeado
 
@@ -630,3 +732,9 @@ def buscar_sede_mas_cercana(
         logging.error(f"Error en buscar_sede_mas_cercana: {e}")
         log_message(f"Ocurrió un error al buscar sede más cercana: {e}", "ERROR")
         return None
+
+def zona_habilitada(zona, hora_actual=None):
+    """
+    Hook para reglas futuras (horarios, días, etc).
+    """
+    return True

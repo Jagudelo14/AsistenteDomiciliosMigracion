@@ -400,7 +400,7 @@ def borrar_intencion_futura(telefono: str) -> bool:
 def obtener_menu() -> list[dict[str, Any]]:
     try:
         id_sede=get_id_sede()
-        print(f"ID sede para obtener menú: {id_sede}")
+        log_message(f"ID sede para obtener menú: {id_sede}","INFO")
         query = """
             SELECT
                 i.iditem,
@@ -430,7 +430,7 @@ def obtener_menu() -> list[dict[str, Any]]:
             for row in items_data
             ]
         log_message("Menú obtenido exitosamente.", "INFO")
-        print(items)
+        log_message(f"Menú: {items}", "INFO")
         return items
     except Exception as e:
         log_message(f"Error al obtener el menú: {e}", "ERROR")
@@ -543,9 +543,9 @@ def normalizar_especificaciones(item):
     if isinstance(requested_specs, list):
         specs.extend(requested_specs)
 
-    modifiers = item.get("modifiers_applied")
-    if isinstance(modifiers, list):
-        specs.extend(modifiers)
+    #modifiers = item.get("modifiers_applied")
+    #if isinstance(modifiers, list):
+    #    specs.extend(modifiers)
 
     if not specs:
         return None
@@ -780,10 +780,8 @@ def send_pdf_response(sender: str):
     pdfs: lista de dicts con keys 'url' y 'filename'
     """
     pdfs = [
-    {"url": "https://menusierra.blob.core.windows.net/menu/menu_pag1.jpg?sp=r&st=2025-12-23T14:56:04Z&se=2027-01-01T23:11:04Z&spr=https&sv=2024-11-04&sr=b&sig=XmbxEJZ54H3byd1vwDIns1NnjDoyQkO44FWh76ltL6U%3D", "filename": "menu_pag1.jpg"},
-    {"url": "https://menusierra.blob.core.windows.net/menu/menu_pag2.jpg?sp=r&st=2025-12-23T14:51:58Z&se=2027-01-01T23:06:58Z&spr=https&sv=2024-11-04&sr=b&sig=oAsO7u7chfQWRRSljNz1hSD6vemGwQrN%2FwQZ2x4T%2Bps%3D", "filename": "menu_pag2.jpg"},
+        {"url": "https://menusierra.blob.core.windows.net/menu/MenuFeb2026.jpeg?sp=r&st=2026-02-06T18:57:11Z&se=2030-02-07T03:12:11Z&spr=https&sv=2024-11-04&sr=b&sig=OP7ZftZpYE6OhjfC7FbFat2XhvIMivsb8mWr7ZzaI0Y%3D", "filename": "MenuFeb2026.jpeg"}
     ]
-    import time
     results = []
     try:
         ACCESS_TOKEN = os.environ["WABA_TOKEN"]
@@ -793,7 +791,7 @@ def send_pdf_response(sender: str):
             "Content-Type": "application/json",
             "Authorization": f"Bearer {ACCESS_TOKEN}"
         }
-        for idx, pdf in enumerate(pdfs[:2]):  # Solo los primeros 1
+        for pdf in pdfs[:1]:  # Solo la primera imagen
             payload = {
                 "messaging_product": "whatsapp",
                 "to": sender,
@@ -807,9 +805,7 @@ def send_pdf_response(sender: str):
             res = requests.post(url, json=payload, headers=headers)
             log_message(f'Imagen enviada al usuario {sender} con estado {res.status_code}.', 'INFO')
             results.append((res.status_code, res.text))
-            # Agregar un pequeño delay para evitar rate limit de WhatsApp
-            if idx == 0:
-                time.sleep(1.5)
+            # No es necesario delay si solo se envía una imagen
         return results
     except Exception as e:
         log_message(f'Error en <SendMultipleImagesResponse>: {e}', 'ERROR')

@@ -175,11 +175,6 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
             "bandera_promocion": bandera_promocion
         }
         guardar_intencion_futura(sender, "confirmar_pedido", pedido_info['codigo_unico'], str(pedido_dict), pregunta_usuario, datos_promocion)
-        if id_ultima_intencion is None:
-            log_message(f"No hay intención previa para marcar como resuelta para {sender}.", "INFO")
-        else:
-            log_message(f"Marcar intención como resuelta {id_ultima_intencion}.", "INFO")
-            marcar_intencion_como_resuelta(id_ultima_intencion)
     except Exception as e:
         logging.error(f"Error en <SubflujoSolicitudPedido>: {e}")
         log_message(f'Error en <SubflujoSolicitudPedido>: {e}.', 'ERROR')
@@ -503,6 +498,7 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         #total_domicilios = dict_registro_temp.get("total_domicilio", "N/A")
         if medio_pago_real =="efectivo":
             mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
             return
@@ -546,7 +542,7 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         log_message(f'Error en <SubflujoMedioPago>: {e}.', 'ERROR')
         raise e
 
-def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usuario: str):
+def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usuario: str, entidades_text: str):
     """Maneja la modificación del pedido por parte del usuario."""
     try:
         # Verificar si existen pedidos pendientes
@@ -707,6 +703,20 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
                                     query = """ INSERT INTO detalle_pedido ( id_producto,id_pedido, cantidad, total, especificaciones) VALUES (%s, %s, %s, %s, %s)"""
                                     params = (item.get("matched").get("id"), id_pedido, item.get("cantidad"), (item.get("matched").get("price") * item.get("cantidad", 1)), especificaciones_txt )
                                     res_detalle = execute_query(query, params)
+                    case "REESCRIBIR_PEDIDO":
+                        query = """SELECT idpedido FROM pedidos WHERE codigo_unico = %s"""
+                        params = (codigo_unico,)
+                        res_pedido = execute_query(query, params, fetchone=True)
+                        if res_pedido:
+                            id_pedido = res_pedido[0]
+                            query = """DELETE FROM detalle_pedido WHERE id_pedido = %s"""
+                            params = (id_pedido,)
+                            execute_query(query, params)
+                            query = """DELETE FROM pedidos WHERE idpedido = %s"""
+                            params = (id_pedido,)
+                            execute_query(query, params)
+                            subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, codigo_unico)
+                            return
                     case "ACLARACION":
                         items = obtener_menu()
                         mensaje = generar_mensaje_sin_intencion(pregunta_usuario, items)
@@ -970,8 +980,8 @@ def orquestador_subflujos(
 ) -> Any:
     """Activa el subflujo correspondiente según la intención detectada."""
     try:
-        if not verify_hour_atettion_v2(sender):
-            return None
+        #if not verify_hour_atettion_v2(sender):
+        #    return None
         log_message(f"Empieza <OrquestadorSubflujos> con sender {sender} y tipo {clasificacion_mensaje}", "INFO")
         set_id_sede(sender)
         clasificacion_mensaje = clasificacion_mensaje.strip().lower()
@@ -1002,7 +1012,7 @@ def orquestador_subflujos(
                 result = execute_query(query_pendientes, (sender,))
                 codigo_unico = result[0][6] if result else 0
                 if codigo_unico != 0:
-                    subflujo_modificacion_pedido(sender, nombre_cliente, pregunta_usuario)
+                    subflujo_modificacion_pedido(sender, nombre_cliente, pregunta_usuario,entidades_text)
                 else:
                     subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, codigo_unico)
             except Exception as e:

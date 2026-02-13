@@ -1,6 +1,6 @@
 # function_app.py
-# Last modified: 2026-01-28 Juan Agudelo
-# ajsute efectivo
+# Last modified: 2026-02-06 Juan Agudelo
+# aajustes video
 import azure.functions as func
 from datetime import datetime
 import logging
@@ -72,19 +72,6 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         tipo_general = message["type"]
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
-        #mensaje= True
-        #if mensaje is True:
-            #Juan= "573026467575"
-            #send_text_response(Juan,"Oscar escriba al teams si le llego el mensaje")
-            #variables_list = [
-            #    "Cancelacion",  # Evento
-            #    "573026467575", # Cliente
-            #    "Usuario: quiero agregar unas papas a mis hamburguesas Agente: tengo en tu pedido 3 hamburguesas en combo Usuario: deseo cancelar mi pedido", # Contexto
-            #    "El cliente desea cancelar su pedido de 3 hamburguesas en combo" # Resumen
-            #]
-            #send_template_response(Juan, "evento_notificacion", variables_list)
-            #return func.HttpResponse("EVENT_RECEIVED", status_code=200)
-        
         #Validación mensaje duplicado
         if validate_duplicated_message(message_id):
             logging.info(f"Mensaje duplicado: {message_id}")
@@ -92,13 +79,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
-        #if not verify_hour_atettion(sender, ID_RESTAURANTE):
-        #    return func.HttpResponse("Fuera de horario de atención", status_code=200)
         ####################################
         ############ CLIENTE NUEVO  ############
         ####################################
-        Juan= "573026467575"
-        send_text_response(Juan,f"el numero {sender} está iniciando conversación")
         if not get_client_database(sender, ID_RESTAURANTE):
             log_message("Cliente nuevo detectado", "INFO")
             datos: str = None
