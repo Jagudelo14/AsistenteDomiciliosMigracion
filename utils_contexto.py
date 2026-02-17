@@ -69,47 +69,60 @@ def actualizar_conversacion(mensaje, telefono,rol) -> str:
     json_mensaje = Json({"rol": rol, "text": mensaje })
     return str(json_mensaje)    
 
-def obtener_contexto_conversacion(telefono: str) -> str:
+def obtener_contexto_conversacion(telefono: str) -> list:
+
     query = """
-    SELECT mensaje
-    FROM conversaciones,
-         jsonb_array_elements(conversacion->'mensajes') WITH ORDINALITY AS m(mensaje, idx)
-    WHERE telefono = %s
-    ORDER BY idx DESC
-    LIMIT %s;
+    WITH ultimos_mensajes AS (
+        SELECT mensaje, idx
+        FROM conversaciones,
+             jsonb_array_elements(conversacion->'mensajes') 
+             WITH ORDINALITY AS m(mensaje, idx)
+        WHERE telefono = %s
+        ORDER BY idx DESC
+        LIMIT 3
+    )
+    SELECT 
+        (SELECT fecha_mensaje 
+         FROM conversaciones 
+         WHERE telefono = %s
+         ORDER BY id_conversaciones DESC
+         LIMIT 1),
+        mensaje
+    FROM ultimos_mensajes
+    ORDER BY idx ASC;
     """
 
-    mensajes  = execute_query(query, (telefono, 3))
-    mensajes = list(reversed(mensajes))
+    resultado = execute_query(query, (telefono, telefono))
 
-    query="""SELECT fecha_mensaje
-    FROM conversaciones
-    WHERE telefono = %s
-    ORDER BY id_conversaciones DESC
-    LIMIT %s;
-    """
-    ultima_hora  = execute_query(query, (get_sender(), 1))
+    if not resultado:
+        return []
+
+    ultima_hora = resultado[0][0]
+    mensajes = [(row[1],) for row in resultado]  # mantiene lista de tuplas
+
     ahora = datetime.now(tz=ZoneInfo("America/Bogota"))
-    diferencia = (ahora - ultima_hora[0][0]) 
-    print(diferencia)
+    diferencia = ahora - ultima_hora
 
-    if ultima_hora and diferencia >= timedelta(hours=24):
-        query = """BEGIN;
+    if diferencia >= timedelta(hours=24):
+        update_query = """
+        UPDATE conversaciones 
+        SET fecha_mensaje = NOW()
+        WHERE telefono = %s;
 
-                update conversaciones set fecha_mensaje = NOW()
-                WHERE telefono = %s;
+        UPDATE historico_conversaciones 
+        SET ultimo_mensaje = NOW(), cantidad_mensajes = 1
+        WHERE ultimo_mensaje IS NULL 
+        AND telefono = %s;
 
-                update historico_conversaciones 
-                set ultimo_mensaje = NOW(), cantidad_mensajes = 1
-                where ultimo_mensaje is null and telefono = %s;
+        INSERT INTO historico_conversaciones 
+        (telefono, primer_mensaje, id_cliente) 
+        VALUES (%s, NOW(), 5);
+        """
 
-                INSERT INTO historico_conversaciones (telefono,primer_mensaje,id_cliente) 
-                VALUES (%s, NOW(),5);
-
-                COMMIT;"""
-        execute_query(query, (get_sender(),get_sender(),get_sender()))
+        execute_query(update_query, (telefono, telefono, telefono))
 
     return mensajes
+
 
  
 def obtener_x_respuestas(telefono: str, limite: int) -> str:

@@ -133,5 +133,14 @@ __blobstorage__
 __queuestorage__
 __azurite_db*__.json
 .python_packages
-
-prueba.ipynb
+.git*
+.vscode
+__azurite_db*__.json
+__blobstorage__
+__queuestorage__
+local.settings.json
+test
+.venv
+__pycache__/
+.python_packages/
+*.pyc

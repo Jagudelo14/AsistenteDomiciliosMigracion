@@ -980,8 +980,8 @@ def orquestador_subflujos(
 ) -> Any:
     """Activa el subflujo correspondiente según la intención detectada."""
     try:
-        #if not verify_hour_atettion_v2(sender):
-        #    return None
+        if not verify_hour_atettion_v2(sender):
+            return None
         log_message(f"Empieza <OrquestadorSubflujos> con sender {sender} y tipo {clasificacion_mensaje}", "INFO")
         set_id_sede(sender)
         clasificacion_mensaje = clasificacion_mensaje.strip().lower()
