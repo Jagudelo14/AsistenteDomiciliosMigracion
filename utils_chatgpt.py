@@ -83,7 +83,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - consulta_promociones
             - direccion (Cuando unicamente contiene una direccion o sobre modificaciones en direccion de envio)
             - negacion_general (Analiza bien el contexto cuando la persona niegue algo y clasificalo como negacion general)
-            - preguntas_generales (estas categorias forman parte: formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.),si hacen domicilios o envíos, horarios de atención, dirección o ubicación del local,contacto, pedidos o reservas promociones o descuentos, preguntas sobre reservas-> son preguntas generales, preguntas sobre ingredientes de los productos, preguntas sobre productos, tipo de proteina)
+            - preguntas_generales (estas categorias forman parte:preguntas sobre formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.),si hacen domicilios o envíos, horarios de atención, dirección o ubicación del local,contacto, pedidos o reservas promociones o descuentos, preguntas sobre reservas-> son preguntas generales, preguntas sobre ingredientes de los productos, preguntas sobre productos, tipo de proteina)
             - quejas (quejas de menor nivel)
             - sin_intencion (Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, clima, películas, tecnología, etc.) → "sin_intencion".)
             - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) (modificaciones a pedidos) (cambios a pedidos)(cuando cosas similares a estos pedidos clasificalas como solicitud pedido) (tambien cuando aclare un pedido como: no, son tantos productos o no, son 3 productos o no, es una malteada y una sierra queso)(cuando el cliente aclare cantidades o productos ya mencionados)
@@ -123,7 +123,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
             - Si el cliente esta contestando a una pregunta de eleccion de sede debes clasifificarlo como eleccion_sede
             Reglas IMPORTANTES:
             - DEBES analizar y clasificar el ÚLTIMO mensaje enviado por el USUARIO.
-            - Todos los mensajes anteriores son SOLO CONTEXTO y NO deben usarse para inferir intención.
+            - Debes analizar principalmente el último mensaje. Si el mensaje es ambiguo (por ejemplo 'sí', 'no', 'efectivo', 'tarjeta'), puedes usar el contexto inmediato para determinar la intención.
             - Nunca clasifiques mensajes del asistente pero si es contexto importante para la decisión final.
             """
 
@@ -135,7 +135,7 @@ def get_classifier(msj: str, sender: str) -> Tuple[Optional[str], Optional[str],
         respuesta: Any = client.chat.completions.create(
             model="gpt-4.1-mini",
             messages=messages,
-            max_tokens=700,
+            #max_tokens=700,
             temperature=0
         )
         tokens_used = _extract_total_tokens(respuesta)
@@ -1052,36 +1052,23 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
 
 def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str,sender: str) -> dict:
     try:
+        query = """
+            SELECT total_domicilio, total_productos, total_final
+            FROM pedidos
+            WHERE codigo_unico = %s
+        """
+        result = execute_query(query, (codigo_unico,))
+        total_domicilio = result[0][0] if result else None
+        total_productos = result[0][1] if result else None
+        total_final = result[0][2] if result else None
 
-#         PROMPT_MEDIOS_PAGO = f"""
-# Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
-# Te llamas PAKO.
-
-# El cliente {nombre} ya confirmó su pedido con el código único: {codigo_unico}.
-# Este es el pedido que hizo:
-# "{pedido_str}"
-
-# TAREA:
-# - Haz un comentario alegre y sabroso sobre el pedido.
-# - Estilo: cálido, entusiasta.
-# - 1 o 2 frases máximo.
-# - Luego pídele elegir medio de pago.
-# - Menciona el local: {nombre_local}
-# - Lista opciones disponibles:
-#   * Efectivo
-#   * Tarjeta débito
-#   * Tarjeta crédito
-
-# Debe responder estrictamente un JSON con el campo:
-# {{
-#    "mensaje": "texto aquí"
-# }}
-# """
         if not validate_personal_data(sender,os.environ.get("ID_RESTAURANTE", "5")):
             PROMPT_MEDIOS_PAGO = f"""
 El cliente {nombre} ya confirmó su pedido.
-Pedido realizado:
-"{pedido_str}"
+Desglose de costos:
+productos:{total_productos}
+domicilio:{total_domicilio}
+total_final:{total_final}
 
 OBJETIVO:
 Generar un ÚNICO mensaje breve, cálido y entusiasta.
@@ -1117,8 +1104,10 @@ Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
 Tu nombre es PAKO.
 
 El cliente {nombre} ya confirmó su pedido.
-Pedido realizado:
-"{pedido_str}"
+Desglose de costos:
+productos:{total_productos}
+domicilio:{total_domicilio}
+total_final:{total_final}
 
 OBJETIVO:
 Generar un ÚNICO mensaje breve, cálido y entusiasta.

@@ -298,10 +298,10 @@ def subflujo_quejas(sender: str, nombre_cliente: str, contenido_usuario: str, ev
         query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
         result = execute_query(query, (get_id_sede(),))
         numero_admin = result[0][0] if result else os.getenv("NUMERO_ADMIN")
-        send_template_response(numero_admin, "evento_notificacion", variables_list)
-        send_template_response(os.getenv("NUMERO_ADMIN"), "evento_notificacion", variables_list)
+        send_template_response(numero_admin, "evento_notificacion", variables_list,'es')
+        send_template_response(os.getenv("NUMERO_ADMIN"), "evento_notificacion", variables_list,'es')
         Juan="3026467575"
-        send_template_response(Juan, "evento_notificacion", variables_list)
+        send_template_response(Juan, "evento_notificacion", variables_list,'es')
         log_message('Registro de queja leve guardado correctamente.', 'INFO')
     except Exception as e:
         logging.error(f"Error en <SubflujoQuejas>: {e}")
@@ -347,10 +347,10 @@ def subflujo_transferencia(sender: str, nombre_cliente: str, contenido_usuario: 
         query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
         result = execute_query(query, (get_id_sede(),))
         numero_admin = result[0][0] if result else os.getenv("NUMERO_ADMIN")
-        send_template_response(numero_admin, "evento_notificacion", variables_list)
-        send_template_response(os.getenv("NUMERO_ADMIN"), "evento_notificacion", variables_list)
+        send_template_response(numero_admin, "evento_notificacion", variables_list,'es')
+        send_template_response(os.getenv("NUMERO_ADMIN"), "evento_notificacion", variables_list,'es')
         Juan="3026467575"
-        send_template_response(Juan, "evento_notificacion", variables_list)
+        send_template_response(Juan, "evento_notificacion", variables_list,'es')
         log_message('Registro de queja grave guardado correctamente.', 'INFO')
     except Exception as e:
         log_message(f'Error en <SubflujoTransferencia>: {e}.', 'ERROR')
@@ -425,10 +425,10 @@ def subflujo_consulta_pedido(sender: str, nombre_cliente: str, contenido_usuario
         query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
         result = execute_query(query, (get_id_sede(),))
         numero_admin = result[0][0] if result else os.getenv("NUMERO_ADMIN")
-        send_template_response(numero_admin, "evento_notificacion", variables_list)
-        send_template_response(os.getenv("NUMERO_ADMIN"), "evento_notificacion", variables_list)
+        send_template_response(numero_admin, "evento_notificacion", variables_list,'es')
+        send_template_response(os.getenv("NUMERO_ADMIN"), "evento_notificacion", variables_list,'es')
         Juan="3026467575"
-        send_template_response(Juan, "evento_notificacion", variables_list)
+        send_template_response(Juan, "evento_notificacion", variables_list,'es')
         log_message('Registro de queja grave guardado correctamente.', 'INFO')
     except Exception as e:
         log_message(f'Error en <SubflujoTransferencia>: {e}.', 'ERROR')
@@ -494,47 +494,49 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         #datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)  # noqa: F841
         dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
         tiempo= dict_registro_temp.get("tiempo_estimado", "N/A")
-        total_productos = dict_registro_temp.get("total_final", "N/A")
+        total_productos = dict_registro_temp.get("total_productos", "N/A")
+        total_domicilios = dict_registro_temp.get("total_domicilio", "N/A")
+        total_final = dict_registro_temp.get("total_final", "N/A")
         #total_domicilios = dict_registro_temp.get("total_domicilio", "N/A")
         if medio_pago_real =="efectivo":
-            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_final} el cual se divide en {total_domicilios} del domicilio y {total_productos} de los productos y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
             return
         elif medio_pago_real == "datafono":
-            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar con Datafono al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es  de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_final} el cual se divide en {total_domicilios} del domicilio y {total_productos} de los productos y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
             return
-        #elif medio_pago_real == "tarjeta":
-        #    try:
-        #        monto = float(total_productos)  # por ejemplo 31900.0
-        #        log_message(f"[SubflujoMedioPago] Generando link de pago para {sender} por monto {monto}.", "INFO")
-        #        monto_cents = int(round(monto * 100))  # 3190000
-        #        pago = generar_link_pago(monto_cents,sender)
-        #        if pago is None:
-        #            send_text_response(sender, "No fue posible generar el link de pago ahora mismo.elige otro medio.")
-        #            return
-        #        form_url, order_id = pago
-                # Guardar referencia del pago en la BD (si falla, informar pero continuar)
-        #        try:
-        #            guardar_id_pago_en_db(order_id, codigo_unico)
-        #        except Exception as e:
-        #            log_message(f"Advertencia: no se pudo guardar id_pago en DB: {e}", "WARN")
-                # Enviar link al cliente con instrucciones claras
-        #        mensaje_pago = (
-        #            f"¡Perfecto {nombre_cliente}! Para completar tu pedido ({codigo_unico}) puedes pagar aquí:\n{form_url}\n\n"
-        #            "Una vez realices el pago, por favor envíame el pantallazo de la transaccion o avisame que ya pagaste para yo hacer la revisión"
-        #        )
-        #        send_text_response(sender, mensaje_pago)
-        #        guardar_intencion_futura(sender, "esperando_confirmacion_pago", codigo_unico)
-        #        return
-        #    except Exception as e:
-        #        log_message(f"Error generando/enviando link de pago: {e}", "ERROR")
-        #        send_text_response(sender, "Hubo un problema generando el link de pago. Puedes intentar pagar en el local o probar otro método.")
-        #        return
+        # elif medio_pago_real == "tarjeta":
+        #     try:
+        #         monto = float(total_productos)  # por ejemplo 31900.0
+        #         log_message(f"[SubflujoMedioPago] Generando link de pago para {sender} por monto {monto}.", "INFO")
+        #         monto_cents = int(round(monto * 100))  # 3190000
+        #         pago = generar_link_pago(monto_cents,sender)
+        #         if pago is None:
+        #             send_text_response(sender, "No fue posible generar el link de pago ahora mismo.elige otro medio.")
+        #             return
+        #         form_url, order_id = pago
+        #         # Guardar referencia del pago en la BD (si falla, informar pero continuar)
+        #         try:
+        #             guardar_id_pago_en_db(order_id, codigo_unico)
+        #         except Exception as e:
+        #             log_message(f"Advertencia: no se pudo guardar id_pago en DB: {e}", "WARN")
+        #         # Enviar link al cliente con instrucciones claras
+        #         mensaje_pago = (
+        #             f"¡Perfecto {nombre_cliente}!Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_final} el cual se divide en {total_domicilios} del domicilio y {total_productos} de los productos para completar tu pedido ({codigo_unico}) puedes pagar aquí:\n{form_url}\n\n"
+        #             "Una vez realices el pago, por favor envíame el pantallazo de la transaccion o avisame que ya pagaste para yo hacer la revisión"
+        #         )
+        #         send_text_response(sender, mensaje_pago)
+        #         guardar_intencion_futura(sender, "esperando_confirmacion_pago", codigo_unico)
+        #         return
+            # except Exception as e:
+            #     log_message(f"Error generando/enviando link de pago: {e}", "ERROR")
+            #     send_text_response(sender, "Hubo un problema generando el link de pago. Puedes intentar pagar en el local o probar otro método.")
+            #     return
         if medio_pago_real == "desconocido" or "":
             log_message(f"Medio de pago no reconocido '{respuesta_usuario}' seleccionado por {nombre_cliente} ({sender}) para el pedido {codigo_unico}.", "WARN")
             send_text_response(sender, f"Lo siento {nombre_cliente}, no reconocí el medio de pago que mencionaste. Por favor repitemelo, recuerda que solo aceptamos efectivo o datafono ambos contraentrega")
@@ -980,8 +982,8 @@ def orquestador_subflujos(
 ) -> Any:
     """Activa el subflujo correspondiente según la intención detectada."""
     try:
-        if not verify_hour_atettion_v2(sender):
-            return None
+        #if not verify_hour_atettion_v2(sender):
+        #    return None
         log_message(f"Empieza <OrquestadorSubflujos> con sender {sender} y tipo {clasificacion_mensaje}", "INFO")
         set_id_sede(sender)
         clasificacion_mensaje = clasificacion_mensaje.strip().lower()

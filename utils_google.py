@@ -128,281 +128,281 @@ def calcular_tiempo_pedido(tiempo_domicilio: str, id_sede: str) -> int:
         log_message(f"Ocurrió un error al calcular tiempo pedido {e}", "ERROR")
         return -1
 
-def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente: float, id_restaurante: str):
-    try:
-        log_message(f"Buscando la sede más cercana dentro de su área para coordenadas ({latitud_cliente}, {longitud_cliente})", "INFO")
-
-        # ------------------------------------
-        # 1. Obtener sedes
-        # ------------------------------------
-        sedes = execute_query("""
-            SELECT id_sede, nombre, ciudad, latitud, longitud
-            FROM sedes
-            WHERE estado = TRUE
-              AND id_restaurante = %s
-              AND latitud IS NOT NULL
-              AND longitud IS NOT NULL;
-        """, (id_restaurante,))
-
-        if not sedes:
-            return None
-        for s in sedes:
-            logging.info(f"Sede: {s}")  
-        ids = [s[0] for s in sedes]
-        areas_map = {}
-
-        # ------------------------------------
-        # 2. Obtener áreas de cobertura
-        # ------------------------------------
-        if ids:
-            placeholders = ",".join(["%s"] * len(ids))
-            query_areas = f"""
-                SELECT id_sede, valor
-                FROM sedes_areas
-                WHERE id_sede IN ({placeholders});
-            """
-            log_message(f"Query areas: {query_areas}", "INFO")
-            areas_rows = execute_query(query_areas, tuple(ids))
-
-            if areas_rows:
-                for id_sede_row, valor in areas_rows:
-                    log_message(f"Valor raw: {valor}", "INFO")
-                    parsed = None
-                    logging.info(f"Valor: {valor}")
-
-                    if valor is None:
-                        parsed = None
-                    elif isinstance(valor, (dict, list)):
-                        parsed = valor
-                    else:
-                        try:
-                            parsed = json.loads(valor)
-                        except Exception:
-                            try:
-                                cleaned = valor.replace('""', '"')
-                                parsed = json.loads(cleaned)
-                            except Exception:
-                                parsed = None
-
-                    logging.info(f"Final parsed {parsed}")
-
-                    if parsed:
-                        areas_map.setdefault(id_sede_row, []).append(parsed)
-
-        # ------------------------------------
-        # 3. Verificar si el cliente cae dentro de un área válida
-        # ------------------------------------
-        candidatos = []
-
-        for s in sedes:
-            
-            sede_id, nombre, ciudad, lat_sede, lon_sede = s
-            polygons = areas_map.get(sede_id)
-
-            logging.info(f"Polys {polygons}")
-            log_message(f"Verificando sede {sede_id} - {nombre} en ciudad {ciudad}", "INFO")
-            if not polygons:
-                continue
-
-            encontrada = None
-
-            for poly in polygons:
-                logging.info(f"Poly for in {poly}")
-                log_message(f"Verificando polígono: {poly}", "INFO")
-                try:
-                    if point_in_polygon(latitud_cliente, longitud_cliente, poly):
-                        logging.info("Punto dentro del polígono")
-                        log_message("Punto dentro del polígono", "INFO")
-                        encontrada = poly
-                        break
-                    else:
-                        logging.info("Punto fuera del polígono")
-                        log_message("Punto fuera del polígono", "INFO")
-                except Exception as e:
-                    logging.info(f"Error e {e}")
-                    log_message(f"Error al verificar punto en polígono: {e}", "ERROR")
-                    continue
-
-            if encontrada is not None:
-                candidatos.append((s, lat_sede, lon_sede, encontrada))
-
-        if not candidatos:
-            return None
-
-        # ------------------------------------
-        # 4. Llamar Google Distance Matrix
-        # ------------------------------------
-        gmaps = obtener_cliente_google_maps()
-
-        origen = (latitud_cliente, longitud_cliente)
-        destinos = [(item[1], item[2]) for item in candidatos]
-
-        logging.info(f"destinos {destinos}")
-
-        try:
-            resultado = gmaps.distance_matrix(
-                origins=[origen],
-                destinations=destinos,
-                mode="driving",
-                language="es"
-            )
-        except ApiError as ae:
-            log_message(f"Google Maps ApiError al calcular distancia para sedes: {ae}", "ERROR")
-            logging.error(f"Google Maps ApiError: {ae}")
-            return None
-        except Exception as ex:
-            log_message(f"Error llamando Google Maps distance_matrix para sedes: {ex}", "ERROR")
-            logging.error(f"Error calling distance_matrix: {ex}")
-            return None
-
-        # Direcciones humanas devueltas por Google
-        #direccion_origen = resultado.get("origin_addresses", [""])[0]
-        direcciones_destinos = resultado.get("origin_addresses", [])
-
-        # ------------------------------------
-        # 5. Construir opciones válidas
-        # ------------------------------------
-        opciones_validas = []
-        elements = resultado.get("rows", [])[0].get("elements", []) if resultado.get("rows") else []
-
-        for i, elem in enumerate(elements):
-            if elem.get("status") != "OK":
-                continue
-            distancia_m = elem["distance"]["value"]
-            duracion_s = elem["duration"]["value"]
-            sede_tuple = candidatos[i][0]
-            area_usada = candidatos[i][3]
-            direccion_destino = direcciones_destinos[i] if i < len(direcciones_destinos) else ""
-            opciones_validas.append({
-                "id": sede_tuple[0],
-                "nombre": sede_tuple[1],
-                "ciudad": sede_tuple[2],
-                "distancia_km": round(distancia_m / 1000, 2),
-                "tiempo_min": round(duracion_s / 60, 1),
-                "lat": candidatos[i][1],
-                "lon": candidatos[i][2],
-                "area": area_usada,
-                "direccion_envio": direccion_destino 
-            })
-        if not opciones_validas:
-            return None
-        # ------------------------------------
-        # 6. Seleccionar la sede más cercana
-        # ------------------------------------
-        opciones_validas.sort(key=lambda x: x["distancia_km"])
-        return opciones_validas[0]
-    except Exception as e:
-        logging.error(f"Error en buscar_sede_mas_cercana_dentro_area: {e}")
-        log_message(f"Ocurrió un error al buscar sede más cercana: {e}", "ERROR")
-        return None
-
-
 # def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente: float, id_restaurante: str):
 #     try:
-#         log_message(
-#             f"[V2] Buscando sede dentro de área para coordenadas ({latitud_cliente}, {longitud_cliente})",
-#             "INFO"
-#         )
+#         log_message(f"Buscando la sede más cercana dentro de su área para coordenadas ({latitud_cliente}, {longitud_cliente})", "INFO")
 
-#         # ------------------------------------------------
-#         # 1. Buscar sede cuyo polígono contenga el punto
-#         # ------------------------------------------------
-#         query = """
-#             SELECT 
-#                 s.id_sede, 
-#                 s.nombre,
-#                 s.ciudad,
-#                 s.latitud,
-#                 s.longitud,
-#                 sa.geom,
-#                 sa.costo_domicilio,
-#                 sa.prioridad
-#             FROM sedes s
-#             JOIN sedes_areas sa ON s.id_sede = sa.id_sede
-#             WHERE s.id_restaurante = %s
-#               AND s.estado = TRUE
-#               AND ST_Contains(
-#                     sa.geom,
-#                     ST_SetSRID(ST_Point(%s, %s), 4326)
-#               )
-#             ORDER BY sa.prioridad DESC, sa.costo_domicilio ASC
-#             LIMIT 1;
-#         """
+#         # ------------------------------------
+#         # 1. Obtener sedes
+#         # ------------------------------------
+#         sedes = execute_query("""
+#             SELECT id_sede, nombre, ciudad, latitud, longitud
+#             FROM sedes
+#             WHERE estado = TRUE
+#               AND id_restaurante = %s
+#               AND latitud IS NOT NULL
+#               AND longitud IS NOT NULL;
+#         """, (id_restaurante,))
 
-#         resultado = execute_query(
-#             query,
-#             (
-#                 id_restaurante,
-#                 longitud_cliente,  # X
-#                 latitud_cliente    # Y
-#             )
-#         )
+#         if not sedes:
+#             return None
+#         for s in sedes:
+#             logging.info(f"Sede: {s}")  
+#         ids = [s[0] for s in sedes]
+#         areas_map = {}
 
-#         if not resultado:
+#         # ------------------------------------
+#         # 2. Obtener áreas de cobertura
+#         # ------------------------------------
+#         if ids:
+#             placeholders = ",".join(["%s"] * len(ids))
+#             query_areas = f"""
+#                 SELECT id_sede, valor
+#                 FROM sedes_areas
+#                 WHERE id_sede IN ({placeholders});
+#             """
+#             log_message(f"Query areas: {query_areas}", "INFO")
+#             areas_rows = execute_query(query_areas, tuple(ids))
+
+#             if areas_rows:
+#                 for id_sede_row, valor in areas_rows:
+#                     log_message(f"Valor raw: {valor}", "INFO")
+#                     parsed = None
+#                     logging.info(f"Valor: {valor}")
+
+#                     if valor is None:
+#                         parsed = None
+#                     elif isinstance(valor, (dict, list)):
+#                         parsed = valor
+#                     else:
+#                         try:
+#                             parsed = json.loads(valor)
+#                         except Exception:
+#                             try:
+#                                 cleaned = valor.replace('""', '"')
+#                                 parsed = json.loads(cleaned)
+#                             except Exception:
+#                                 parsed = None
+
+#                     logging.info(f"Final parsed {parsed}")
+
+#                     if parsed:
+#                         areas_map.setdefault(id_sede_row, []).append(parsed)
+
+#         # ------------------------------------
+#         # 3. Verificar si el cliente cae dentro de un área válida
+#         # ------------------------------------
+#         candidatos = []
+
+#         for s in sedes:
+            
+#             sede_id, nombre, ciudad, lat_sede, lon_sede = s
+#             polygons = areas_map.get(sede_id)
+
+#             logging.info(f"Polys {polygons}")
+#             log_message(f"Verificando sede {sede_id} - {nombre} en ciudad {ciudad}", "INFO")
+#             if not polygons:
+#                 continue
+
+#             encontrada = None
+
+#             for poly in polygons:
+#                 logging.info(f"Poly for in {poly}")
+#                 log_message(f"Verificando polígono: {poly}", "INFO")
+#                 try:
+#                     if point_in_polygon(latitud_cliente, longitud_cliente, poly):
+#                         logging.info("Punto dentro del polígono")
+#                         log_message("Punto dentro del polígono", "INFO")
+#                         encontrada = poly
+#                         break
+#                     else:
+#                         logging.info("Punto fuera del polígono")
+#                         log_message("Punto fuera del polígono", "INFO")
+#                 except Exception as e:
+#                     logging.info(f"Error e {e}")
+#                     log_message(f"Error al verificar punto en polígono: {e}", "ERROR")
+#                     continue
+
+#             if encontrada is not None:
+#                 candidatos.append((s, lat_sede, lon_sede, encontrada))
+
+#         if not candidatos:
 #             return None
 
-#         (
-#             id_sede,
-#             nombre,
-#             ciudad,
-#             lat_sede,
-#             lon_sede,
-#             geom,
-#             costo_domicilio,
-#             prioridad
-#         ) = resultado[0]
-
-#         # ------------------------------------------------
-#         # 2. Calcular distancia y tiempo con Google
-#         # ------------------------------------------------
+#         # ------------------------------------
+#         # 4. Llamar Google Distance Matrix
+#         # ------------------------------------
 #         gmaps = obtener_cliente_google_maps()
 
 #         origen = (latitud_cliente, longitud_cliente)
-#         destino = (lat_sede, lon_sede)
+#         destinos = [(item[1], item[2]) for item in candidatos]
+
+#         logging.info(f"destinos {destinos}")
 
 #         try:
-#             resultado_google = gmaps.distance_matrix(
+#             resultado = gmaps.distance_matrix(
 #                 origins=[origen],
-#                 destinations=[destino],
+#                 destinations=destinos,
 #                 mode="driving",
 #                 language="es"
 #             )
-#         except Exception as e:
-#             log_message(f"Google error en V2: {e}", "ERROR")
+#         except ApiError as ae:
+#             log_message(f"Google Maps ApiError al calcular distancia para sedes: {ae}", "ERROR")
+#             logging.error(f"Google Maps ApiError: {ae}")
+#             return None
+#         except Exception as ex:
+#             log_message(f"Error llamando Google Maps distance_matrix para sedes: {ex}", "ERROR")
+#             logging.error(f"Error calling distance_matrix: {ex}")
 #             return None
 
-#         rows = resultado_google.get("rows", [])
-#         if not rows:
+#         # Direcciones humanas devueltas por Google
+#         #direccion_origen = resultado.get("origin_addresses", [""])[0]
+#         direcciones_destinos = resultado.get("origin_addresses", [])
+
+#         # ------------------------------------
+#         # 5. Construir opciones válidas
+#         # ------------------------------------
+#         opciones_validas = []
+#         elements = resultado.get("rows", [])[0].get("elements", []) if resultado.get("rows") else []
+
+#         for i, elem in enumerate(elements):
+#             if elem.get("status") != "OK":
+#                 continue
+#             distancia_m = elem["distance"]["value"]
+#             duracion_s = elem["duration"]["value"]
+#             sede_tuple = candidatos[i][0]
+#             area_usada = candidatos[i][3]
+#             direccion_destino = direcciones_destinos[i] if i < len(direcciones_destinos) else ""
+#             opciones_validas.append({
+#                 "id": sede_tuple[0],
+#                 "nombre": sede_tuple[1],
+#                 "ciudad": sede_tuple[2],
+#                 "distancia_km": round(distancia_m / 1000, 2),
+#                 "tiempo_min": round(duracion_s / 60, 1),
+#                 "lat": candidatos[i][1],
+#                 "lon": candidatos[i][2],
+#                 "area": area_usada,
+#                 "direccion_envio": direccion_destino 
+#             })
+#         if not opciones_validas:
 #             return None
-
-#         elements = rows[0].get("elements", [])
-#         if not elements or elements[0].get("status") != "OK":
-#             return None
-
-#         distancia_m = elements[0]["distance"]["value"]
-#         duracion_s = elements[0]["duration"]["value"]
-
-#         direccion_destino = resultado_google.get("destination_addresses", [""])[0]
-
-#         # ------------------------------------------------
-#         # 3. Construir mismo diccionario que V1
-#         # ------------------------------------------------
-#         return {
-#             "id": id_sede,
-#             "nombre": nombre,
-#             "ciudad": ciudad,
-#             "distancia_km": round(distancia_m / 1000, 2),
-#             "tiempo_min": round(duracion_s / 60, 1),
-#             "lat": lat_sede,
-#             "lon": lon_sede,
-#             "area": geom,  # devolvemos el geom igual que v1 devolvía el polígono
-#             "direccion_envio": direccion_destino
-#         }
-
+#         # ------------------------------------
+#         # 6. Seleccionar la sede más cercana
+#         # ------------------------------------
+#         opciones_validas.sort(key=lambda x: x["distancia_km"])
+#         return opciones_validas[0]
 #     except Exception as e:
-#         logging.error(f"Error en buscar_Sede_mas_cercana_dentro_area_v2: {e}")
-#         log_message(f"Ocurrió un error en V2: {e}", "ERROR")
+#         logging.error(f"Error en buscar_sede_mas_cercana_dentro_area: {e}")
+#         log_message(f"Ocurrió un error al buscar sede más cercana: {e}", "ERROR")
 #         return None
+
+
+def buscar_sede_mas_cercana_dentro_area(latitud_cliente: float, longitud_cliente: float, id_restaurante: str):
+    try:
+        log_message(
+            f"[V2] Buscando sede dentro de área para coordenadas ({latitud_cliente}, {longitud_cliente})",
+            "INFO"
+        )
+
+        # ------------------------------------------------
+        # 1. Buscar sede cuyo polígono contenga el punto
+        # ------------------------------------------------
+        query = """
+            SELECT 
+                s.id_sede, 
+                s.nombre,
+                s.ciudad,
+                s.latitud,
+                s.longitud,
+                sa.geom,
+                sa.costo_domicilio,
+                sa.prioridad
+            FROM sedes s
+            JOIN sedes_areas sa ON s.id_sede = sa.id_sede
+            WHERE s.id_restaurante = %s
+              AND s.estado = TRUE
+              AND ST_Contains(
+                    sa.geom,
+                    ST_SetSRID(ST_Point(%s, %s), 4326)
+              )
+            ORDER BY sa.prioridad DESC, sa.costo_domicilio ASC
+            LIMIT 1;
+        """
+
+        resultado = execute_query(
+            query,
+            (
+                id_restaurante,
+                longitud_cliente,  # X
+                latitud_cliente    # Y
+            )
+        )
+
+        if not resultado:
+            return None
+
+        (
+            id_sede,
+            nombre,
+            ciudad,
+            lat_sede,
+            lon_sede,
+            geom,
+            costo_domicilio,
+            prioridad
+        ) = resultado[0]
+
+        # ------------------------------------------------
+        # 2. Calcular distancia y tiempo con Google
+        # ------------------------------------------------
+        gmaps = obtener_cliente_google_maps()
+
+        origen = (latitud_cliente, longitud_cliente)
+        destino = (lat_sede, lon_sede)
+
+        try:
+            resultado_google = gmaps.distance_matrix(
+                origins=[origen],
+                destinations=[destino],
+                mode="driving",
+                language="es"
+            )
+        except Exception as e:
+            log_message(f"Google error en V2: {e}", "ERROR")
+            return None
+
+        rows = resultado_google.get("rows", [])
+        if not rows:
+            return None
+
+        elements = rows[0].get("elements", [])
+        if not elements or elements[0].get("status") != "OK":
+            return None
+
+        distancia_m = elements[0]["distance"]["value"]
+        duracion_s = elements[0]["duration"]["value"]
+
+        direccion_destino = resultado_google.get("destination_addresses", [""])[0]
+
+        # ------------------------------------------------
+        # 3. Construir mismo diccionario que V1
+        # ------------------------------------------------
+        return {
+            "id": id_sede,
+            "nombre": nombre,
+            "ciudad": ciudad,
+            "distancia_km": round(distancia_m / 1000, 2),
+            "tiempo_min": round(duracion_s / 60, 1),
+            "lat": lat_sede,
+            "lon": lon_sede,
+            "area": geom,  # devolvemos el geom igual que v1 devolvía el polígono
+            "direccion_envio": direccion_destino
+        }
+
+    except Exception as e:
+        logging.error(f"Error en buscar_Sede_mas_cercana_dentro_area_v2: {e}")
+        log_message(f"Ocurrió un error en V2: {e}", "ERROR")
+        return None
 
 
 def set_sede_cliente(id_sede: str, numero_cliente, id_restaurante: str) -> bool:
@@ -457,12 +457,37 @@ def set_direccion_cliente(numero_cliente: str, direccion: str, id_restaurante: s
         log_message(f"Error al actualizar dirección del cliente: {e}", "ERROR")
         raise e
 
-def calcular_valor(distancia, sender) -> float: 
-    """Calcula el valor del domicilio basado en la distancia en metros"""
-    log_message(f"Calculando valor del domicilio para distancia {distancia} metros", "INFO")
+def calcular_valor(origen: tuple) -> float:
+    """
+    origen = (latitud, longitud)
+    """
+    log_message(f"Calculando valor del domicilio para origen {origen}", "INFO")
 
-    valor_redondeado = 0.0  # establecer valor del domicilio en 0
-    return valor_redondeado
+    latitud, longitud = origen  # viene (lat, lng)
+
+    query = """
+        SELECT sa.costo_domicilio
+        FROM sedes_areas sa
+        WHERE ST_Contains(
+                sa.geom,
+                ST_SetSRID(ST_Point(%s, %s), 4326)
+              )
+        ORDER BY sa.prioridad DESC, sa.costo_domicilio ASC
+        LIMIT 1;
+    """
+
+    resultado = execute_query(
+        query,
+        (
+            longitud,  # X
+            latitud     # Y
+        )
+    )
+
+    if not resultado:
+        return None
+
+    return float(resultado[0][0])
 
 def calcular_distancia_y_tiempo(origen: tuple, destino: tuple, numero_telefono: str, id_restaurante: str, id_sede: str):
     try:
@@ -492,7 +517,7 @@ def calcular_distancia_y_tiempo(origen: tuple, destino: tuple, numero_telefono: 
         distancia_metros = resultado['rows'][0]['elements'][0]['distance']['value']
         duracion = calcular_tiempo_pedido(duracion, id_sede)
         tiempo_pedido: str = formatear_tiempo_entrega(duracion)
-        valor = calcular_valor(distancia_metros,numero_telefono)
+        valor = calcular_valor(origen)
         log_message("Termina de calcular distancia y tiempo", "INFO")
         return valor, tiempo_pedido, float(distancia_metros), direccion_envio
     except Exception as e:

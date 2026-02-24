@@ -671,18 +671,15 @@ def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
         params = (codigo_unico, id_whatsapp)
         res = execute_query(query, params, fetchone=True)
         variables_list = [
-                "Confirmación de pedido",  # Evento
-                sender, # Cliente
-                "El cliente ha hecho un pedido por favor revisa la pagina", # Contexto
-                "Pedido confirmado" # Resumen
+                codigo_unico,  
             ]
         query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
         result = execute_query(query, (get_id_sede(),))
         numero_admin = result[0][0] if result else os.getenv("NUMERO_ADMIN")
-        send_template_response(numero_admin, "evento_notificacion", variables_list)
-        send_template_response(os.getenv("NUMERO_ADMIN"), "evento_notificacion", variables_list)
+        send_template_response(numero_admin, "confirmacion", variables_list, 'es_CO')
+        send_template_response(os.getenv("NUMERO_ADMIN"), "confirmacion", variables_list, 'es_CO')
         Juan="3026467575"
-        send_template_response(Juan, "evento_notificacion", variables_list)
+        send_template_response(Juan, "confirmacion", variables_list, 'es_CO')
         if res:
             log_message(f'Pedido actualizado con código único {codigo_unico}', 'INFO')
             return {
@@ -1124,8 +1121,6 @@ def actualizar_costos_y_tiempos_pedido(
     y total_final = total_productos + total_domicilio.
     """
     try:
-        #establecer valor domicilio en 0
-        valor=0.0
         # 1. Obtener id_whatsapp
         q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
         res_idw = execute_query(q_idw, (sender,), fetchone=True)
@@ -1578,7 +1573,7 @@ def formatear_conversacion(contenido_usuario):
         log_message(f"Error en formatear_conversacion_sin_fecha: {e}", "ERROR")
         return ""
 
-def send_template_response(to: str, template_name: str,variables: list , language: str = "es") -> str:
+def send_template_response(to: str, template_name: str,variables: list , language: str ) -> str:
     try:
         log_message(
             f"Enviando plantilla '{template_name}' a {to}",
@@ -1596,7 +1591,8 @@ def send_template_response(to: str, template_name: str,variables: list , languag
                 "type": "body",
                 "parameters": [{"type": "text", "text": str(v)} for v in variables]
             }]
-
+        print(f"Components construidos para plantilla: {components}")
+        print(f"Variables lenguaje - nombre plantilla: {language} - {template_name}")
         whatsapp.send_template(
             template_name,
             to,

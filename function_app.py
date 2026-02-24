@@ -1,6 +1,6 @@
 # function_app.py
-# Last modified: 2026-02-06 Juan Agudelo
-# contexto ajuste
+# Last modified: 2026-02-20 Juan Agudelo
+# activar tarjeta
 import azure.functions as func
 from datetime import datetime
 import logging
@@ -72,10 +72,19 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         tipo_general = message["type"]
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
+                #mensaje= True
+        mensaje = True
+        if mensaje is True:
+            Juan= "573026467575"
+            variables_list = [
+                'P-0001',  
+            ]
+            send_template_response(Juan, "confirmacion", variables_list, 'es_CO')
+            return func.HttpResponse("EVENT_RECEIVED", status_code=200)
         #Validación mensaje duplicado
-        if validate_duplicated_message(message_id):
-             logging.info(f"Mensaje duplicado: {message_id}")
-             return func.HttpResponse("Mensaje duplicado", status_code=200)
+        #if validate_duplicated_message(message_id):
+        #     logging.info(f"Mensaje duplicado: {message_id}")
+        #     return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
