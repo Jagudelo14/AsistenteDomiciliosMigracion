@@ -207,12 +207,6 @@ def get_client_name_database(sender: str, id_restaurante: str) -> str:
         log_message(f"Error al obtener nombre de cliente en la bbdd {e}", "ERROR")
         return None
 
-def _to_float(v):
-    try:
-        return float(v)
-    except Exception:
-        raise TypeError(f"Valor no numérico en coordenada: {v!r}")
-
 def point_on_segment(x, y, xi, yi, xj, yj, eps=1e-9):
     # comprobar si (x,y) está en el segmento (xi,yi)-(xj,yj)
     # usando la distancia perpendicular y la caja delimitadora
@@ -252,16 +246,16 @@ def point_in_polygon(lat, lng, poly):
         # soportar claves 'lng' o 'lon'
         if 'lat' not in p or ('lng' not in p and 'lon' not in p):
             raise KeyError(f"Punto del polígono debe tener 'lat' y 'lng'/'lon'. Recibido: {p}")
-        lat_i = _to_float(p.get('lat'))
-        lng_i = _to_float(p.get('lng') if 'lng' in p else p.get('lon'))
+        lat_i = float(p.get('lat'))
+        lng_i = float(p.get('lng') if 'lng' in p else p.get('lon'))
         pts.append((lng_i, lat_i))  # trabajamos con (x=lng, y=lat)
 
     n = len(pts)
     if n < 3:
         return False  # no es polígono válido
 
-    x = _to_float(lng)
-    y = _to_float(lat)
+    x = float(lng)
+    y = float(lat)
 
     # Caja rápida (bounding box)
     xs = [p[0] for p in pts]
