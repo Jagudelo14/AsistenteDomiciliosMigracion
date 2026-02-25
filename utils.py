@@ -17,6 +17,7 @@ import json
 import requests
 import difflib
 from utils_contexto import get_sender,actualizar_conversacion,get_id_sede
+import requests
 
 
 def register_log(mensaje: str, tipo: str, ambiente: str = "Whatsapp", idusuario: int = 1, archivoPy: str = "", function_name: str = "",line_number: int = 0) -> None:
@@ -670,16 +671,29 @@ def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
         """
         params = (codigo_unico, id_whatsapp)
         res = execute_query(query, params, fetchone=True)
-        variables_list = [
-                codigo_unico,  
-            ]
+        # if res:
+        #     payload = {
+        #         "idpedido": res[0],
+        #         "cliente_nombre": sender,  # aquí puedes reemplazar por el nombre real si lo tienes
+        #         "idsede": get_id_sede(),
+        #         "idcliente": os.environ.get("ID_RESTAURANTE", "5")
+        #     }
+        #     try:
+        #         requests.post(
+        #             "http://localhost:7071/api/webhook_nuevo_pedido",
+        #             json=payload,
+        #             timeout=5
+        #         )
+        #     except Exception as e:
+        #         log_message(f'Error enviando webhook_nuevo_pedido: {e}', 'ERROR')
         query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
         result = execute_query(query, (get_id_sede(),))
-        numero_admin = result[0][0] if result else os.getenv("NUMERO_ADMIN")
-        send_template_response(numero_admin, "confirmacion", variables_list, 'es_CO')
-        send_template_response(os.getenv("NUMERO_ADMIN"), "confirmacion", variables_list, 'es_CO')
+        numero_admin = result[0][0] 
+        send_template_response_util(numero_admin, "confirmacion", codigo_unico)
+        send_template_response_util(os.getenv("NUMERO_ADMIN"), "confirmacion", codigo_unico)
         Juan="3026467575"
-        send_template_response(Juan, "confirmacion", variables_list, 'es_CO')
+        send_template_response_util(Juan, "confirmacion", codigo_unico)
+
         if res:
             log_message(f'Pedido actualizado con código único {codigo_unico}', 'INFO')
             return {
@@ -1179,6 +1193,7 @@ def actualizar_costos_y_tiempos_pedido(
 def obtener_promociones_activas() -> list:
     try:
         log_message("Inicia obtener promociones activas", "INFO")
+        print("Inicia obtener promociones activas")
         promos_rows, promo_cols = execute_query_columns(
             """
             SELECT *
@@ -1200,38 +1215,64 @@ def obtener_promociones_activas() -> list:
         log_message(f"Error al obtener promociones activas {e}", "ERROR")
         return 
 
-def verify_hour_atettion(sender: str, ID_RESTAURANTE: int) -> bool:
-    """Verifica si el mensaje fue enviado dentro del horario de atención."""
+def verify_hour_atettion(sender: str, id_sede: int) -> bool:
+    """Verifica si el mensaje fue enviado dentro del horario de atención según JSONB horarios."""
     try:
+        print("iniciando")
+        id_sede = id_sede or 21
         query = """
-            SELECT hora_apertura, hora_cierre
-            FROM public.clientes
-            WHERE idcliente = %s;
+            SELECT horarios
+            FROM public.sedes
+            WHERE id_sede = %s;
         """
-        params = (ID_RESTAURANTE,)
-        res = execute_query(query, params, fetchone=True)
-        # corregir la lógica y usar valores por defecto si vienen como NULL
-        hora_inicio = int(res[0]) if res and res[0] is not None else 11
-        hora_fin = int(res[1]) if res and res[1] is not None else 22
+        res = execute_query(query, (id_sede,), fetchone=True)
 
+        if not res or not res[0]:
+            # sin horarios configurados → permitir por defecto
+            print("sin horarios")
+            return True
+        
+        horarios = res[0]  # psycopg ya lo devuelve como lista/dict
+        print(horarios)
         ahora = datetime.now(ZoneInfo("America/Bogota"))
-        hora_actual = ahora.hour
+        hora_actual = ahora.time()
 
-        # soportar horario que no cruza medianoche (ej: 11-22) y que sí lo cruza (ej: 22-6)
+        dias_es = [
+            "Lunes", "Martes", "Miércoles",
+            "Jueves", "Viernes", "Sábado", "Domingo"
+        ]
+        dia_actual = dias_es[ahora.weekday()]
+
+        # buscar el día actual en el JSON
+        dia_config = next((d for d in horarios if d["dia"] == dia_actual), None)
+
+        if not dia_config or not dia_config.get("abierto", False):
+            send_text_response(
+                sender,
+                "¡Hola! 👋 Hoy estamos cerrados 🕐. Te esperamos en nuestro próximo horario. ⏰"
+            )
+            return False
+
+        # convertir strings HH:MM a time
+        hora_inicio = datetime.strptime(dia_config["apertura"], "%H:%M").time()
+        hora_fin = datetime.strptime(dia_config["cierre"], "%H:%M").time()
+        print(str(hora_inicio))
+        # manejar cruce de medianoche
         if hora_inicio <= hora_fin:
-            dentro = (hora_inicio <= hora_actual < hora_fin)
+            dentro = hora_inicio <= hora_actual < hora_fin
         else:
-            # abre por la tarde/noche y cierra al día siguiente
-            dentro = (hora_actual >= hora_inicio) or (hora_actual < hora_fin)
+            dentro = hora_actual >= hora_inicio or hora_actual < hora_fin
 
         if dentro:
             return True
         else:
             send_text_response(
                 sender,
-                f"¡Hola! 👋✨Por ahora estamos fuera de horario 🕐, pero abrimos de nuevo a las {hora_inicio} AM ⏰¡Te esperamos pronto!"
+                f"¡Hola! 👋✨ Por ahora estamos fuera de horario 🕐.\n"
+                f"Abrimos hoy a las {dia_config['apertura']} ⏰"
             )
             return False
+
     except Exception as e:
         log_message(f"Error al verificar horario de atención: {e}", "ERROR")
         return True
@@ -1545,11 +1586,6 @@ def calcular_minutos(entrada):
         log_message(f"Error en calcular_minutos: {e}", "ERROR")
         return entrada
     
-# def es_menor_24h(fecha_str):
-#     fecha = datetime.strptime(fecha_str.split('.')[0], "%Y-%m-%d %H:%M:%S")
-#     ahora = datetime.now()
-#     return (ahora - fecha) <= timedelta(hours=24)
-
 def formatear_conversacion(contenido_usuario):
     mensajes = []
     try:
@@ -1573,7 +1609,7 @@ def formatear_conversacion(contenido_usuario):
         log_message(f"Error en formatear_conversacion_sin_fecha: {e}", "ERROR")
         return ""
 
-def send_template_response(to: str, template_name: str,variables: list , language: str ) -> str:
+def send_template_response(to: str, template_name: str,variables: list , language: str = "es") -> str:
     try:
         log_message(
             f"Enviando plantilla '{template_name}' a {to}",
@@ -1620,3 +1656,44 @@ def limpiar_param_whatsapp(texto):
     # Reduce espacios múltiples a uno solo
     texto = re.sub(r' {2,}', ' ', texto)
     return texto.strip()
+
+def send_template_response_util(
+    to: str,
+    template_name: str,
+    variable: str,
+    language: str = "es_CO"
+):
+    try:
+
+        token = api_whatsapp()
+        phone_id = os.environ["PHONE_NUMBER_ID"]
+
+        whatsapp = WhatsApp(token, phone_id)
+
+        components = [
+            {
+                "type": "body",
+                "parameters": [
+                    {
+                        "type": "text",
+                        "parameter_name": "order_number",
+                        "text": variable
+                    }
+                ]
+            }
+        ]
+
+        print("Components:", components)
+
+        whatsapp.send_template(
+            template_name,
+            to,
+            components,
+            language
+        )
+
+        return "OK"
+
+    except Exception as e:
+        print(e)
+        return "ERROR"

@@ -6,7 +6,7 @@ from datetime import datetime
 import logging
 import os
 import json
-from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, get_client_name_database,verify_hour_atettion,validate_duplicated_message,send_template_response
+from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, get_client_name_database,verify_hour_atettion,validate_duplicated_message,send_template_response,send_template_response_util
 from utils_chatgpt import get_classifier, get_openai_key,get_direction,get_name
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign,buscar_sede_mas_cercana_dentro_area,buscar_sede_mas_cercana
@@ -72,15 +72,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         tipo_general = message["type"]
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
-                #mensaje= True
         mensaje = True
-        if mensaje is True:
-            Juan= "573026467575"
-            variables_list = [
-                'P-0001',  
-            ]
-            send_template_response(Juan, "confirmacion", variables_list, 'es_CO')
-            return func.HttpResponse("EVENT_RECEIVED", status_code=200)
         #Validación mensaje duplicado
         #if validate_duplicated_message(message_id):
         #     logging.info(f"Mensaje duplicado: {message_id}")

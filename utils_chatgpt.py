@@ -1064,11 +1064,7 @@ def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedi
 
         if not validate_personal_data(sender,os.environ.get("ID_RESTAURANTE", "5")):
             PROMPT_MEDIOS_PAGO = f"""
-El cliente {nombre} ya confirmó su pedido.
-Desglose de costos:
-productos:{total_productos}
-domicilio:{total_domicilio}
-total_final:{total_final}
+El cliente {nombre} ha confirmado que quiere pedir pero aun no confirma su pedido.
 
 OBJETIVO:
 Generar un ÚNICO mensaje breve, cálido y entusiasta.
@@ -1103,11 +1099,7 @@ Estructura final:
 Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
 Tu nombre es PAKO.
 
-El cliente {nombre} ya confirmó su pedido.
-Desglose de costos:
-productos:{total_productos}
-domicilio:{total_domicilio}
-total_final:{total_final}
+El cliente {nombre} ha confirmado que quiere pedir pero aun no confirma su pedido.
 
 OBJETIVO:
 Generar un ÚNICO mensaje breve, cálido y entusiasta.
