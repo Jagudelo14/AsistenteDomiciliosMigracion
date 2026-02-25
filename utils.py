@@ -11,13 +11,12 @@ from utils_database import execute_query, execute_query_columns
 import inspect
 import traceback
 from typing import Dict, Any, List
-from datetime import datetime, date, time,timedelta
+from datetime import datetime, date, time
 from zoneinfo import ZoneInfo
 import json
 import requests
 import difflib
 from utils_contexto import get_sender,actualizar_conversacion,get_id_sede
-import requests
 
 
 def register_log(mensaje: str, tipo: str, ambiente: str = "Whatsapp", idusuario: int = 1, archivoPy: str = "", function_name: str = "",line_number: int = 0) -> None:
@@ -671,21 +670,21 @@ def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
         """
         params = (codigo_unico, id_whatsapp)
         res = execute_query(query, params, fetchone=True)
-        # if res:
-        #     payload = {
-        #         "idpedido": res[0],
-        #         "cliente_nombre": sender,  # aquí puedes reemplazar por el nombre real si lo tienes
-        #         "idsede": get_id_sede(),
-        #         "idcliente": os.environ.get("ID_RESTAURANTE", "5")
-        #     }
-        #     try:
-        #         requests.post(
-        #             "http://localhost:7071/api/webhook_nuevo_pedido",
-        #             json=payload,
-        #             timeout=5
-        #         )
-        #     except Exception as e:
-        #         log_message(f'Error enviando webhook_nuevo_pedido: {e}', 'ERROR')
+        if res:
+            payload = {
+                "idpedido": res[0],
+                "cliente_nombre": sender,  # aquí puedes reemplazar por el nombre real si lo tienes
+                "idsede": get_id_sede(),
+                "idcliente": os.environ.get("ID_RESTAURANTE", "5")
+            }
+            try:
+                requests.post(
+                    "http://localhost:7071/api/webhook_nuevo_pedido",
+                    json=payload,
+                    timeout=5
+                )
+            except Exception as e:
+                log_message(f'Error enviando webhook_nuevo_pedido: {e}', 'ERROR')
         query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
         result = execute_query(query, (get_id_sede(),))
         numero_admin = result[0][0] 

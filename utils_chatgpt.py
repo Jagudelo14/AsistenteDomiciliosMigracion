@@ -7,10 +7,9 @@ import logging
 from typing import Any,  Optional, Tuple, Dict
 import os
 import json
-from utils import send_text_response, limpiar_respuesta_json, log_message, convert_decimals, to_json_safe,corregir_total_price_en_result
+from utils import send_text_response, limpiar_respuesta_json, log_message, to_json_safe,corregir_total_price_en_result
 from utils_database import execute_query
 from datetime import datetime, date
-import json
 from utils_registration import validate_personal_data
 
 def get_openai_key() -> str:
@@ -1052,16 +1051,6 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
 
 def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str,sender: str) -> dict:
     try:
-        query = """
-            SELECT total_domicilio, total_productos, total_final
-            FROM pedidos
-            WHERE codigo_unico = %s
-        """
-        result = execute_query(query, (codigo_unico,))
-        total_domicilio = result[0][0] if result else None
-        total_productos = result[0][1] if result else None
-        total_final = result[0][2] if result else None
-
         if not validate_personal_data(sender,os.environ.get("ID_RESTAURANTE", "5")):
             PROMPT_MEDIOS_PAGO = f"""
 El cliente {nombre} ha confirmado que quiere pedir pero aun no confirma su pedido.

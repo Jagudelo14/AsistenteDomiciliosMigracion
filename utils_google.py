@@ -4,10 +4,9 @@
 import logging
 import googlemaps
 from googlemaps.exceptions import ApiError
-from utils import borrar_intencion_futura, guardar_intencion_futura, log_message, obtener_intencion_futura_observaciones, obtener_pedido_pendiente_reciente, point_in_polygon, send_text_response
+from utils import borrar_intencion_futura, guardar_intencion_futura, log_message, obtener_intencion_futura_observaciones, obtener_pedido_pendiente_reciente, send_text_response
 from utils_chatgpt import solicitar_confirmacion_direccion
 from utils_database import execute_query
-import json
 import os
 
 CANTIDAD_TIEMPO_PEDIDO: int = 5 # Cantidad de tiempo por pedido en cola en minutos

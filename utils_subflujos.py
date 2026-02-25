@@ -14,7 +14,6 @@ from utils_registration import validate_direction_first_time
 from utils import (
     actualizar_medio_entrega,
     limpiar_param_whatsapp,
-    actualizar_medio_pago,
     calcular_minutos,
     extraer_ultimo_mensaje,
     formatear_conversacion,
@@ -25,11 +24,9 @@ from utils import (
     guardar_intencion_futura,
     guardar_pedido_completo,
     log_message,
-    marcar_intencion_como_resuelta,
     marcar_pedido_como_definitivo,
     match_item_to_menu,
     obtener_datos_cliente_por_telefono,
-    obtener_estado_pedido_por_codigo,
     obtener_intencion_futura_mensaje_chatbot,
     obtener_intencion_futura_observaciones,
     obtener_menu,
@@ -42,12 +39,11 @@ from utils import (
     borrar_intencion_futura,
     normalizar_especificaciones,
     send_template_response,
-    verify_hour_atettion_v2,
     verify_hour_atettion
 )
-from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_pedido, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida,clasificar_negacion_general,respuesta_transferencia,generar_mensaje_seleccion_sede
+from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida,clasificar_negacion_general,respuesta_transferencia,generar_mensaje_seleccion_sede
 from utils_database import execute_query
-from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio, primera_regla_tiempo
+from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
 from utils_registration import validate_personal_data,save_personal_data_partial,check_and_mark_datos_personales
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
