@@ -30,21 +30,6 @@ def update_dir_primera_vez(sender: str, id_restaurante: str, valor: bool) -> Non
         logging.error(f"update_dir_primera_vez error: {e}")
         raise
 
-
-def update_datos_personales(sender: str, id_restaurante: str, valor: bool) -> None:
-    try:
-        query = """
-            UPDATE public.clientes_whatsapp
-            SET datos_personales = %s
-            WHERE telefono = %s AND id_restaurante = %s;
-        """
-        params = (valor, sender, id_restaurante)
-        execute_query(query, params)
-    except Exception as e:
-        log_message(f"update_datos_personales error: {e}", "ERROR")
-        logging.error(f"update_datos_personales error: {e}")
-        raise
-
 def save_personal_data_partial(sender: str, id_restaurante: str, tipo_doc: str, n_doc: str, email: str) -> None:
     """
     Actualiza solo los campos que traigan valor útil (no None y != "No proporcionado").

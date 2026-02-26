@@ -988,7 +988,8 @@ def orquestador_subflujos(
         set_id_sede(sender)
         clasificacion_mensaje = clasificacion_mensaje.strip().lower()
         if clasificacion_mensaje == "saludo":
-            respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender, pregunta_usuario)
+            #respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender, pregunta_usuario)
+            respuesta_bot = f"Hola {nombre_cliente}, Bienvenido a Sierra Nevada, Recuerda contestar un mensaje a la vez"
             send_text_response(sender, respuesta_bot)
             send_pdf_response(sender)
         elif (clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "continuacion_promocion"):

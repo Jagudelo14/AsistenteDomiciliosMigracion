@@ -6,15 +6,14 @@ from datetime import datetime
 import logging
 import os
 import json
-from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, get_client_name_database,validate_duplicated_message
+from utils import obtener_datos_cliente_por_telefono, send_pdf_response, send_text_response,  log_message, get_client_database, handle_create_client, get_client_name_database,validate_duplicated_message,obtener_nombre_sede
 from utils_chatgpt import get_classifier, get_openai_key,get_direction,get_name
 from utils_subflujos import manejar_dialogo
 from utils_google import orquestador_ubicacion_exacta,calcular_distancia_entre_sede_y_cliente,geocode_and_assign,buscar_sede_mas_cercana
 from utils_registration import  update_dir_primera_vez, update_nombre_bool, validate_nombre_bool,  validate_direction_first_time
 from utils_database import execute_query
 from typing import Any, Dict, Optional, List
-import requests
-from openai import OpenAI
+
 import io
 from utils_contexto import set_sender,crear_conversacion, actualizar_conversacion,obtener_contexto_conversacion
 import random
@@ -64,7 +63,6 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         change: Dict[str, Any] = entry.get("changes", [{}])[0]
         value: Dict[str, Any] = change.get("value", {})
         messages: Optional[List[Dict[str, Any]]] = value.get("messages")
-        client = OpenAI(api_key=get_openai_key())
         if not messages:
             logging.info("No hay mensajes en el evento. Puede ser una notificación de estado.")
             return func.HttpResponse("Sin mensajes para procesar", status_code=200)
@@ -74,9 +72,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         message_id = message["id"]
         mensaje = True
         #Validación mensaje duplicado
-        if validate_duplicated_message(message_id):
-             logging.info(f"Mensaje duplicado: {message_id}")
-             return func.HttpResponse("Mensaje duplicado", status_code=200)
+        #if validate_duplicated_message(message_id):
+        #     logging.info(f"Mensaje duplicado: {message_id}")
+        #     return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
@@ -102,6 +100,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 log_message("Llega mensaje de audio", "INFO")
                 headers = {"Authorization": f"Bearer {ACCESS_TOKEN}"}
                 media_url = f"https://graph.facebook.com/v17.0/{audio_id}?fields=url"
+                import requests
                 response = requests.get(media_url, headers=headers)
                 media_info = response.json()
                 if "url" not in media_info:
@@ -111,6 +110,8 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                 audio_response = requests.get(file_url, headers=headers)
                 audio_data = io.BytesIO(audio_response.content)
                 files = {"file": ("audio.ogg", audio_data, mime_type)}
+                from openai import OpenAI
+                client = OpenAI(api_key=get_openai_key())
                 transcript = client.audio.transcriptions.create(
                     model="whisper-1",
                     file=files["file"]
@@ -138,6 +139,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     return func.HttpResponse("Mensaje vacío", status_code=200)
             elif message["type"] == "audio":
                     log_message("Llega mensaje de audio", "INFO")
+                    from openai import OpenAI
+                    import requests
+                    client = OpenAI(api_key=get_openai_key())
                     audio_id = message["audio"]["id"]
                     mime_type = message["audio"]["mime_type"]
                     logging.info(f"Audio recibido de {sender}: ID {audio_id}, Tipo {mime_type}")
@@ -254,6 +258,7 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
                     if booleano_dir is False:
                         send_text_response(sender, f"No estas dentro de nuestra area de operación, puedes hacer tu pedido para recoger en tienda, la sede mas cercana a ti es {nombre_sede} o tambien puedes usar otra direccion para la entrega")
                     if validate_direction_first_time(sender, ID_RESTAURANTE) and validate_nombre_bool(sender, ID_RESTAURANTE):
+                        nombre_sede=obtener_nombre_sede(sender)
                         send_text_response(sender,f"¡Gracias por la información! 😊 Bienvenido a sierra nevada la cima del sabor la sede mas cercana a ti es {nombre_sede}")
                         send_pdf_response(sender)                 
                     return func.HttpResponse("EVENT_RECEIVED", status_code=200)

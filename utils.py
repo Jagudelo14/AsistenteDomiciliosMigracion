@@ -285,34 +285,6 @@ def point_in_polygon(lat, lng, poly):
 
     return inside
 
-def marcar_intencion_como_resuelta(id_intencion: int) -> bool:
-    """
-    Actualiza el estado de una intención a 'resuelto' según su ID.
-    Retorna True si la actualización fue exitosa, False si falló.
-    """
-    try:
-        # Validar entrada
-        if id_intencion is None or str(id_intencion).strip() == "":
-            log_message(f"marcar_intencion_como_resuelta: id_intencion inválido: {id_intencion!r}", "ERROR")
-            return False
-        try:
-            id_int = int(id_intencion)
-        except (ValueError, TypeError):
-            log_message(f"marcar_intencion_como_resuelta: no se pudo convertir id a int: {id_intencion!r}", "ERROR")
-            return False
-
-        query = """
-            UPDATE public.clasificacion_intenciones
-            SET estado = 'resuelta'
-            WHERE id = %s;
-        """
-        execute_query(query, (id_int,))
-        log_message(f"Intención {id_int} marcada como resuelta.", "INFO")
-        return True
-    except Exception as e:
-        log_message(f"Error al actualizar la intención {id_intencion} a 'resuelta': {e}", "ERROR")
-        return False
-
 def guardar_intencion_futura(telefono: str, intencion_futura: str, observaciones: str = "", mensaje_chatbot: str = "", mensaje_usuario: str = "", datos_promocion: dict = None) -> None:
     """
     Inserta o actualiza la intención futura de un cliente según su número de teléfono.
@@ -598,31 +570,6 @@ def obtener_intencion_futura_mensaje_chatbot(telefono: str) -> str:
         log_message(f"Error al consultar la base de datos: {e}")
         return None
 
-def _safe_parse_order(pedido_actual: Any) -> Dict:
-    """Convierte pedido_actual a dict incluso si viene como repr de python (comillas simples)."""
-    if isinstance(pedido_actual, dict):
-        return pedido_actual
-    if isinstance(pedido_actual, str):
-        try:
-            return json.loads(pedido_actual)
-        except Exception:
-            pass
-        try:
-            parsed = ast.literal_eval(pedido_actual)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            pass
-    return {"order_complete": False, "items": [], "total_price": 0}
-
-def _normalize_name(item: Dict) -> str:
-    """Extrae un nombre normalizado para detectar duplicados."""
-    name = ""
-    if isinstance(item, dict):
-        matched = item.get("matched") or {}
-        name = matched.get("name") or item.get("requested", {}).get("producto") or item.get("name") or ""
-    return re.sub(r'\s+', ' ', str(name or "")).strip().lower()
-
 def _price_of_item(it: Dict) -> float:
     """Extrae el precio multiplicado por cantidad de un item de forma segura."""
     if not isinstance(it, dict):
@@ -673,7 +620,7 @@ def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
             }
             try:
                 requests.post(
-                    "http://localhost:7071/api/webhook_nuevo_pedido",
+                    "https://back-pagina-g0f6axc4cjfjg4e2.eastus2-01.azurewebsites.net/api/webhook_nuevo_pedido",
                     json=payload,
                     timeout=5
                 )
@@ -815,52 +762,6 @@ def send_pdf_response(sender: str):
         log_message(f'Error en <SendMultipleImagesResponse>: {e}', 'ERROR')
         logging.error(f'Error en send_multiple_images_response: {e}')
         return [None, str(e)]
-    
-def obtener_estado_pedido_por_codigo(sender: str, codigo_unico: str) -> dict:
-    try:
-        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s;"
-        res_idw = execute_query_columns(q_idw, (sender,), fetchone=True)
-        id_whatsapp = res_idw[0] if res_idw else None
-        if id_whatsapp is None:
-            return {"exito": False, "msg": "No existe id_whatsapp para este número."}
-        query_pedido = """
-            SELECT *
-            FROM pedidos
-            WHERE codigo_unico = %s
-              AND id_whatsapp = %s;
-        """
-        pedido_row, pedido_cols = execute_query_columns(
-            query_pedido, (codigo_unico, id_whatsapp),
-            fetchone=True, return_columns=True
-        )
-        if not pedido_row:
-            return {"exito": False, "msg": "No se encontró un pedido con ese código."}
-        pedido_info_serializable = {
-            col: to_json_safe(val)
-            for col, val in zip(pedido_cols, pedido_row)
-        }
-        idsede = pedido_info_serializable.get("idsede")
-        sede_dict = None
-        if idsede:
-            query_sede = "SELECT * FROM sedes WHERE id_sede = %s;"
-            sede_row, sede_cols = execute_query_columns(
-                query_sede, (idsede,), fetchone=True, return_columns=True
-            )
-            if sede_row:
-                sede_dict = {
-                    col: to_json_safe(val)
-                    for col, val in zip(sede_cols, sede_row)
-                }
-        return {
-            "exito": True,
-            "pedido": pedido_info_serializable,
-            "sede": sede_dict
-        }
-    except Exception as e:
-        log_message(f'Error en <ObtenerPedidoPorCodigo>: {e}', 'ERROR')
-        logging.error(f'Error en obtener_pedido_por_codigo: {e}')
-        return {"exito": False, "error": str(e)}
-
 
 def convert_decimals(obj):
     try:
@@ -995,25 +896,6 @@ def obtener_pedido_por_codigo(codigo_unico: str) -> dict:
         "tiempo_estimado": res[7],
         "total_domicilio": float(res[8]) if res[8] is not None else 0.0
     }
-
-# Helper: obtener ordenes existentes por idpedido (cada fila representa un item)
-def obtener_ordenes_por_idpedido(idpedido: int) -> List[dict]:
-    q = """
-        SELECT idorden, desglose_productos, desglose_precio, especificaciones
-        FROM ordenes
-        WHERE idpedidos = %s
-        ORDER BY idorden
-    """
-    rows = execute_query(q, (idpedido,), fetchall=True)
-    ordenes = []
-    for r in rows:
-        ordenes.append({
-            "idorden": r[0],
-            "producto": r[1],
-            "precio": float(r[2]) if r[2] is not None else 0.0,
-            "especificaciones": r[3] or ""
-        })
-    return ordenes
 
 # Helper: buscar producto en el menu (obtiene nombre oficial y precio)
 def match_item_to_menu(product_name: str, items_menu: List[dict]) -> dict:
@@ -1279,6 +1161,7 @@ def verify_hour_atettion_v2(sender: str) -> bool:
     Usa la hora de America/Bogota.
     """
     try:
+        log_message("Inicio verificacion horario","INFO")
         ahora = datetime.now(ZoneInfo("America/Bogota"))
         dia_semana = ahora.weekday()  # 0=lunes, 6=domingo
         hora_actual = ahora.hour
@@ -1302,12 +1185,14 @@ def verify_hour_atettion_v2(sender: str) -> bool:
         dentro = inicio_minutos <= actual_minutos < fin_minutos
 
         if dentro:
+            log_message("fin verificacion horario","INFO")
             return True
         else:
             send_text_response(
                 sender,
                 "¡Hola! 👋✨Por ahora estamos fuera de horario 🕐, pero abrimos de nuevo a las 11:30 AM ⏰. ¡Te esperamos pronto!"
             )
+            log_message("fin verificacion horario","INFO")
             return False
     except Exception as e:
         log_message(f"Error al verificar horario de atención v2: {e}", "ERROR")
@@ -1690,3 +1575,23 @@ def send_template_response_util(
     except Exception as e:
         print(e)
         return "ERROR"
+
+def obtener_nombre_sede(sender: str) -> str | None:
+    try:
+        query = """
+            SELECT s.nombre
+            FROM public.clientes_whatsapp cw
+            LEFT JOIN public.sedes s 
+                ON cw.id_sede = s.id_sede
+            WHERE cw.telefono = %s;
+        """
+
+        resultado = execute_query(query, (sender,), fetchone=True)
+
+        if resultado:
+            return resultado[0]  
+        return None
+
+    except Exception as e:
+        log_message(f"Error obteniendo nombre sede: {e}", "ERROR")
+        return None
