@@ -21,11 +21,11 @@ import random
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
 # Constantes desde variables de entorno
-VERIFY_TOKEN: str = os.environ["META_VERIFY_TOKEN"] 
-ACCESS_TOKEN: str = os.environ["WABA_TOKEN"]
-ID_RESTAURANTE: str = os.environ.get("ID_RESTAURANTE", "5")
+VERIFY_TOKEN: str = os.getenv("META_VERIFY_TOKEN") 
+ACCESS_TOKEN: str = os.getenv("WABA_TOKEN")
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
 
-#PHONE_ID:str = os.environ["PHONE_NUMBER_ID"] 
+#PHONE_ID:str = os.getenv["PHONE_NUMBER_ID"] 
 
 @app.function_name(name="wpp_webhook")
 @app.route(route="wpp", auth_level=func.AuthLevel.ANONYMOUS, methods=["GET", "POST"])
@@ -72,6 +72,9 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         message_id = message["id"]
         mensaje = True
         #Validación mensaje duplicado
+        #if validate_duplicated_message(message_id):
+        #     logging.info(f"Mensaje duplicado: {message_id}")
+        #     return func.HttpResponse("Mensaje duplicado", status_code=200)
         #if validate_duplicated_message(message_id):
         #     logging.info(f"Mensaje duplicado: {message_id}")
         #     return func.HttpResponse("Mensaje duplicado", status_code=200)

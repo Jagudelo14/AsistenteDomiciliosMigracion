@@ -8,6 +8,8 @@ import os
 from datetime import datetime, timedelta    
 from zoneinfo import ZoneInfo   
 
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
+
 _sender_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("sender", default=None)
 _id_cliente_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("id_cliente", default=None)
 
@@ -42,8 +44,8 @@ def crear_conversacion(mensaje) -> str:
             }
         ]
     })
-    execute_query("""INSERT INTO conversaciones (telefono,conversacion,fecha_mensaje,id_cliente) VALUES (%s, %s, NOW(), %s)""", (get_sender(), json_mensaje, os.environ.get("ID_RESTAURANTE", "5")))
-    execute_query("""INSERT INTO historico_conversaciones (telefono,primer_mensaje,id_cliente) VALUES (%s, NOW(),%s)""", (get_sender(), os.environ.get("ID_RESTAURANTE", "5")))
+    execute_query("""INSERT INTO conversaciones (telefono,conversacion,fecha_mensaje,id_cliente) VALUES (%s, %s, NOW(), %s)""", (get_sender(), json_mensaje, ID_RESTAURANTE))
+    execute_query("""INSERT INTO historico_conversaciones (telefono,primer_mensaje,id_cliente) VALUES (%s, NOW(),%s)""", (get_sender(), ID_RESTAURANTE))
     return str(json_mensaje)
 
 def actualizar_conversacion(mensaje, telefono,rol) -> str:
@@ -140,3 +142,111 @@ def obtener_x_respuestas(telefono: str, limite: int) -> str:
 
     return mensajes
   
+def obtener_estado_pedido(telefono: str, id_restaurante: int):
+    try:
+        query = """
+            SELECT estado_actual, num_pedido
+            FROM estado_pedido
+            WHERE telefono = %s
+            AND id_restaurante = %s
+            LIMIT 1;
+        """
+
+        result = execute_query(query, (telefono, id_restaurante), fetchone=True)
+
+        if not result:
+            return None
+
+        return {
+            "estado_actual": result[0],
+            "num_pedido": result[1]
+        }
+
+    except Exception as e:
+        return None
+    
+
+def crear_estado_inicial(telefono: str, id_restaurante: int, estado: str ,num_pedido: str ):
+    try:
+        query = """
+            INSERT INTO estado_pedido (telefono, id_restaurante, estado_actual, num_pedido)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (telefono, id_restaurante)
+            DO NOTHING;
+        """
+
+        execute_query(query, (telefono, id_restaurante, estado, num_pedido))
+
+    except Exception as e:
+        return None
+
+def actualizar_estado_pedido(
+    telefono: str,
+    id_restaurante: int,
+    estado: str,
+    num_pedido: str = None
+):
+    try:
+        query = """
+            INSERT INTO estado_pedido (telefono, id_restaurante, estado_actual, num_pedido)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (telefono, id_restaurante)
+            DO UPDATE SET
+                estado_actual = EXCLUDED.estado_actual,
+                num_pedido = COALESCE(EXCLUDED.num_pedido, estado_pedido.num_pedido),
+                fecha_actualizacion = NOW();
+        """
+
+        execute_query(query, (telefono, id_restaurante, estado, num_pedido))
+
+    except Exception as e:
+        raise e
+
+def borrar_estado_pedido(telefono: str, id_restaurante: int):
+    try:
+        query = """
+            DELETE FROM estado_pedido
+            WHERE telefono = %s
+            AND id_restaurante = %s;
+        """
+
+        execute_query(query, (telefono, id_restaurante))
+
+    except Exception as e:
+        return None
+
+def tiene_estado_activo(telefono: str, id_restaurante: int) -> bool:
+    try:
+        query = """
+            SELECT 1
+            FROM estado_pedido
+            WHERE telefono = %s
+            AND id_restaurante = %s
+            LIMIT 1;
+        """
+
+        result = execute_query(query, (telefono, id_restaurante), fetchone=True)
+        return result is not None
+
+    except Exception as e:
+        return False
+    
+def obtener_codigo(telefono: str, id_restaurante: int):
+    try:
+        query = """
+            SELECT num_pedido
+            FROM estado_pedido
+            WHERE telefono = %s
+            AND id_restaurante = %s
+            LIMIT 1;
+        """
+
+        result = execute_query(query, (telefono, id_restaurante), fetchone=True)
+
+        if not result:
+            return None
+
+        return result[0]
+
+    except Exception as e:
+        return None

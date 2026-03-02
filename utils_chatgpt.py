@@ -12,6 +12,8 @@ from utils_database import execute_query
 from datetime import datetime, date
 from utils_registration import validate_personal_data
 
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
+
 def get_openai_key() -> str:
     try:
         """Obtiene la clave API de OpenAI desde variables de entorno."""
@@ -808,78 +810,30 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
 def saludo_dynamic(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
     try:
         PROMPT_SALUDO_DYNAMIC = """
-Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
-Tu tarea es generar un saludo personalizado según el tono que use el cliente.
+        Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
 
-El cliente escribió: "{mensaje_usuario}"
+        Genera un saludo breve para el cliente.
 
-PAUTAS DE TONO:
-1. Si el cliente usa expresiones informales como:
-"q hubo", "quiubo", "k hubo", "que más", "que mas", "q mas",
-"hey", "holi", "epa", "epaaa", "hoola", "hola parce",
-entonces:
-    - Usa un tono cercano, relajado y natural, sin jerga excesiva.
-    - Puedes usar 1 emoji suave si fluye bien.
-    - Mantén calidez y sensación de bienvenida al estilo Sierra Nevada.
+        El cliente escribió: "{mensaje_usuario}"
 
-2. Si el cliente usa expresiones formales como:
-"buenas tardes", "buenos días", "buen dia",
-"cordial saludo", "mucho gusto", "estimados",
-entonces:
-    - Usa un tono respetuoso, profesional y sereno.
-    - No uses emojis.
-    - Mantén claridad, amabilidad y un toque cálido sin exagerar.
+        REGLAS:
+        - Máximo 1 frase corta (máximo 20 palabras).
+        - Incluye el nombre del cliente: {nombre}
+        - Incluye el nombre del local: {nombre_local}
+        - Usa un tono natural según cómo escriba el cliente.
+        - Solo puedes usar 1 emoji si el tono es informal.
+        - Incluye un recordatorio breve usando "recuerda" para no enviar varios mensajes seguidos.
+        - No hagas preguntas.
+        - No agregues explicaciones.
+        - No inventes información.
 
-3. En cualquier otro caso:
-    - Usa un tono cordial estándar: amable, natural y con sabor.
-    - Puedes usar un emoji suave si queda orgánico.
-
-= MENSAJE INICIAL PREVENTIVO =
-
-- La recomendación debe ser un RECORDATORIO de comportamiento.
-- Usa verbos como: "recuerda", "ten en cuenta", "procura", "trata de".
-- NO lo formules como una pregunta.
-- El objetivo es que el cliente cuando conteste lo haga en un unico mensaje
-IMPORTANTE:
-- La recomendación debe ser ATEMPORAL, no ligada al siguiente mensaje.
-- NO hagas referencia a "ahora", "en este mensaje", "al responder".
-- Debe entenderse como una regla general para toda la conversación.
-- Evita frases como:
-  "para ayudarte más rápido",
-  "cuando me respondas",
-  "en tu siguiente mensaje".
-
-REGLAS DE ESTILO SIERRA NEVADA:
-- Habla como un buen anfitrión: cálido, claro y con energía positiva.
-- Evita expresiones barriales, sarcasmo o exageraciones.
-- Mantén un lenguaje cotidiano y respetuoso.
-- No inventes productos ni detalles.
-- Incluye siempre el nombre del cliente: {nombre}
-- Incluye siempre el nombre del local: {nombre_local}
-- Responde en máximo 1 o 2 frases.
-- Escoge UNA intención entre:
-    - "consulta_menu"
-    - "consulta_promociones"
-
-TIPS PARA UNA MEJOR EXPERIENCIA (OBLIGATORIO INCLUIRLOS EN EL JSON):
-Incluye SIEMPRE un campo "tips" con una lista de 3 a 5 tips breves.
-Los tips deben sonar amables, útiles y positivos.
-Ejemplos:
-- Sé claro y específico con lo que necesitas.
-- Envía un mensaje a la vez.
-- Sigue los pasos que te indique el bot.
-- Espera mi respuesta antes de enviar otro mensaje.
-- Esto ayuda a procesar tu pedido sin errores.
-
-FORMATO:
-Debes responder en un JSON válido:
-{{
-    "mensaje": "texto aquí",
-    "intencion": "consulta_menu",
-    "tips": ["tip1", "tip2", "tip3"]
-}}
-No incluyas texto adicional fuera del JSON.
-"""
+        FORMATO OBLIGATORIO (JSON válido):
+        {
+            "mensaje": "texto aquí",
+            "intencion": "consulta_menu"
+        }
+        No incluyas texto fuera del JSON.
+        """
 
         client = OpenAI()
         prompt = PROMPT_SALUDO_DYNAMIC.format(

@@ -14,8 +14,8 @@ def generar_link_pago(amount: int, sender: str):
             log_message(f"[GenerarLinkPago] No se pudieron obtener los datos del cliente para el teléfono: {sender}", "ERROR")
             return None
         Address,docType, docValue, phone, email = cliente_datos
-        userName = os.environ.get("userCrediBanco")
-        password = os.environ.get("ClaveCredibanco")
+        userName = os.getenv.get("userCrediBanco")
+        password = os.getenv.get("ClaveCredibanco")
         if not userName or not password:
             log_message("Credibanco: faltan credenciales en las variables de entorno", "ERROR")
             return None
@@ -85,8 +85,8 @@ def validar_pago(order_id: str):
     url = "https://ecouat.credibanco.com/payment/rest/getOrderStatusExtended.do"
 
     payload = {
-        "userName": os.environ.get("userCrediBanco"),
-        "password": os.environ.get("ClaveCredibanco"),
+        "userName": os.getenv.get("userCrediBanco"),
+        "password": os.getenv.get("ClaveCredibanco"),
         "orderId": order_id,
         "language": "es"
     }

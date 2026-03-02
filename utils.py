@@ -66,7 +66,7 @@ def send_text_response(to: str, message: str) -> str:
         """Envía un mensaje de texto por WhatsApp Business API."""
         logging.info('Enviando respuesta a WhatsApp')
         token: str = api_whatsapp()
-        PHONE_ID: str = os.environ["PHONE_NUMBER_ID"]
+        PHONE_ID: str = os.getenv("PHONE_NUMBER_ID")
         whatsapp: WhatsApp = WhatsApp(token, PHONE_ID)
         whatsapp.send_message(message, to)
         log_message(f'Respuesta enviada a {to}: {message}', 'INFO')
@@ -735,8 +735,8 @@ def send_pdf_response(sender: str):
     ]
     results = []
     try:
-        ACCESS_TOKEN = os.environ["WABA_TOKEN"]
-        PHONE_ID = os.environ["PHONE_NUMBER_ID"]
+        ACCESS_TOKEN = os.getenv("WABA_TOKEN")
+        PHONE_ID = os.getenv("PHONE_NUMBER_ID")
         url = f"https://graph.facebook.com/v20.0/{PHONE_ID}/messages"
         headers = {
             "Content-Type": "application/json",
@@ -1495,7 +1495,7 @@ def send_template_response(to: str, template_name: str,variables: list , languag
         )
 
         token: str = api_whatsapp()
-        PHONE_ID: str = os.environ["PHONE_NUMBER_ID"]
+        PHONE_ID: str = os.getenv("PHONE_NUMBER_ID")
         whatsapp: WhatsApp = WhatsApp(token, PHONE_ID)
 
         # Construir components para variables
@@ -1534,6 +1534,7 @@ def limpiar_param_whatsapp(texto):
     # Reduce espacios múltiples a uno solo
     texto = re.sub(r' {2,}', ' ', texto)
     return texto.strip()
+
 
 def send_template_response_util(
     to: str,
