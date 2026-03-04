@@ -1596,3 +1596,34 @@ def obtener_nombre_sede(sender: str) -> str | None:
     except Exception as e:
         log_message(f"Error obteniendo nombre sede: {e}", "ERROR")
         return None
+
+def contiene_preferencias(texto: str) -> bool:
+    """
+    Retorna True si el texto contiene alguna expresión
+    que indique gusto o disgusto.
+    """
+
+    texto = texto.lower()
+
+    patrones = [
+        # Positivos
+        r"\bme gusta[n]?\b",
+        r"\bme encanta[n]?\b",
+        r"\bamo\b",
+        r"\bme fascina[n]?\b",
+        r"\bprefiero\b",
+
+        # Negativos
+        r"\bno me gusta[n]?\b",
+        r"\bno quiero\b",
+        r"\bodio\b",
+        r"\bdetesto\b",
+        r"\bprefiero sin\b",
+        r"\bsin\b"
+    ]
+
+    for patron in patrones:
+        if re.search(patron, texto):
+            return True
+
+    return False

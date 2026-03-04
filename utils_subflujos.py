@@ -41,7 +41,7 @@ from utils import (
     send_template_response,
     verify_hour_atettion
 )
-from utils_chatgpt import clasificador_consulta_menu, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida,clasificar_negacion_general,respuesta_transferencia,generar_mensaje_seleccion_sede
+from utils_chatgpt import clasificador_consulta_menu, extraer_resumen_corto, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, obtener_respuestas_mismo_dia, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida,clasificar_negacion_general,respuesta_transferencia,generar_mensaje_seleccion_sede
 from utils_database import execute_query
 from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiempo_pedido, formatear_tiempo_entrega, geocode_and_assign, orquestador_tiempo_y_valor_envio
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
@@ -112,7 +112,7 @@ def subflujo_solicitud_pedido(sender: str, pregunta_usuario: str, entidades_text
         pedido_dict: dict = {}
         if not bandera_revision:
             log_message(f"Nuevo pedido para {sender}.", "INFO")
-            pedido_dict = mapear_pedido_al_menu(pregunta_usuario, items_menu)
+            pedido_dict = mapear_pedido_al_menu(pregunta_usuario, items_menu,sender)
 
         # --- Intento rápido: si el usuario respondió con "cantidad + producto"
         # y el pedido sigue incompleto, intentar un match directo para no quedar en loop.
@@ -503,14 +503,20 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         total_final = dict_registro_temp.get("total_final", "N/A")
         #total_domicilios = dict_registro_temp.get("total_domicilio", "N/A")
         if medio_pago_real =="efectivo":
-            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_final} el cual se divide en {total_domicilios} del domicilio y {total_productos} de los productos y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            if total_domicilios == 0:
+                mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). El costo total de tus productos es de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            else:
+                mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_final} el cual se divide en {total_domicilios} del domicilio y {total_productos} de los productos y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             borrar_estado_pedido(sender, ID_RESTAURANTE)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
             return
         elif medio_pago_real == "datafono":
-            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_final} el cual se divide en {total_domicilios} del domicilio y {total_productos} de los productos y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            if total_domicilios == 0:
+                mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar con datafono al momento de la entrega o recogida de tu pedido ({codigo_unico}). El costo total de tus productos es de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            else:
+                mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar con datafono al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_final} el cual se divide en {total_domicilios} del domicilio y {total_productos} de los productos y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             borrar_estado_pedido(sender, ID_RESTAURANTE)
@@ -583,7 +589,7 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
             items_menu: list = obtener_menu()
             #txtSolicitud = extraer_ultimo_mensaje(pregunta_usuario)
             txtSolicitud = obtener_x_respuestas(sender, 2)
-            productos = mapear_pedido_al_menu(txtSolicitud, items_menu, model="gpt-5.1")
+            productos = mapear_pedido_al_menu(txtSolicitud, items_menu,sender, model="gpt-5.1")
             if productos.get("order_complete", False) is False:
                 log_message(f"Modificación de pedido incompleta para {sender}.", "INFO")
                 no_completo: dict = pedido_incompleto_dynamic(txtSolicitud, items_menu, str(productos))
@@ -837,6 +843,7 @@ def generar_pago_domicilio(sender: str, nombre_cliente: str, codigo_unico: str, 
                 )
                 send_text_response(sender, mensaje_link)
                 guardar_intencion_futura(sender, "esperando_confirmacion_pago", codigo_unico)
+                actualizar_estado_pedido(sender, ID_RESTAURANTE, "esperando_confirmacion_pago")
                 log_message(f'Valor y tiempo de envío calculados correctamente y link enviado a {sender}.', 'INFO')
                 return
             else:
@@ -853,7 +860,7 @@ def subflujo_recoger_restaurante(sender: str, nombre_cliente: str):
         send_text_response(sender, mensaje_sede)
         codigo_unico = obtener_intencion_futura_observaciones(sender)
         actualizar_medio_entrega(sender, codigo_unico, "recoger")
-        actualizar_estado_pedido(sender, ID_RESTAURANTE, "confirmar_direccion")
+        actualizar_estado_pedido(sender, ID_RESTAURANTE, "eleccion_sede")
         guardar_intencion_futura(sender, "eleccion_sede", codigo_unico)
     except Exception as e:
         log_message(f"Error en subflujo recoger restaurante {e}", "ERROR") 
@@ -896,7 +903,7 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
         tiempo_pedido: str = formatear_tiempo_entrega(duracion)
         datos_actualizados: dict = actualizar_costos_y_tiempos_pedido(sender, codigo_unico, 0, tiempo_pedido, 0)
         if not datos_actualizados.get("actualizado"):
-            send_text_response(sender, "Lo siento, no pude confirmar tu pedido")
+            subflujo_preguntas_generales(sender,texto_cliente,nombre_cliente)
             return
         valor_ultimo = datos_actualizados.get("total_final")
         mensaje = generar_mensaje_recogida_invitar_pago(
@@ -980,19 +987,57 @@ def subflujo_tiempo_recogida(sender: str, respuesta_usuario: str) -> None:
 def manejar_paso_activo_simple(sender, nombre_cliente, pregunta_usuario, clasificacion_mensaje):
 
     estado = obtener_estado_pedido(sender, ID_RESTAURANTE)
-
+    
     if not estado:
+        log_message(f"No se encontró estado de pedido para {sender}.", "INFO")
         return False
-
+    
     paso = estado.get("estado_actual")
-
+    log_message(f"Estado actual del pedido para {sender}: {paso}", "INFO")
     if not paso:
         return False  # No hay paso activo
 
     # 🔥 Permitir salida real
     if clasificacion_mensaje in ["transferencia", "quejas"]:
         return False
+    # =========================================================
+    # PASO: METODO RECOGIDA
+    # =========================================================
+    if paso == "metodo_recogida":
 
+        if clasificacion_mensaje in ["recoger_restaurante"]:
+            subflujo_recoger_restaurante(sender, nombre_cliente)
+            return True
+        
+        if clasificacion_mensaje in ["domicilio"]:
+            if validate_direction_first_time(sender, ID_RESTAURANTE):
+                direccion = obtener_direccion(sender, ID_RESTAURANTE)
+                if direccion:
+                    mensaje = direccion_bd(nombre_cliente, direccion,sender)
+                    send_text_response(sender, mensaje)
+                    actualizar_estado_pedido(sender, ID_RESTAURANTE, "confirmar_direccion")
+                    guardar_intencion_futura(sender, "confirmar_direccion", obtener_intencion_futura_observaciones(sender))
+                else:
+                    # caso raro: flag indica primera vez pero no hay dirección en BD
+                    send_text_response(sender, "Gracias. Te recuerdo que no estas en el area de cobertura, por favor envia una direccion donde te entregaremos este pedido no olvides incluir tu barrio y cualquier otra referencia. También puedo ofrecerte recogerlo en el restaurante.")
+                    guardar_intencion_futura(sender, "primera_direccion_domicilio", obtener_intencion_futura_observaciones(sender))
+            else:
+                # No tiene dirección: solicitarla al usuario
+                send_text_response(sender, "Por favor, proporciona tu dirección completa para el domicilio. No olvides incluir detalles como calle, número, ciudad y cualquier referencia adicional. También puedes enviarme tu ubicación si lo prefieres.")
+                codigo_unico: str = obtener_intencion_futura_observaciones(sender)
+                guardar_intencion_futura(sender, "primera_direccion_domicilio", codigo_unico)
+            return True
+        if clasificacion_mensaje in ["preguntas_generales", "consulta_menu"]:
+            items = obtener_menu()
+            resp = responder_pregunta_menu_chatgpt(pregunta_usuario, items, sender)
+            send_text_response(
+                sender,
+                f"{resp.get('respuesta')}\n\nSeguimos en método de recogida. Dime si quieres recoger en el restaurante o que te lo llevemos a domicilio."
+            )
+            return True
+
+        send_text_response(sender, "Seguimos en método de recogida. Dime si quieres recoger en el restaurante o que te lo llevemos a domicilio.")
+        return True
     # =========================================================
     # PASO: MEDIO DE PAGO
     # =========================================================
@@ -1004,7 +1049,8 @@ def manejar_paso_activo_simple(sender, nombre_cliente, pregunta_usuario, clasifi
             subflujo_medio_pago(sender, nombre_cliente, pregunta_usuario)
             return True
 
-        if clasificacion_mensaje in ["preguntas_generales", "consulta_menu", "sin_intencion"]:
+        #if clasificacion_mensaje in ["preguntas_generales", "consulta_menu", "sin_intencion"]:
+        else:
             items = obtener_menu()
             resp = responder_pregunta_menu_chatgpt(pregunta_usuario, items, sender)
             send_text_response(
@@ -1104,12 +1150,14 @@ def orquestador_subflujos(
         #    return None
         log_message(f"Empieza <OrquestadorSubflujos> con sender {sender} y tipo {clasificacion_mensaje}", "INFO")
         set_id_sede(sender)
+        msj_mismo_dia = obtener_respuestas_mismo_dia(sender)
+        extraer_resumen_corto(msj_mismo_dia, sender, ID_RESTAURANTE)
         clasificacion_mensaje = clasificacion_mensaje.strip().lower()
         if manejar_paso_activo_simple(sender, nombre_cliente, pregunta_usuario, clasificacion_mensaje):
             return True
         if clasificacion_mensaje == "saludo":
             #respuesta_bot = subflujo_saludo_bienvenida(nombre_cliente, nombre_local, sender, pregunta_usuario)
-            respuesta_bot = f"Hola {nombre_cliente}, Bienvenido a Sierra Nevada, Recuerda contestar un mensaje a la vez"
+            respuesta_bot = f"Hola {nombre_cliente}, Bienvenido a Sierra Nevada, Recuerda contestar con un mensaje a la vez"
             send_text_response(sender, respuesta_bot)
             send_pdf_response(sender)
         elif (clasificacion_mensaje == "solicitud_pedido" or clasificacion_mensaje == "continuacion_promocion"):

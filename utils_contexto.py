@@ -7,6 +7,7 @@ import os
 # from utils import es_menor_24h
 from datetime import datetime, timedelta    
 from zoneinfo import ZoneInfo   
+import json
 
 ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
 
@@ -81,7 +82,7 @@ def obtener_contexto_conversacion(telefono: str) -> list:
              WITH ORDINALITY AS m(mensaje, idx)
         WHERE telefono = %s
         ORDER BY idx DESC
-        LIMIT 3
+        LIMIT 5
     )
     SELECT 
         (SELECT fecha_mensaje 
@@ -122,7 +123,27 @@ def obtener_contexto_conversacion(telefono: str) -> list:
         """
 
         execute_query(update_query, (telefono, telefono, telefono))
+        query = """
+        UPDATE clientes_whatsapp
+        SET resumen = %s::jsonb
+        WHERE telefono = %s
+        AND id_restaurante = %s;
+        """
 
+        resumen_base = {
+            "pedido_en_proceso": "",
+            "metodo_pago_seleccionado": "",
+            "direccion_confirmada": False,
+            "resumen_contextual": "",
+            "Importante": "",
+            "gusta": [],
+            "no_le_gusta": []
+        }
+
+        execute_query(
+            query,
+            (json.dumps(resumen_base), telefono, ID_RESTAURANTE)
+        )
     return mensajes
 
 
@@ -250,3 +271,54 @@ def obtener_codigo(telefono: str, id_restaurante: int):
 
     except Exception as e:
         return None
+
+def actualizar_resumen_parcial(id_cliente: int, telefono: str, cambios: dict) -> bool:
+    """
+    Actualiza solo las llaves enviadas en 'cambios'
+    dentro del jsonb 'resumen' en clientes_whatsapp
+    usando execute_query().
+    """
+
+    if not cambios:
+        return False
+
+    try:
+        update_expr = "resumen"
+        valores = []
+
+        # Construimos jsonb_set encadenado
+        for clave, valor in cambios.items():
+            update_expr = f"jsonb_set({update_expr}, %s, %s::jsonb, true)"
+            valores.append(f"{{{clave}}}")
+            valores.append(json.dumps(valor))
+
+        query = f"""
+            UPDATE clientes_whatsapp
+            SET resumen = {update_expr}
+            WHERE id_cliente = %s
+            AND telefono = %s;
+        """
+
+        valores.append(id_cliente)
+        valores.append(telefono)
+
+        execute_query(query, tuple(valores))
+
+        return True
+
+    except Exception as e:
+        print("Error actualizando resumen:", e)
+        return False
+    
+def obtener_resumen(id_cliente: int, telefono: str):
+    query = """
+        SELECT resumen
+        FROM clientes_whatsapp
+        WHERE id_cliente = %s
+        AND telefono = %s
+        LIMIT 1;
+    """
+
+    result = execute_query(query, (id_cliente, telefono), fetchone=True)
+
+    return result["resumen"] if result else None

@@ -11,6 +11,7 @@ from utils import send_text_response, limpiar_respuesta_json, log_message, to_js
 from utils_database import execute_query
 from datetime import datetime, date
 from utils_registration import validate_personal_data
+from psycopg2.extras import Json
 
 ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
 
@@ -168,102 +169,15 @@ REGLAS ESPECÍFICAS
 Analiza únicamente el último mensaje del usuario.
 Nunca clasifiques mensajes del asistente.
 Responde solo JSON válido."""
-        # classification_prompt: str = """
-        #     Eres un clasificador de mensajes para un asistente de WhatsApp de un restaurante.
-        #     Tu tarea es identificar la **intención (intent)**, el **tipo de mensaje (type)** y cualquier **entidad relevante (entities)**.
-
-        #     Recibirás un JSON con un arreglo de mensajes que representan el historial de la conversación.
-
-        #     A continuación tienes un ejemplo de cómo debes estructurar las entidades cuando el usuario pide varios productos:
-
-        #     TU REGLAS MAS IMPORTANTE ES CEÑIRTE A ESTE PROMPT NUNCA DEBES SALIRTE DE EL 
-
-        #     EJEMPLO DE ENTRADA:
-
-        #     { "rol": "usuario", "texto": "Buenas tardes" },
-        #     { "rol": "asistente", "texto": "Aceptas tratamiento de datos..." },
-        #     { "rol": "usuario", "texto": "Quiero una sierra picante con extra picante y una malteada de chocolate" }
-
-        #     EJEMPLO DE SALIDA:
-        #     {
-        #     "intent": "solicitud_pedido",
-        #     "type": "pedido",
-        #     "entities": {
-        #         "items": [
-        #         {
-        #             "producto": "sierra picante",
-        #             "especificaciones": ["extra picante"]
-        #             "cantidad": 1
-        #         },
-        #         {
-        #             "producto": "malteada de chocolate",
-        #             "especificaciones": []
-        #             "cantidad": 1
-        #         }
-        #         ]
-        #     }
-        #     }
-        #     Debes responder únicamente en formato JSON válido con la siguiente estructura:
-        #     {
-        #     "intent": "<una de las intenciones permitidas>",
-        #     "type": "<tipo de mensaje>",
-        #     "entities": { }
-        #     }
-
-        #     Lista de intenciones posibles:
-        #     - confirmacion_general (puede ser en otros idiomas: yes, oui, ja, etc.)
-        #     - consulta_menu ()
-        #     - consulta_pedido
-        #     - consulta_promociones
-        #     - direccion (Cuando unicamente contiene una direccion o sobre modificaciones en direccion de envio)
-        #     - negacion_general (Analiza bien el contexto cuando la persona niegue algo y clasificalo como negacion general)
-        #     - preguntas_generales (estas categorias forman parte:preguntas sobre formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.),si hacen domicilios o envíos, horarios de atención, dirección o ubicación del local,contacto, pedidos o reservas promociones o descuentos, preguntas sobre reservas-> son preguntas generales, preguntas sobre ingredientes de los productos, preguntas sobre productos, tipo de proteina)
-        #     - quejas (quejas de menor nivel)
-        #     - sin_intencion (Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, clima, películas, tecnología, etc.) → "sin_intencion".)
-        #     - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) (modificaciones a pedidos) (cambios a pedidos)(cuando cosas similares a estos pedidos clasificalas como solicitud pedido) (tambien cuando aclare un pedido como: no, son tantos productos o no, son 3 productos o no, es una malteada y una sierra queso)(cuando el cliente aclare cantidades o productos ya mencionados)
-        #     Ejemplo: "quiero agregar una malteada de vainilla", "quiero que la hamburguesa no traiga lechuga", "cambia mi pedido por favor por...", "quitar la malteada", "también quiero una gaseosa coca cola original", "dame también una malteada de chocolate", etc.
-        #     - transferencia (quejas de mayor nivel) (cancelacion de pedido) (cuando el cliente pide cancelar su pedido)
-        #     - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo) (cuando el usuario envie sus datos de facturacion correo, documento y tipo de documento)
-        #     * el numero de identificacion en colombia no tiene letras y tiene 6 a 10 digitos numericos
-        #     * Tipos de documento, RC — Registro Civil, TI — Tarjeta de Identidad, CC — Cédula de Ciudadanía, CE — Cédula de Extranjería, PA — Pasaporte, PA — Pasaporte.
-        #     - recoger_restaurante   (NUEVA intención: cuando el usuario dice que pasará a recoger, irá al restaurante o lo recoge en tienda o en una de nuestras sedes: Caobos)
-        #     - domicilio             (NUEVA intención: cuando el usuario pide entrega a domicilio, "tráelo", "envíamelo", "a mi casa", etc.)
-        #     - saludo (hola, buenos dias, buenas tardes, buenas noches, saludos, etc.)
-        #     - despedida (adios, hasta luego, nos vemos, gracias, etc.) (cuando notes que se da la informacion final al usuario y agradece o se despide)
-        #     - Tiempo_de_recogida (Cuando el usuario menciona en cuanto tiempo pasará por su pedido)
-        #     - esperando_confirmacion_pago (Cuando el usuario confirma que ya realizó el pago)
-
-        #     Instrucciones importantes:
-        #     - No incluyas texto fuera del JSON.
-        #     - No uses comentarios, explicaciones o saltos de línea innecesarios.
-        #     - Si no puedes determinar la intención, usa "sin_intencion".
-        #     - TE ACLARO QUE UN PRODUCTO EN COMBO SE TRATA DIFERENTE A UN PRODUCTO SOLO POR EJEMPLO UNA SIERRA QUESO ES DIFERENTE DE UNA SIERRA QUESO EN COMBO
-        #     - SI TE DICEN UN PRODUCTO EN COMBO TRATALO COMO UN PRODUCTO DIFERENTE A SU HOMONIMO SOLO
-        #     - Si el usuario menciona detalles adicionales que modifican un producto ya mencionado (por ejemplo “que la bebida sea…”, “sin tomate”, “pero la salsa aparte”), debes agregar esas especificaciones al MISMO item.
-        #     - No debes crear un nuevo item cuando la frase solo aclara o modifica el producto anterior.
-        #     - SI EL CLIENTE TE PIDE UN PRODUCTO EN COMBO NUNCA DEBES AÑADIR SU VERSIÓN SOLO COMO PARTE DEL PEDIDO A MENOS QUE LO EXIJA EXPLICITAMENTE EL MENSAJE (POR EJEMPLO: "UNA SIERRA QUESO Y UNA SIERRA QUESO EN COMBO" SI DEBES AÑADIR AMBOS PRODUCTOS AL PEDIDO EJEMPLO 2: "UNA SIERRA QUESO EN COMBO" NO DEBES AÑADIR SIERRA QUESO SOLO)
-        #     - Si el usuario indica una cantidad explícita (ej. "2", "4", "dos", "cuatro"), debes representarla usando el campo "cantidad" y no duplicar items iguales.
-        #     - Las reservas las clasificas como preguntas generales y todo lo relacionado con reservas va en esa categoría.
-        #     - Si te preguntan que me recomiendas se refiere a preguntas generales, en general las recomendaciones relacionalas con el menu y preguntas generales.
-        #     - Si el usuario solo dice "sí" o "no" sin contexto, clasifícalo como confirmación_general o negación_general respectivamente.
-        #     - Si el usuario pide hablar con un asesor, persona, humano, gerente, administrador, supervisor, encargado, responsable, operador, agente, representante o similar, clasifícalo como transferencia.
-        #     - Si el usuario pide ayuda o soporte, clasifícalo como transferencia.
-        #     - Si hay información personal antes de clasificarlo revisa el contexto de los mensajes anteriores si es el correo el documento y el numero del documento es si o si validación_pago
-        #     - Si dentro del contexto ya existe un pedido y te estan pidiendo mas productos es una modificacion pedido y no una solicitud de pedido
-        #     - Si la bebida es agua  se refiere a una Agua normal 600 ml
-        #     - Si la bebida es agua con gas se refiere a una Agua con gas 600 ml
-        #     - Las adiciones debes clasificarlas en el producto que se indica y tambien como un producto aparte a la vez
-        #     - LAS ADICIONES SIEMPRE DEBES CLASIFICARLAS COMO UN PRODUCTO UNICO CON SU PRECIO Y SU CANTIDAD
-        #     - Si el cliente esta contestando a una pregunta de eleccion de sede debes clasifificarlo como eleccion_sede
-        #     Reglas IMPORTANTES:
-        #     - DEBES analizar y clasificar el ÚLTIMO mensaje enviado por el USUARIO.
-        #     - Debes analizar principalmente el último mensaje. Si el mensaje es ambiguo (por ejemplo 'sí', 'no', 'efectivo', 'tarjeta'), puedes usar el contexto inmediato para determinar la intención.
-        #     - Nunca clasifiques mensajes del asistente pero si es contexto importante para la decisión final.
-        #     """
-
         messages = [
-            {"role": "system", "content": classification_prompt},
-            {"role": "user", "content": msj}
+            {
+                "role": "system",
+                "content": classification_prompt
+            },
+            {
+                "role": "user",
+                "content": msj
+            }
         ]
         client: OpenAI = OpenAI(api_key=get_openai_key())
         respuesta: Any = client.chat.completions.create(
@@ -476,13 +390,21 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
         if result_direccion and len(result_direccion) > 0:
             direccion = result_direccion[0][0]
     # Prompt unificado
+    resumen=obtener_resumen(sender)
+    if resumen is None:
+        resumen = {}
+
+    if isinstance(resumen, dict):
+        resumen_str = json.dumps(resumen, ensure_ascii=False)
+    else:
+        resumen_str = str(resumen)
     prompt = f"""
         Eres PAKO, el asistente cálido y cercano de Sierra Nevada, La Cima del Sabor 🏔️🍔.
         Tu tarea es ayudar al cliente con información sobre el menú, horarios, sedes y servicios,
         siempre con el tono oficial de la marca: amable, natural y con un toque sabroso, sin exagerar.
 
         Información del restaurante:
-        🕐 Horario: Todos los días de 12:00 p.m. a 7:00 p.m.
+        🕐 Horario: 11:30 a 7:00 pm lunes a sabado y 12 a 6:30 pm domingos y festivos
         📍 Sedes:
         - Caobos Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca el numero de caobos es 3134827171
         - Centro Internacional Ac. 32 # 18-7, Teusaquillo, Bogotá, D.C. el numero de centro internacional es 3160107705
@@ -495,10 +417,9 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
         
         El cliente preguntó: "{pregunta_usuario}"
         La sede asignada del cliente es: "{direccion if direccion else 'No asignada'}".
-
+        El resumen de la conversación con el cliente es: {resumen_str}
         Este es el menú completo:
         {json.dumps(items, ensure_ascii=False)}
-
         PAUTAS DE TONO (OBLIGATORIAS):
         - Habla como un buen anfitrión bogotano: cálido, natural y claro.
         - Siempre cordial, sin sarcasmo, sin ironía y sin jerga barrial.
@@ -518,6 +439,9 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
         - Mantén la respuesta en máximo 2 frases si es posible.
         - En este momento no manejamos reservas
         - Si la pregunta es sobre costo de domicilio recuerdale que actualmente dentro del area de cobertura es gratis
+        - Los unicos metodos de pago disponibles son efectivo y datafono contraentrega, no manejamos transferencias ni pagos digitales ni pago con tarjeta 
+        REGLA ESTRICTA
+        NUNCA LE DIGAS AL CLIENTE QUE EL PEDIDO HA SIDO CONFIRMADO
         FORMATO OBLIGATORIO DE SALIDA:
         Devuelve SOLO un JSON válido con esta estructura EXACTA:
 
@@ -584,12 +508,12 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
             "productos": []
         }
 
-def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model: str = "gpt-5.1") -> dict:
+def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list,sender: str, model: str = "gpt-5.1") -> dict:
     """
     Mapear los items provenientes del clasificador AL MENÚ usando GPT.
     """
     client = OpenAI()
-
+    pedido=obtener_pedido_en_proceso(sender, ID_RESTAURANTE)
     prompt = f"""
         Eres un asistente encargado de interpretar mensajes de clientes para la toma y modificación de pedidos de domicilios.
         Tu función es:
@@ -654,7 +578,7 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
             -Para el producto que ingresa al pedido, establece el valor exacto: "Producto de reemplazo".
             -Para el producto que sale del pedido, establece el valor exacto: "Producto a reemplazar".
             -Esta regla es estricta y debe cumplirse siempre que la intención sea REPLACE_ITEM, sin excepciones.
-        - Nunca clasificar como REPLACE_ITEM si no existen dos productos claramente identificables en el mensaje en cambio clasificalo como ACLARACION.
+        - Nunca clasificar como REPLACE_ITEM si no existen dos productos claramente identificables en el mensaje O en el contexto del PEDIDO ACTUAL EN PROCESO.
         - Cuando el cliente pide "platanitos" "platanos" o "plátanos" se refiere a los platanitos maduros el ACOMPAÑAMIENTO DE 7900 a menos que explicitamente mencione sea la adicion en ese caso son los platanos maduros de 2900 el adicional
         - Si colocas order_complete en true debes colocar la coincidencia mas aproximada en el campo matched de los candidatos
         - En las hamburguesas que se puedan elegir proteina si el cliente no elige proteina pon de res SOLO CUANDO EL CLIENTE NO ELIJA
@@ -743,6 +667,81 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - Si un modificador tiene costo, debe agregarse obligatoriamente como un item independiente dentro del array "items".
         - El precio SOLO puede existir dentro del objeto "matched" de los items principales o adicionales independientes.
         - Está estrictamente prohibido incluir precio dentro de "modifiers_applied".
+        - Cuando el producto principal sea un COMBO del menú, los componentes incluidos en su descripción (bebida y acompañamiento) NO deben crearse como items independientes.
+        - La bebida y el acompañamiento incluidos estructuralmente en un combo NO son adiciones.
+        - Solo deben crearse como items independientes si el usuario los pide adicionalmente fuera del combo.
+        - La regla de "adiciones pagas como item independiente" NO aplica a componentes estructurales de combos.
+        - Los productos cuyo nombre empiece por "Combo" son unidades cerradas indivisibles y su precio ya incluye bebida y acompañamiento.
+        REGLA CRÍTICA DE COMBOS:
+
+        Cuando el cliente mencione una bebida inmediatamente después de que el agente haya
+        preguntado por la bebida de un combo, esa bebida se interpreta como una elección
+        de bebida del combo.
+
+        NO debe crearse un item independiente para esa bebida.
+
+        La bebida debe agregarse únicamente como modificador del combo dentro de
+        "modifiers_applied".
+
+        Ejemplo:
+
+        Cliente:
+        "Con quatro"
+
+        Resultado:
+
+        Combo con Platanito Maduro
+        modifiers_applied:
+        ["bebida: Quatro 400 ml"]
+
+        NO crear item independiente de bebida.
+        REGLA DE CONTEXTO DEL PEDIDO:
+
+        El campo "PEDIDO ACTUAL EN PROCESO" representa el producto activo
+        sobre el cual el cliente está hablando.
+
+        Si el cliente utiliza frases como:
+
+        - "mejor"
+        - "cámbialo"
+        - "ponlo"
+        - "hazlo"
+        - "en combo"
+        - "solo"
+        - "sin"
+
+        y no menciona el producto explícitamente,
+        debes asumir que se refiere al producto activo del
+        PEDIDO ACTUAL EN PROCESO.
+        REGLA DE CONVERSIÓN A COMBO:
+
+        Si el usuario dice expresiones como:
+        "mejor en combo"
+        "hazlo combo"
+        "ponlo en combo"
+        "que sea combo"
+        "vuélvelo combo"
+
+        y el pedido actual contiene una hamburguesa que tiene versión en combo
+        en el menú, debes convertir automáticamente ese producto a su
+        versión de combo equivalente.
+
+        Ejemplo:
+
+        "Con Platanito Maduro y Queso Costeño"
+        → "Combo con Platanito Maduro"
+
+        "Con Queso"
+        → "Combo Con Queso"
+
+        "Con Chicharrón"
+        → "Combo con Chicharrón"
+
+        "Con Doble Tocineta"
+        → "Combo Doble Tocineta"
+
+        Esta conversión debe clasificarse como:
+        intent: REPLACE_ITEM
         ======================================================
         Tono de la conversacion:
         -Directo,formal,cercano y amable
@@ -752,6 +751,8 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         CLASIFICADOR:
         {json.dumps(contenido_clasificador, ensure_ascii=False)}
 
+        PEDIDO ACTUAL EN PROCESO:
+        {pedido if pedido else "No hay pedido en proceso"}
         DEVUELVE SOLO EL JSON.
         """
 
@@ -1676,28 +1677,18 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
 
         Debes analizar el texto del usuario y responder exclusivamente uno de los siguientes valores:
 
-        - "transferencia - nequi"
-        - "transferencia - daviplata"
-        - "transferencia - bre-b"
-        - "transferencia - otro"
+        - "datafono"
         - "efectivo"
-        - "tarjeta"
-        - "nfc"
         - "desconocido"
         - "datafono"
 
         Reglas:
         1. Aunque esté mal escrito, identifica la intención correcta.
         2. Si menciona:
-        - nequi / neki / nekii / nequi bbva → "transferencia - nequi"
-        - daviplata / davi / dabiplya / daviplaya → "transferencia - daviplata"
-        - bre-b / breb → "transferencia - bre-b"
-        - “movil”, “transfer”, “transfe”, “pse”, “lo hago por el celu”, “paso por app” → "transferencia - otro"
         - "datafono", "datáfono", "dátáfono", "datafon" → "datafono"
-        3. tarjeta, tc, td, targta, tarjta, crédito, débito → "tarjeta"
-        4. nfc, acercar la tarjeta, contactless → "nfc"
-        5. efectivo, cash → "efectivo"
-        6. Si no puedes entenderlo → "desconocido"
+        3. tarjeta, tc, td, targta, tarjta, crédito, débito → "datafono"
+        4. efectivo, cash → "efectivo"
+        5. Si no puedes entenderlo → "desconocido"
 
         Formato de salida OBLIGATORIO (JSON puro):
         {{
@@ -3104,3 +3095,247 @@ def respuesta_transferencia(mensaje_usuario: str, nombre: str, nombre_local: str
             "resumen_ejecutivo": "Error en el proceso automático, requiere revisión manual.",
             "intencion": "queja_grave"
         }
+def extraer_resumen(mensajes , resumen ) -> dict:
+    try:
+        PROMPT_SALUDO_DYNAMIC = f"""
+        Analiza estos mensajes recientes de un cliente de restaurante.
+
+        Ademas este es el perfil que hemos construido del cliente basado en sus mensajes anteriores:
+        {resumen}
+        Basándote en el perfil del cliente y los mensajes recientes, actualiza el perfil del cliente con cualquier nueva información relevante que puedas extraer, como preferencias, intenciones, estado emocional o cualquier detalle personal que el cliente haya compartido. Si no hay nueva información, mantén el perfil igual. Devuelve el perfil actualizado en formato JSON.
+        Devuelve el siguiente JSON con el perfil actualizado del cliente:
+        {mensajes}
+         {{
+            "le_gusta": ,
+            "no_le_gusta": ,
+            "preferencias":,
+            "puntos_importantes": ,
+            "resumen":
+            }}
+        Reglas:
+        - No inventes información que no esté presente en los mensajes.
+        - Extrae solo información que el cliente haya mencionado explícitamente.
+        - Si no hay informacion no te preocupes por llenar los campos vacíos, es mejor dejarlos vacíos que inventar datos.
+        - Se muy puntual y concreto en la información que extraes, no agregues explicaciones ni detalles adicionales.
+        """
+        client = OpenAI()
+        prompt = PROMPT_SALUDO_DYNAMIC
+        
+        response = client.chat.completions.create(
+            model="gpt-5.1",
+            messages=[
+                {"role": "system", "content": "Eres un Analista de mensajes recientes de un cliente de restaurante."},
+                {"role": "user", "content": prompt}
+            ],
+#            max_tokens=350,
+            temperature=0.1
+        )
+        log_message(f'prompt: {prompt}', 'DEBUG')
+        raw = response.choices[0].message.content.strip()
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] extraer_resumen tokens_used={tokens_used}", "DEBUG")
+        
+        data = json.loads(raw)
+        return data
+    except Exception as e:
+        log_message(f'Error en función <extraer_resumen>: {e}', 'ERROR')
+        return None
+    
+
+def obtener_respuestas_mismo_dia(telefono: str) -> list:
+    query = """
+    SELECT mensaje
+    FROM conversaciones,
+         jsonb_array_elements(conversacion->'mensajes') WITH ORDINALITY AS m(mensaje, idx)
+    WHERE telefono = %s
+      AND (mensaje->>'fecha')::timestamp::date = CURRENT_DATE
+    ORDER BY idx DESC
+    """
+
+    mensajes = execute_query(query, (telefono,))
+
+    # execute_query devuelve lista de tuplas → extraemos primer elemento
+    mensajes = [m[0] for m in mensajes]
+
+    # Volvemos al orden cronológico
+    mensajes = list(reversed(mensajes))
+
+    return mensajes
+def obtener_resumen(telefono: str) -> list:
+    log_message(f"Consultando resumen para {telefono}", "DEBUG")
+    try:
+        query = """
+        SELECT resumen
+        FROM clientes_whatsapp
+        WHERE telefono = %s
+        AND id_restaurante = %s
+        LIMIT 1;
+        """
+
+        result = execute_query(query, (telefono, ID_RESTAURANTE,), fetchone=True)
+
+        if not result:
+            log_message(f"No existe resumen previo para {telefono}", "INFO")
+            return None
+
+        log_message(f"Resumen obtenido para {telefono}", "DEBUG")
+        return result[0]
+    except Exception as e:
+        log_message(f"Error al obtener resumen para {telefono}: {e}", "ERROR")
+        return None
+def guardar_resumen(telefono: str, resumen: dict) -> None:
+    log_message(f"Guardando resumen para {telefono}", "DEBUG")
+    try:
+        query = """
+        UPDATE clientes_whatsapp
+        SET resumen = %s 
+        WHERE telefono = %s
+        AND id_restaurante = %s;
+        """
+
+        execute_query(query, (Json(resumen), telefono, ID_RESTAURANTE,))
+        log_message(f"Resumen guardado para {telefono}", "DEBUG")
+    except Exception as e:
+        log_message(f"Error guardando resumen para {telefono}: {e}", "ERROR")
+        # swallow to avoid bubbling up
+        pass
+def resumen_conversacion(telefono: str) -> str:
+    log_message(f"Iniciando resumen_conversacion para {telefono}", "DEBUG")
+    try:
+        mensajes = obtener_respuestas_mismo_dia(telefono)
+        resumen = obtener_resumen(telefono)
+        if not resumen:
+            log_message(f"No había resumen previo para {telefono}, inicializando estructura vacía", "DEBUG")
+            resumen_sesion = {
+                "le_gusta": None,
+                "no_le_gusta": None,
+                "preferencias": None,
+                "puntos_importantes": None,
+                "resumen": None
+            }
+        else:
+            resumen_sesion = resumen
+        resumen_actualizado = extraer_resumen(mensajes, resumen_sesion)
+        if resumen_actualizado:
+            log_message(f"Resumen actualizado para {telefono}: {resumen_actualizado}", "DEBUG")
+            guardar_resumen(telefono, resumen_actualizado)
+        return resumen_actualizado
+    except Exception as e:
+        log_message(f"Error en resumen_conversacion para {telefono}: {e}", "ERROR")
+        return None 
+
+import json
+from openai import OpenAI
+
+def extraer_resumen_corto(mensajes, telefono, id_restaurante):
+    try:
+        # 1️⃣ Obtener resumen actual desde clientes_whatsapp
+        query = """
+            SELECT resumen
+            FROM clientes_whatsapp
+            WHERE telefono = %s
+            AND id_restaurante = %s
+            LIMIT 1;
+        """
+
+        result = execute_query(query, (telefono, id_restaurante), fetchone=True)
+
+        resumen_actual = result[0] if result else {} if result else {}
+
+        if resumen_actual is None:
+            resumen_actual = {}
+
+        if isinstance(resumen_actual, str):
+            resumen_actual = json.loads(resumen_actual)
+
+        # 2️⃣ Prompt híbrido (solo detectar cambios)
+        PROMPT = f"""
+        Analiza los siguientes mensajes recientes de un cliente de restaurante.
+
+        Perfil actual del cliente:
+        {json.dumps(resumen_actual, ensure_ascii=False)}
+
+        Mensajes recientes:
+        {mensajes}
+
+        Devuelve SOLO los campos que deban actualizarse.
+        Si no hay cambios, devuelve {{}}.
+
+        Estructura posible:
+        {{
+            "pedido_en_proceso": "",
+            "metodo_pago_seleccionado": "",
+            "direccion_confirmada": false,
+            "resumen_contextual": "",
+            "Importante": "",
+            "gusta": [],
+            "no_le_gusta": []
+        }}
+
+        Reglas:
+        - No inventes información.
+        - No repitas campos si no cambiaron.
+        - Devuelve únicamente JSON válido.
+        """
+
+        client = OpenAI()
+
+        response = client.chat.completions.create(
+            model="gpt-5.1",
+            messages=[
+                {"role": "system", "content": "Eres un analista de cambios en perfiles de clientes."},
+                {"role": "user", "content": PROMPT}
+            ],
+            temperature=0.1
+        )
+
+        raw = response.choices[0].message.content.strip()
+        raw = raw.replace("```json", "").replace("```", "").strip()
+        tokens_used = _extract_total_tokens(response)
+        if tokens_used is not None:
+            log_message(f"[OpenAI] extraer_resumen tokens_used={tokens_used}", "DEBUG")
+        cambios = json.loads(raw)
+
+        # 3️⃣ Validación defensiva
+        if not isinstance(cambios, dict):
+            log_message("Respuesta del LLM no es dict", "ERROR")
+            return resumen_actual
+
+        # 4️⃣ Merge controlado en backend
+        resumen_actual.update(cambios)
+
+        # 5️⃣ Guardar en jsonb (reemplazando el objeto final consolidado)
+        update_query = """
+            UPDATE clientes_whatsapp
+            SET resumen = %s::jsonb
+            WHERE telefono = %s
+            AND id_restaurante = %s;
+        """
+
+        execute_query(
+            update_query,
+            (json.dumps(resumen_actual, ensure_ascii=False), telefono, id_restaurante)
+        )
+
+        return resumen_actual
+
+    except Exception as e:
+        log_message(f'Error en <extraer_resumen_corto>: {e}', 'ERROR')
+        return None
+    
+def obtener_pedido_en_proceso(telefono: str, id_restaurante: int) -> str:
+    query = """
+        SELECT COALESCE(NULLIF(resumen->>'pedido_en_proceso', ''), '')
+        FROM clientes_whatsapp
+        WHERE telefono = %s
+        AND id_restaurante = %s
+        LIMIT 1;
+    """
+
+    result = execute_query(query, (telefono, id_restaurante), fetchone=True)
+
+    if not result:
+        return ""
+
+    return result[0] or ""
