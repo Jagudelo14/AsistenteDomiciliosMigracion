@@ -887,9 +887,11 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
                         );
             """
         result = execute_query(query_pendientes, (sender,))
+        log_message(f"[SubflujoEleccionSede] Resultado consulta pedidos pendientes para {sender}: {result}", "INFO")
         codigo_unico = result[0][6] if result else 0
         #MODIFICACION TEMPORAL SOLO UNA SEDE
         datos_mapeo_sede: dict = mapear_sede_cliente(texto_cliente)
+        log_message(f"[SubflujoEleccionSede] Resultado mapeo sede para {texto_cliente}: {datos_mapeo_sede}", "INFO")
         if datos_mapeo_sede.get("error"):
             send_text_response(sender, "Disculpa, la sede que escribiste no existe, ¿puedes volver a escribir con mayor claridad?")
             return
@@ -916,6 +918,7 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
         )
         send_text_response(sender, mensaje)
         marcar_estemporal_true_en_pedidos(sender,codigo_unico)
+        actualizar_estado_pedido(sender, ID_RESTAURANTE, "tiempo_de_recogida")
         log_message("Termina subflujo eleccion sede", "INFO")
     except Exception as e:
         log_message(f"Error en subflujo eleccion sede {e}", "ERROR")

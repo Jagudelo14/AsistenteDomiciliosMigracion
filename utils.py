@@ -313,7 +313,7 @@ def guardar_intencion_futura(telefono: str, intencion_futura: str, observaciones
                 observaciones,
                 mensaje_chatbot,
                 mensaje_usuario,
-                json.dumps(datos_promocion, ensure_ascii=False)
+                None
             )
         )
         log_message(f"Intención futura guardada/actualizada para {telefono}: {intencion_futura}", "INFO")

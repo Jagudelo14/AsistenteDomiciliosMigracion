@@ -105,6 +105,7 @@ Incluye preguntas sobre:
 - ingredientes
 - recomendaciones
 - reservas
+- Sedes
 
 4) transferencia:
 Cuando el usuario pide hablar con humano, asesor, gerente, soporte, o presenta queja grave.
@@ -117,7 +118,16 @@ Cuando el usuario envía datos de facturación:
 - método de pago (Nequi, Daviplata, tarjeta, efectivo)
 
 6) direccion:
-Cuando el mensaje contiene únicamente una dirección o modificación de dirección.
+Solo cuando el usuario ENVÍA su dirección para un domicilio.
+
+Ejemplos:
+- "mi dirección es calle 10 # 20-30"
+- "carrera 15 # 80-21 apto 301"
+- "cámbiala por calle 100 # 9-45"
+- "la dirección correcta es..."
+
+NO usar esta intención cuando el usuario pregunta por la dirección de una sede.
+En ese caso usar: preguntas_generales.
 
 7) recoger_restaurante:
 Cuando indica que pasará a recoger el pedido.
@@ -393,23 +403,53 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
     resumen=obtener_resumen(sender)
     if resumen is None:
         resumen = {}
-
     if isinstance(resumen, dict):
         resumen_str = json.dumps(resumen, ensure_ascii=False)
     else:
         resumen_str = str(resumen)
+    sedes = execute_query("""
+        SELECT nombre, direccion, horarios
+        FROM sedes
+        WHERE estado = TRUE
+        AND id_restaurante = %s
+        AND latitud IS NOT NULL
+        AND longitud IS NOT NULL;
+    """, (ID_RESTAURANTE,))
+
+    if not sedes:
+        return None
+
+    sedes_contexto = []
+
+    for s in sedes:
+        nombre = s[0]
+        direccion = s[1]
+        horarios = s[2]
+
+        # convertir horarios a json si viene como string
+        if isinstance(horarios, str):
+            horarios = json.loads(horarios)
+
+        sede_dict = {
+            "nombre": nombre,
+            "direccion": direccion,
+            "horarios": horarios
+        }
+
+        sedes_contexto.append(sede_dict)
+
+    # convertir a json para pasarlo al LLM
+    sedes_json = json.dumps(sedes_contexto, ensure_ascii=False, indent=2)
+
+    print(sedes_json)
     prompt = f"""
         Eres PAKO, el asistente cálido y cercano de Sierra Nevada, La Cima del Sabor 🏔️🍔.
         Tu tarea es ayudar al cliente con información sobre el menú, horarios, sedes y servicios,
         siempre con el tono oficial de la marca: amable, natural y con un toque sabroso, sin exagerar.
 
         Información del restaurante:
-        🕐 Horario: 11:30 a 7:00 pm lunes a sabado y 12 a 6:30 pm domingos y festivos
-        📍 Sedes:
-        - Caobos Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca el numero de caobos es 3134827171
-        - Centro Internacional Ac. 32 # 18-7, Teusaquillo, Bogotá, D.C. el numero de centro internacional es 3160107705
-        - Chicó 2.0 Ac 100 #9A-45, Bogotá, Colombia el numero de chico es 3134827229
-        - Centro Mayor  Cl. 38A Sur #34, Bogotá, Colombia el numero de centro mayor es 3228144839
+        Sedes y horarios:
+        {sedes_json}
         💳 Medios de pago: solo contraentrega efectivo y datafono.
         - Tenemos domicilios siempre y cuando esten en el area de cobertura si no esta no podria entregar a domicilio.
         - Si el cliente menciona que no le gusta un ingrediente dile que puede quitarlo del producto
@@ -440,6 +480,7 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
         - En este momento no manejamos reservas
         - Si la pregunta es sobre costo de domicilio recuerdale que actualmente dentro del area de cobertura es gratis
         - Los unicos metodos de pago disponibles son efectivo y datafono contraentrega, no manejamos transferencias ni pagos digitales ni pago con tarjeta 
+        - Siempre que indiques una sede menciona su direccion
         REGLA ESTRICTA
         NUNCA LE DIGAS AL CLIENTE QUE EL PEDIDO HA SIDO CONFIRMADO
         FORMATO OBLIGATORIO DE SALIDA:
@@ -460,6 +501,7 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
         }}
         """
     try:
+        log_message(f"Prompt para ChatGPT preguntas generales: {prompt}", "DEBUG")
         client = OpenAI()
         response = client.responses.create(
             model=model,

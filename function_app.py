@@ -58,7 +58,6 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         """Procesa los mensajes recibidos desde WhatsApp Business API."""
         req_body: Dict[str, Any] = json.loads(req.get_body().decode("utf-8"))
         logging.info(f"Cuerpo recibido: {json.dumps(req_body, indent=2)}")
-        log_message(f'Cuerpo recibido: {json.dumps(req_body, indent=2)}', 'INFO')
         entry: Dict[str, Any] = req_body.get("entry", [{}])[0]
         change: Dict[str, Any] = entry.get("changes", [{}])[0]
         value: Dict[str, Any] = change.get("value", {})

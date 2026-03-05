@@ -33,7 +33,8 @@ def connect_database() -> connection:
                 password=password,
                 host=host,
                 port=port,
-                sslmode='require'
+                sslmode='require',
+                application_name="whatsapp_bot"
             )
         conn: connection = _pool.getconn()
         if conn is None:
