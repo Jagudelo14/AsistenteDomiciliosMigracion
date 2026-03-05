@@ -119,7 +119,7 @@ def obtener_contexto_conversacion(telefono: str) -> list:
 
         INSERT INTO historico_conversaciones 
         (telefono, primer_mensaje, id_cliente) 
-        VALUES (%s, NOW(), 5);
+        VALUES (%s, NOW(), 3);
         """
 
         execute_query(update_query, (telefono, telefono, telefono))

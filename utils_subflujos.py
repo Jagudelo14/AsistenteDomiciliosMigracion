@@ -39,7 +39,8 @@ from utils import (
     borrar_intencion_futura,
     normalizar_especificaciones,
     send_template_response,
-    verify_hour_atettion
+    verify_hour_atettion,
+    verify_hour_atettion_v2
 )
 from utils_chatgpt import clasificador_consulta_menu, extraer_resumen_corto, generar_mensaje_sin_intencion,get_direction, clasificar_pregunta_menu_chatgpt, enviar_menu_digital, generar_mensaje_confirmacion_modificacion_pedido, generar_mensaje_recogida_invitar_pago, interpretar_eleccion_promocion, mapear_pedido_al_menu, mapear_sede_cliente, obtener_respuestas_mismo_dia, pedido_incompleto_dynamic, pedido_incompleto_dynamic_promocion, responder_pregunta_menu_chatgpt, responder_sobre_promociones, respuesta_quejas_graves_ia, respuesta_quejas_ia, saludo_dynamic, solicitar_medio_pago, solicitar_metodo_recogida,direccion_bd,mapear_modo_pago,extraer_info_personal,clasificar_confirmación_general,get_tiempo_recogida,clasificar_negacion_general,respuesta_transferencia,generar_mensaje_seleccion_sede
 from utils_database import execute_query
@@ -550,9 +551,12 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         #        log_message(f"Error generando/enviando link de pago: {e}", "ERROR")
         #        send_text_response(sender, "Hubo un problema generando el link de pago. Puedes intentar pagar en el local o probar otro método.")
         #        return
-        if medio_pago_real == "desconocido" or "":
+        elif medio_pago_real == "desconocido" or "":
             log_message(f"Medio de pago no reconocido '{respuesta_usuario}' seleccionado por {nombre_cliente} ({sender}) para el pedido {codigo_unico}.", "WARN")
             send_text_response(sender, f"Lo siento {nombre_cliente}, no reconocí el medio de pago que mencionaste. Por favor repitemelo, recuerda que solo aceptamos efectivo o datafono ambos contraentrega")
+        elif medio_pago_real == "Pendiente":
+            log_message(f"Medio de pago pendiente de clasificación para {nombre_cliente} ({sender}) con respuesta '{respuesta_usuario}' para el pedido {codigo_unico}.", "INFO")
+            send_text_response(sender, f"{nombre_cliente}, no estoy seguro de qué medio de pago prefieres. Por favor indícame si pagarás en efectivo o con datafono al momento de la entrega o recogida.")
     except Exception as e:
         log_message(f'Error en <SubflujoMedioPago>: {e}.', 'ERROR')
         raise e
@@ -1149,8 +1153,8 @@ def orquestador_subflujos(
 ) -> Any:
     """Activa el subflujo correspondiente según la intención detectada."""
     try:
-        #if not verify_hour_atettion_v2(sender):
-        #    return None
+        if not verify_hour_atettion_v2(sender):
+            return None
         log_message(f"Empieza <OrquestadorSubflujos> con sender {sender} y tipo {clasificacion_mensaje}", "INFO")
         set_id_sede(sender)
         msj_mismo_dia = obtener_respuestas_mismo_dia(sender)

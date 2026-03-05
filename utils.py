@@ -1054,7 +1054,7 @@ def actualizar_costos_y_tiempos_pedido(
         return {
             "actualizado": True,
             "idpedido": res[0],
-            "total_final": float(res[1])
+            "total_final": float(res[1] or 0) 
         }
 
     except Exception as e:

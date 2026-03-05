@@ -1817,7 +1817,7 @@ def solicitar_metodo_recogida(nombre: str, codigo_unico: str, nombre_local: str,
 Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
 Te llamas PAKO.
 
-El cliente {nombre} ya confirmó su pedido
+El cliente {nombre} ya confirmó que quiere pedir
 Este es el pedido que hizo:
 "{pedido_str}"
 
@@ -3290,36 +3290,79 @@ def extraer_resumen_corto(mensajes, telefono, id_restaurante):
 
         if isinstance(resumen_actual, str):
             resumen_actual = json.loads(resumen_actual)
-
+        mensajes=mensajes[-8:]
         # 2️⃣ Prompt híbrido (solo detectar cambios)
-        PROMPT = f"""
-        Analiza los siguientes mensajes recientes de un cliente de restaurante.
+        PROMPT = fPROMPT = f"""
+Analiza los mensajes recientes de un cliente de restaurante.
 
-        Perfil actual del cliente:
-        {json.dumps(resumen_actual, ensure_ascii=False)}
+Perfil actual:
+{json.dumps(resumen_actual, ensure_ascii=False)}
 
-        Mensajes recientes:
-        {mensajes}
+Mensajes:
+{mensajes}
 
-        Devuelve SOLO los campos que deban actualizarse.
-        Si no hay cambios, devuelve {{}}.
+Devuelve SOLO los campos que deban actualizarse.
+Si no hay cambios devuelve {{}}.
 
-        Estructura posible:
-        {{
-            "pedido_en_proceso": "",
-            "metodo_pago_seleccionado": "",
-            "direccion_confirmada": false,
-            "resumen_contextual": "",
-            "Importante": "",
-            "gusta": [],
-            "no_le_gusta": []
-        }}
+Estructura posible:
+{{
+  "pedido_en_proceso": "",
+  "metodo_pago_seleccionado": "",
+  "direccion_confirmada": false,
+  "resumen_contextual": "",
+  "Importante": "",
+  "gusta": [],
+  "no_le_gusta": []
+}}
 
-        Reglas:
-        - No inventes información.
-        - No repitas campos si no cambiaron.
-        - Devuelve únicamente JSON válido.
-        """
+Reglas importantes:
+
+1. PRODUCTOS
+- Usa SIEMPRE el nombre del producto como aparece en los mensajes del AGENTE.
+- Si el usuario usa una descripción distinta, normalízala al nombre usado por el agente.
+- Ejemplo:
+  usuario: "quiero una con doble tocineta"
+  agente: "Con Doble Tocineta"
+  salida correcta: "Con Doble Tocineta"
+
+2. PEDIDO EN PROCESO
+- Debe ser MUY corto.
+- Solo listar productos confirmados.
+- No incluir historia ni explicaciones.
+
+Ejemplo correcto:
+"pedido_en_proceso": "Con Doble Tocineta, Papas francesas, Coca Cola Zero"
+
+3. GUSTA
+- Solo productos que el cliente pidió o mostró preferencia.
+- Usar nombres del menú del agente.
+- No repetir productos que solo aparecen una vez si no reflejan preferencia.
+
+4. NO_LE_GUSTA
+- Solo ingredientes explícitamente rechazados.
+
+5. RESUMEN_CONTEXTUAL
+Debe ser extremadamente corto.
+Solo información relevante para futuras interacciones.
+
+Ejemplos:
+"Cliente recoge en sede Caobos"
+"Cliente fuera de área de domicilio"
+"Prefiere pago en efectivo"
+
+NO escribir párrafos.
+
+6. IMPORTANTE
+Solo usar si es información crítica.
+
+7. No inventar información.
+
+8. No repetir campos si no cambiaron.
+
+9. Respuestas muy cortas.
+
+Devuelve únicamente JSON válido.
+"""
 
         client = OpenAI()
 
