@@ -299,8 +299,6 @@ def subflujo_quejas(sender: str, nombre_cliente: str, contenido_usuario: str, ev
         query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
         result = execute_query(query, (get_id_sede(),))
         numero_admin = result[0][0] if result else os.getenv("NUMERO_ADMIN")
-        send_template_response(numero_admin, "evento_notificacion", variables_list,'es')
-        send_template_response(os.getenv("NUMERO_ADMIN"), "evento_notificacion", variables_list,'es')
         Juan="3026467575"
         send_template_response(Juan, "evento_notificacion", variables_list,'es')
         log_message('Registro de queja leve guardado correctamente.', 'INFO')
@@ -348,8 +346,6 @@ def subflujo_transferencia(sender: str, nombre_cliente: str, contenido_usuario: 
         query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
         result = execute_query(query, (get_id_sede(),))
         numero_admin = result[0][0] if result else os.getenv("NUMERO_ADMIN")
-        send_template_response(numero_admin, "evento_notificacion", variables_list,'es')
-        send_template_response(os.getenv("NUMERO_ADMIN"), "evento_notificacion", variables_list,'es')
         Juan="3026467575"
         send_template_response(Juan, "evento_notificacion", variables_list,'es')
         log_message('Registro de queja grave guardado correctamente.', 'INFO')
@@ -1153,7 +1149,7 @@ def orquestador_subflujos(
 ) -> Any:
     """Activa el subflujo correspondiente según la intención detectada."""
     try:
-        if not verify_hour_atettion_v2(sender):
+        if not verify_hour_atettion(sender):
             return None
         log_message(f"Empieza <OrquestadorSubflujos> con sender {sender} y tipo {clasificacion_mensaje}", "INFO")
         set_id_sede(sender)

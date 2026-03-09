@@ -22,8 +22,8 @@ def get_sender() -> Optional[str]:
 
 def set_id_sede(sender: str) -> None:
     try:
-        query = """SELECT id_sede FROM clientes_whatsapp WHERE telefono = %s LIMIT 1"""
-        result = execute_query(query, (sender,))
+        query = """SELECT id_sede FROM clientes_whatsapp WHERE telefono = %s and id_restaurante = %s LIMIT 1"""
+        result = execute_query(query, (sender, ID_RESTAURANTE))
         id_sede = result[0][0] if result else None
         print(f'ID sede obtenido: {id_sede}', 'INFO')
         _id_cliente_var.set(id_sede)
@@ -67,8 +67,9 @@ def actualizar_conversacion(mensaje, telefono,rol) -> str:
         true
     )
     WHERE telefono = %s
+    AND id_cliente = %s
     """
-    execute_query(query, (rol, mensaje, telefono))
+    execute_query(query, (rol, mensaje, telefono, ID_RESTAURANTE,))
     json_mensaje = Json({"rol": rol, "text": mensaje })
     return str(json_mensaje)    
 
@@ -78,24 +79,26 @@ def obtener_contexto_conversacion(telefono: str) -> list:
     WITH ultimos_mensajes AS (
         SELECT mensaje, idx
         FROM conversaciones,
-             jsonb_array_elements(conversacion->'mensajes') 
-             WITH ORDINALITY AS m(mensaje, idx)
+            jsonb_array_elements(conversacion->'mensajes') 
+            WITH ORDINALITY AS m(mensaje, idx)
         WHERE telefono = %s
+        AND id_restaurante = %s
         ORDER BY idx DESC
         LIMIT 5
     )
     SELECT 
         (SELECT fecha_mensaje 
-         FROM conversaciones 
-         WHERE telefono = %s
-         ORDER BY id_conversaciones DESC
-         LIMIT 1),
+        FROM conversaciones 
+        WHERE telefono = %s
+        AND id_restaurante = %s
+        ORDER BY id_conversaciones DESC
+        LIMIT 1),
         mensaje
     FROM ultimos_mensajes
     ORDER BY idx ASC;
     """
 
-    resultado = execute_query(query, (telefono, telefono))
+    resultado = execute_query(query, (telefono,ID_RESTAURANTE, telefono, ID_RESTAURANTE))
 
     if not resultado:
         return []
@@ -154,11 +157,12 @@ def obtener_x_respuestas(telefono: str, limite: int) -> str:
     FROM conversaciones,
          jsonb_array_elements(conversacion->'mensajes') WITH ORDINALITY AS m(mensaje, idx)
     WHERE telefono = %s
+      AND id_cliente = %s
     ORDER BY idx DESC
     LIMIT %s;
     """
 
-    mensajes  = execute_query(query, (telefono, limite))
+    mensajes  = execute_query(query, (telefono, ID_RESTAURANTE, limite))
     mensajes = list(reversed(mensajes))
 
     return mensajes

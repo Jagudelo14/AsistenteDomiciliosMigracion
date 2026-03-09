@@ -158,7 +158,10 @@ def handle_create_client(sender: str, datos: str, id_restaurante: str, es_tempor
     try:
         log_message(f'Datos recibidos para crear/actualizar cliente: {datos}', 'INFO')
         nombre = "Desconocido"
-        id_sede = 21  # Valor por defecto
+        if id_restaurante=="5":
+            id_sede = 21  # Valor por defecto
+        if id_restaurante=="9":
+            id_sede = 31  # Valor por defecto
         if datos is not None:
             nombre = datos
         logging.info(f'Nombre del cliente: {nombre}')
@@ -166,15 +169,14 @@ def handle_create_client(sender: str, datos: str, id_restaurante: str, es_tempor
         log_message(f'Nombre del cliente: {nombre}', 'INFO')
         log_message(f'Teléfono (sender): {sender}', 'INFO')
         execute_query("""
-            INSERT INTO clientes_whatsapp (nombre, telefono, id_restaurante, es_temporal,id_sede)
+            INSERT INTO clientes_whatsapp (nombre, telefono, id_restaurante, es_temporal, id_sede)
             VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (telefono)
+            ON CONFLICT (telefono, id_restaurante)
             DO UPDATE SET 
                 nombre = EXCLUDED.nombre,
                 es_temporal = EXCLUDED.es_temporal,
-                id_restaurante = EXCLUDED.id_restaurante,
                 id_sede = EXCLUDED.id_sede;
-        """, (nombre, sender, id_restaurante, es_temporal,id_sede))
+        """, (nombre, sender, id_restaurante, es_temporal, id_sede))
 
         log_message(f'Cliente creado o actualizado exitosamente.{nombre}', 'INFO')
         return nombre.split()[0]  # Retorna el primer nombre

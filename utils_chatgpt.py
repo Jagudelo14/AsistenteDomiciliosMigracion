@@ -78,6 +78,7 @@ INTENCIONES DISPONIBLES
 - esperando_confirmacion_pago
 - direccion
 - eleccion_sede
+- confirmar_pedido
 
 ----------------------------------------------------
 REGLAS DE CLASIFICACIÓN IMPORTANTES
@@ -2167,17 +2168,17 @@ def generar_mensaje_seleccion_sede(nombre_cliente: str,sender: str, model: str =
     """
     try:
         # Obtener id_sede más cercana y su info
-        query = """SELECT id_sede FROM clientes_whatsapp WHERE telefono = %s LIMIT 1"""
-        result = execute_query(query, (sender,))
+        query = """SELECT id_sede FROM clientes_whatsapp WHERE telefono = %s and id_restaurante = %s LIMIT 1"""
+        result = execute_query(query, (sender, ID_RESTAURANTE))
         id_sede_cercana = result[0][0] if result else None
 
-        query = """SELECT nombre, direccion FROM sedes WHERE id_sede = %s LIMIT 1"""
-        result = execute_query(query, (id_sede_cercana,))
+        query = """SELECT nombre, direccion FROM sedes WHERE id_sede = %s and id_restaurante = %s LIMIT 1"""
+        result = execute_query(query, (id_sede_cercana, ID_RESTAURANTE))
         sede_cercana = result[0] if result else ("", "")
 
         # Obtener todas las sedes
-        query = """SELECT nombre, direccion FROM sedes WHERE estado = true"""
-        result = execute_query(query)
+        query = """SELECT nombre, direccion FROM sedes WHERE estado = true and id_restaurante = %s"""
+        result = execute_query(query, (ID_RESTAURANTE,))
         sedes = [{"nombre": row[0], "direccion": row[1]} for row in result]
 
         # Formatear sedes para el prompt
@@ -2238,8 +2239,8 @@ def mapear_sede_cliente(texto_cliente: str):
     sedes = execute_query("""
         SELECT nombre, direccion, id_sede, latitud, longitud
         FROM sedes
-        where estado = true
-    """)
+        where estado = true and id_restaurante = %s
+    """, (ID_RESTAURANTE,))
 
     if not sedes:
         return {"error": "No se encontraron sedes en la base de datos."}
@@ -2460,8 +2461,8 @@ def direccion_bd(nombre_cliente: str, direccion_google: str, sender: str) -> str
     try:
         resultado=execute_query("""SELECT observaciones_dir 
                                    FROM clientes_whatsapp
-                                   WHERE telefono= %s
-                                   LIMIT 1""", (sender,))
+                                   WHERE telefono= %s and id_restaurante = %s
+                                   LIMIT 1""", (sender, ID_RESTAURANTE))
         indicaciones=resultado[0][0] if resultado and resultado[0] and resultado[0][0] else ""
         client = OpenAI()
         prompt = f"""
@@ -3192,10 +3193,11 @@ def obtener_respuestas_mismo_dia(telefono: str) -> list:
          jsonb_array_elements(conversacion->'mensajes') WITH ORDINALITY AS m(mensaje, idx)
     WHERE telefono = %s
       AND (mensaje->>'fecha')::timestamp::date = CURRENT_DATE
+      AND id_cliente=%s
     ORDER BY idx DESC
     """
 
-    mensajes = execute_query(query, (telefono,))
+    mensajes = execute_query(query, (telefono, ID_RESTAURANTE,))
 
     # execute_query devuelve lista de tuplas → extraemos primer elemento
     mensajes = [m[0] for m in mensajes]

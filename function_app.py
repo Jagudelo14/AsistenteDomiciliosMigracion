@@ -23,7 +23,7 @@ app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 # Constantes desde variables de entorno
 VERIFY_TOKEN: str = os.getenv("META_VERIFY_TOKEN") 
 ACCESS_TOKEN: str = os.getenv("WABA_TOKEN")
-ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "9")
 
 #PHONE_ID:str = os.getenv["PHONE_NUMBER_ID"] 
 
@@ -70,15 +70,16 @@ def _process_message(req: func.HttpRequest) -> func.HttpResponse:
         logging.info(f"Tipo de mensaje recibido: {tipo_general}")
         message_id = message["id"]
         mensaje = True
-        if validate_duplicated_message(message_id):
-             logging.info(f"Mensaje duplicado: {message_id}")
-             return func.HttpResponse("Mensaje duplicado", status_code=200)
+        #if validate_duplicated_message(message_id):
+        #     logging.info(f"Mensaje duplicado: {message_id}")
+        #     return func.HttpResponse("Mensaje duplicado", status_code=200)
         sender: str = message["from"]
         set_sender(sender)
         nombre_cliente: str
         ####################################
         ############ CLIENTE NUEVO  ############
         ####################################
+        print(ID_RESTAURANTE)
         if not get_client_database(sender, ID_RESTAURANTE):
             log_message("Cliente nuevo detectado", "INFO")
             datos: str = None
