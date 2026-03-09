@@ -48,7 +48,7 @@ from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiemp
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
 from utils_registration import validate_personal_data,save_personal_data_partial,check_and_mark_datos_personales
 
-ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "9")
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
 respuestas_no_relacionadas = [
     {
@@ -343,8 +343,8 @@ def subflujo_transferencia(sender: str, nombre_cliente: str, contenido_usuario: 
                 texto_limpio, # Contexto
                 respuesta_grave.get("resumen_ejecutivo") # Resumen
             ]
-        query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
-        result = execute_query(query, (get_id_sede(),))
+        query = """SELECT telefono FROM sedes WHERE id_sede = %s and id_restaurante = %s LIMIT 1"""
+        result = execute_query(query, (get_id_sede(), ID_RESTAURANTE))
         numero_admin = result[0][0] if result else os.getenv("NUMERO_ADMIN")
         Juan="3026467575"
         send_template_response(Juan, "evento_notificacion", variables_list,'es')
@@ -423,8 +423,8 @@ def subflujo_consulta_pedido(sender: str, nombre_cliente: str, contenido_usuario
                 texto_limpio, # Contexto
                 respuesta_grave.get("resumen_ejecutivo") # Resumen
             ]
-        query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
-        result = execute_query(query, (get_id_sede(),))
+        query = """SELECT telefono FROM sedes WHERE id_sede = %s and id_restaurante = %s LIMIT 1"""
+        result = execute_query(query, (get_id_sede(), ID_RESTAURANTE))
         numero_admin = result[0][0] if result else os.getenv("NUMERO_ADMIN")
         send_template_response(numero_admin, "evento_notificacion", variables_list,'es')
         send_template_response(os.getenv("NUMERO_ADMIN"), "evento_notificacion", variables_list,'es')
@@ -461,8 +461,9 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         if medio_pago_real and medio_pago_real != "desconocido":
             query="""UPDATE pedidos
                         SET metodo_pago = %s
-                        WHERE codigo_unico = %s;"""
-            result= execute_query(query,(medio_pago_real,codigo_unico))
+                        WHERE codigo_unico = %s;
+                        AND idcliente = %s"""
+            result= execute_query(query,(medio_pago_real,codigo_unico,ID_RESTAURANTE))
         if not validate_personal_data(sender,ID_RESTAURANTE):
             datos = extraer_info_personal(mensaje)
             # datos es dict con keys: tipo_documento, numero_documento, email
@@ -489,8 +490,9 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         if medio_pago_real == "desconocido":
             query="""SELECT metodo_pago
                     fROM pedidos
-                    wHERE codigo_unico=%s;"""
-            result= execute_query(query,(codigo_unico,))
+                    wHERE codigo_unico=%s;
+                    and idcliente = %s"""
+            result= execute_query(query,(codigo_unico, ID_RESTAURANTE))
             medio_pago_real=result[0][0] if result else "desconocido"
         #datos_actualizados: dict = actualizar_medio_pago(sender, codigo_unico, medio_pago_real)  # noqa: F841
         dict_registro_temp: dict = obtener_pedido_por_codigo(codigo_unico)
@@ -719,16 +721,16 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
                                     params = (item.get("matched").get("id"), id_pedido, item.get("cantidad"), (item.get("matched").get("price") * item.get("cantidad", 1)), especificaciones_txt )
                                     res_detalle = execute_query(query, params)
                     case "REESCRIBIR_PEDIDO":
-                        query = """SELECT idpedido FROM pedidos WHERE codigo_unico = %s"""
-                        params = (codigo_unico,)
+                        query = """SELECT idpedido FROM pedidos WHERE codigo_unico = %s and idcliente = %s"""
+                        params = (codigo_unico, ID_RESTAURANTE)
                         res_pedido = execute_query(query, params, fetchone=True)
                         if res_pedido:
                             id_pedido = res_pedido[0]
-                            query = """DELETE FROM detalle_pedido WHERE id_pedido = %s"""
-                            params = (id_pedido,)
+                            query = """DELETE FROM detalle_pedido WHERE id_pedido = %s and idcliente = %s"""
+                            params = (id_pedido, ID_RESTAURANTE)
                             execute_query(query, params)
-                            query = """DELETE FROM pedidos WHERE idpedido = %s"""
-                            params = (id_pedido,)
+                            query = """DELETE FROM pedidos WHERE idpedido = %s and idcliente = %s"""
+                            params = (id_pedido, ID_RESTAURANTE)
                             execute_query(query, params)
                             subflujo_solicitud_pedido(sender, pregunta_usuario, entidades_text, codigo_unico)
                             return
@@ -870,23 +872,32 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
     try:
         log_message("Empieza subflujo eleccion sede", "INFO")
         query_pendientes = """
-                    SELECT d.id_pedido,i.nombre,d.cantidad,i.precio,d.total,d.especificaciones, p.codigo_unico
-                        FROM detalle_pedido d
-                        INNER JOIN pedidos p 
-                            ON d.id_pedido = p.idpedido
-                        INNER JOIN items i 
-                            ON i.iditem = d.id_producto
-                        WHERE p.codigo_unico = (
-                            SELECT p2.codigo_unico
-                            FROM pedidos p2
-                            INNER JOIN clientes_whatsapp cw 
-                                ON p2.id_whatsapp = cw.id_whatsapp
-                            WHERE cw.telefono = %s and p.estado = 'pendiente' and p.es_temporal = true
-                            ORDER BY p2.idpedido DESC
-                            LIMIT 1
-                        );
+                                SELECT d.id_pedido,
+                                    i.nombre,
+                                    d.cantidad,
+                                    i.precio,
+                                    d.total,
+                                    d.especificaciones,
+                                    p.codigo_unico
+                                FROM detalle_pedido d
+                                INNER JOIN pedidos p 
+                                    ON d.id_pedido = p.idpedido
+                                INNER JOIN items i 
+                                    ON i.iditem = d.id_producto
+                                WHERE p.codigo_unico = (
+                                    SELECT p2.codigo_unico
+                                    FROM pedidos p2
+                                    INNER JOIN clientes_whatsapp cw 
+                                        ON p2.id_whatsapp = cw.id_whatsapp
+                                    WHERE cw.telefono = %s
+                                    AND p2.idcliente = %s
+                                    AND p2.estado = 'pendiente'
+                                    AND p2.es_temporal = true
+                                    ORDER BY p2.idpedido DESC
+                                    LIMIT 1
+                                );
             """
-        result = execute_query(query_pendientes, (sender,))
+        result = execute_query(query_pendientes, (sender, ID_RESTAURANTE))
         log_message(f"[SubflujoEleccionSede] Resultado consulta pedidos pendientes para {sender}: {result}", "INFO")
         codigo_unico = result[0][6] if result else 0
         #MODIFICACION TEMPORAL SOLO UNA SEDE
@@ -930,7 +941,8 @@ def subflujo_verificación_pago(sender: str, nombre_cliente: str, respuesta_usua
         query="""
             SELECT id_pago
             FROM public.pedidos
-            WHERE codigo_unico = %s;"""
+            WHERE codigo_unico = %s
+            and id_restaurante = %s;"""
         params=(codigo_unico,)
         order_row = execute_query(query, params, fetchone=True)
         log_message(f"[SubflujoVerificacionPago] Resultado consulta id_pago para codigo_unico {codigo_unico}: {order_row}", "INFO")
@@ -1149,12 +1161,13 @@ def orquestador_subflujos(
 ) -> Any:
     """Activa el subflujo correspondiente según la intención detectada."""
     try:
-        if not verify_hour_atettion(sender):
+        set_id_sede(sender)
+        id_sede=get_id_sede()
+        if not verify_hour_atettion(sender, id_sede):
             return None
         log_message(f"Empieza <OrquestadorSubflujos> con sender {sender} y tipo {clasificacion_mensaje}", "INFO")
-        set_id_sede(sender)
-        msj_mismo_dia = obtener_respuestas_mismo_dia(sender)
-        extraer_resumen_corto(msj_mismo_dia, sender, ID_RESTAURANTE)
+        #msj_mismo_dia = obtener_respuestas_mismo_dia(sender)
+        #extraer_resumen_corto(msj_mismo_dia, sender, ID_RESTAURANTE)
         clasificacion_mensaje = clasificacion_mensaje.strip().lower()
         if manejar_paso_activo_simple(sender, nombre_cliente, pregunta_usuario, clasificacion_mensaje):
             return True
@@ -1167,23 +1180,32 @@ def orquestador_subflujos(
             try:
                 # Verificar si existen pedidos pendientes
                 query_pendientes = """
-                        SELECT d.id_pedido,i.nombre,d.cantidad,i.precio,d.total,d.especificaciones, p.codigo_unico
-                            FROM detalle_pedido d
-                            INNER JOIN pedidos p 
-                                ON d.id_pedido = p.idpedido
-                            INNER JOIN items i 
-                                ON i.iditem = d.id_producto
-                            WHERE p.codigo_unico = (
-                                SELECT p2.codigo_unico
-                                FROM pedidos p2
-                                INNER JOIN clientes_whatsapp cw 
-                                    ON p2.id_whatsapp = cw.id_whatsapp
-                                WHERE cw.telefono = %s and p.estado = 'pendiente' and p.es_temporal = true
-                                ORDER BY p2.idpedido DESC
-                                LIMIT 1
-                            );
+                                    SELECT d.id_pedido,
+                                        i.nombre,
+                                        d.cantidad,
+                                        i.precio,
+                                        d.total,
+                                        d.especificaciones,
+                                        p.codigo_unico
+                                    FROM detalle_pedido d
+                                    INNER JOIN pedidos p 
+                                        ON d.id_pedido = p.idpedido
+                                    INNER JOIN items i 
+                                        ON i.iditem = d.id_producto
+                                    WHERE p.codigo_unico = (
+                                        SELECT p2.codigo_unico
+                                        FROM pedidos p2
+                                        INNER JOIN clientes_whatsapp cw 
+                                            ON p2.id_whatsapp = cw.id_whatsapp
+                                        WHERE cw.telefono = %s
+                                        AND p2.idcliente = %s
+                                        AND p2.estado = 'pendiente'
+                                        AND p2.es_temporal = true
+                                        ORDER BY p2.idpedido DESC
+                                        LIMIT 1
+                                    );
                 """
-                result = execute_query(query_pendientes, (sender,))
+                result = execute_query(query_pendientes, (sender, ID_RESTAURANTE))
                 codigo_unico = result[0][6] if result else 0
                 if codigo_unico != 0:
                     subflujo_modificacion_pedido(sender, nombre_cliente, pregunta_usuario,entidades_text)
@@ -1262,12 +1284,12 @@ def orquestador_subflujos(
                                 FROM pedidos p2
                                 INNER JOIN clientes_whatsapp cw 
                                     ON p2.id_whatsapp = cw.id_whatsapp
-                                WHERE cw.telefono = %s and p.estado = 'pendiente' and p.es_temporal = true
+                                WHERE cw.telefono = %s and p.estado = 'pendiente' and p.es_temporal = true and p2.idcliente = %s
                                 ORDER BY p2.idpedido DESC
                                 LIMIT 1
                             );
                 """
-                result = execute_query(query_pendientes, (sender,))
+                result = execute_query(query_pendientes, (sender, ID_RESTAURANTE))
                 codigo_unico = result[0][6] if result else 0
                 if codigo_unico != 0:
                     subflujo_confirmar_direccion(sender, nombre_cliente)

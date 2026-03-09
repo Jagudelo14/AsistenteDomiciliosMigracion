@@ -18,6 +18,7 @@ import requests
 import difflib
 from utils_contexto import get_sender,actualizar_conversacion,get_id_sede
 
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "9")
 
 def register_log(mensaje: str, tipo: str, ambiente: str = "Whatsapp", idusuario: int = 1, archivoPy: str = "", function_name: str = "",line_number: int = 0) -> None:
     try:
@@ -295,22 +296,23 @@ def guardar_intencion_futura(telefono: str, intencion_futura: str, observaciones
     try:
 
         query = """
-            INSERT INTO clasificacion_intenciones_futuras 
-            (telefono, intencion_futura, fecha_actualizacion, observaciones, mensaje_chatbot, mensaje_usuario, datos_promocion)
-            VALUES (%s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s::jsonb)
-            ON CONFLICT (telefono)
-            DO UPDATE SET
-                intencion_futura = EXCLUDED.intencion_futura,
-                fecha_actualizacion = CURRENT_TIMESTAMP,
-                observaciones = EXCLUDED.observaciones,
-                mensaje_chatbot = EXCLUDED.mensaje_chatbot,
-                mensaje_usuario = EXCLUDED.mensaje_usuario,
-                datos_promocion = EXCLUDED.datos_promocion;
+                INSERT INTO clasificacion_intenciones_futuras 
+                (telefono, id_restaurante, intencion_futura, fecha_actualizacion, observaciones, mensaje_chatbot, mensaje_usuario, datos_promocion)
+                VALUES (%s, %s, %s, CURRENT_TIMESTAMP, %s, %s, %s, %s::jsonb)
+                ON CONFLICT (telefono, id_restaurante)
+                DO UPDATE SET
+                    intencion_futura = EXCLUDED.intencion_futura,
+                    fecha_actualizacion = CURRENT_TIMESTAMP,
+                    observaciones = EXCLUDED.observaciones,
+                    mensaje_chatbot = EXCLUDED.mensaje_chatbot,
+                    mensaje_usuario = EXCLUDED.mensaje_usuario,
+                    datos_promocion = EXCLUDED.datos_promocion;
         """
         execute_query(
             query,
             (
                 telefono,
+                ID_RESTAURANTE,
                 intencion_futura,
                 observaciones,
                 mensaje_chatbot,
@@ -333,10 +335,11 @@ def obtener_intencion_futura(telefono: str) -> str:
             SELECT intencion_futura
             FROM public.clasificacion_intenciones_futuras
             WHERE telefono = %s
+            AND id_restaurante = %s
             ORDER BY telefono ASC
             LIMIT 1;
         """
-        resultado = execute_query(query, (telefono,), fetchone=True)
+        resultado = execute_query(query, (telefono, ID_RESTAURANTE), fetchone=True)
         log_message(f"Intención futura obtenida para {telefono}: {resultado}", "INFO")
         if resultado:
             return resultado[0]
@@ -356,9 +359,10 @@ def borrar_intencion_futura(telefono: str) -> bool:
     try:
         query = """
             DELETE FROM public.clasificacion_intenciones_futuras
-            WHERE telefono = %s;
+            WHERE telefono = %s
+            AND id_restaurante = %s;
         """
-        filas_afectadas = execute_query(query, (telefono,))
+        filas_afectadas = execute_query(query, (telefono, ID_RESTAURANTE))
         log_message(f"Registro eliminado para {telefono}, filas afectadas: {filas_afectadas}", "INFO")
         return bool(filas_afectadas)
     except Exception as e:
@@ -383,9 +387,10 @@ def obtener_menu() -> list[dict[str, Any]]:
             WHERE i.estado = true
                 AND d.disponible = true
                 AND d.id_sede = %s
+                AND i.idcliente = %s
             ORDER BY i.tipo_comida, i.nombre;
         """
-        items_data = execute_query(query, (id_sede,))
+        items_data = execute_query(query, (id_sede, ID_RESTAURANTE))
         items = [
             {   
                 "iditem": row[0],
@@ -408,8 +413,8 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
     try:
         """ Guarda un pedido completo en la BD y retorna: { "idpedido": X, "codigo_unico": "P-00015" } """
         # ------------------------------- # 1. Obtener id_whatsapp # -------------------------------
-        q_idw = "SELECT * FROM clientes_whatsapp WHERE telefono = %s"
-        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        q_idw = "SELECT * FROM clientes_whatsapp WHERE telefono = %s AND id_restaurante = %s LIMIT 1;"
+        res_idw = execute_query(q_idw, (sender, ID_RESTAURANTE), fetchone=True)
         log_message(f"[GuardarPedidoCompleto] Resultado consulta id_whatsapp: {res_idw}", "INFO")
         id_whatsapp = res_idw[0] if res_idw else None
         idsede = res_idw[11] if res_idw else 17
@@ -419,12 +424,12 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
             direccion= direccion + (" | " + observaciones if observaciones else "")
         logging.info(f"[GuardarPedidoCompleto] id_whatsapp para {sender}: {id_whatsapp}")
         # ------------------------------- # 2. Determinar si es persona nueva # -------------------------------
-        q_prev = "SELECT COUNT(*) FROM pedidos WHERE id_whatsapp = %s"
-        res_prev = execute_query(q_prev, (id_whatsapp,), fetchone=True)
+        q_prev = "SELECT COUNT(*) FROM pedidos WHERE id_whatsapp = %s AND idcliente = %s"
+        res_prev = execute_query(q_prev, (id_whatsapp, ID_RESTAURANTE), fetchone=True)
         persona_nuevo = (res_prev[0] == 0)
         # ------------------------------- # 3. Obtener último código único # -------------------------------
-        q_last_code = "SELECT codigo_unico FROM pedidos ORDER BY idpedido DESC LIMIT 1"
-        res_last_code = execute_query(q_last_code, fetchone=True)
+        q_last_code = "SELECT codigo_unico FROM pedidos WHERE idcliente = %s ORDER BY idpedido DESC LIMIT 1"
+        res_last_code = execute_query(q_last_code, (ID_RESTAURANTE,), fetchone=True)
         if res_last_code: 
             last_code = res_last_code[0] # Ej: "P-00042"
             num = int(last_code.split("-")[1])
@@ -536,10 +541,11 @@ def obtener_intencion_futura_observaciones(telefono: str) -> str:
             SELECT observaciones
             FROM public.clasificacion_intenciones_futuras
             WHERE telefono = %s
+            AND id_restaurante = %s
             ORDER BY telefono ASC
             LIMIT 1;
         """
-        resultado = execute_query(query, (telefono,), fetchone=True)
+        resultado = execute_query(query, (telefono, ID_RESTAURANTE), fetchone=True)
         log_message(f"Intención futura - observaciones obtenida para {telefono}: {resultado}", "INFO")
         if resultado:
             return resultado[0]
@@ -559,10 +565,11 @@ def obtener_intencion_futura_mensaje_chatbot(telefono: str) -> str:
             SELECT mensaje_chatbot
             FROM public.clasificacion_intenciones_futuras
             WHERE telefono = %s
+            AND id_restaurante = %s
             ORDER BY telefono ASC
             LIMIT 1;
         """
-        resultado = execute_query(query, (telefono,), fetchone=True)
+        resultado = execute_query(query, (telefono,ID_RESTAURANTE), fetchone=True)
         log_message(f"Intención futura - mensaje_chatbot obtenida para {telefono}: {resultado}", "INFO")
         if resultado:
             return resultado[0]
@@ -595,8 +602,8 @@ def _price_of_item(it: Dict) -> float:
 def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
     """Marca es_temporal = FALSE en el pedido del cliente."""
     try:
-        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
-        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s AND id_restaurante = %s LIMIT 1;"
+        res_idw = execute_query(q_idw, (sender, ID_RESTAURANTE), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
 
         if id_whatsapp is None:
@@ -628,8 +635,8 @@ def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
                 )
             except Exception as e:
                 log_message(f'Error enviando webhook_nuevo_pedido: {e}', 'ERROR')
-        query = """SELECT telefono FROM sedes WHERE id_sede = %s LIMIT 1"""
-        result = execute_query(query, (get_id_sede(),))
+        query = """SELECT telefono FROM sedes WHERE id_sede = %s AND id_restaurante = %s LIMIT 1"""
+        result = execute_query(query, (get_id_sede(), ID_RESTAURANTE ), fetchone=True)
         numero_admin = result[0][0] 
         send_template_response_util(numero_admin, "confirmacion", codigo_unico)
         send_template_response_util(os.getenv("NUMERO_ADMIN"), "confirmacion", codigo_unico)
@@ -657,8 +664,8 @@ def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
 def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
     """MARCA UN PEDIDO COMO TRUE EN ES_TEMPORAL Y RETORNA INFO DEL PEDIDO ACTUALIZADO."""
     try:
-        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
-        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s AND id_restaurante = %s LIMIT 1;"
+        res_idw = execute_query(q_idw, (sender, ID_RESTAURANTE), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
 
         if id_whatsapp is None:
@@ -693,8 +700,8 @@ def marcar_pedido_como_definitivo(sender: str, codigo_unico: str) -> dict:
     
 def obtener_pedido_por_codigo_orignal(sender: str, codigo_unico: str) -> dict:
     try:
-        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
-        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s AND id_restaurante = %s LIMIT 1;"
+        res_idw = execute_query(q_idw, (sender, ID_RESTAURANTE), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
 
         if id_whatsapp is None:
@@ -808,10 +815,11 @@ def actualizar_total_productos(sender: str, codigo_unico: str, nuevo_total: floa
                     SELECT id_whatsapp
                     FROM clientes_whatsapp
                     WHERE telefono = %s
+                    AND id_restaurante = %s
                 )
             RETURNING idpedido, total_productos, id_promocion;
         """
-        params = (nuevo_total, codigo_unico, sender)
+        params = (nuevo_total, codigo_unico, sender, ID_RESTAURANTE)
         #res_promo = execute_query(query, params, fetchone=True)
         query = """
             UPDATE pedidos
@@ -821,10 +829,11 @@ def actualizar_total_productos(sender: str, codigo_unico: str, nuevo_total: floa
                     SELECT id_whatsapp
                     FROM clientes_whatsapp
                     WHERE telefono = %s
+                    AND id_restaurante = %s
                 )
             RETURNING idpedido, total_productos, id_promocion;
         """
-        params = (nuevo_total, codigo_unico, sender)
+        params = (nuevo_total, codigo_unico, sender, ID_RESTAURANTE)
         res = execute_query(query, params, fetchone=True)
         if not res:
             return {
@@ -958,8 +967,8 @@ def obtener_pedido_pendiente_reciente(sender: str) -> dict:
     """
     try:
         # 1. Obtener id_whatsapp
-        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
-        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s AND id_restaurante = %s LIMIT 1;"
+        res_idw = execute_query(q_idw, (sender, ID_RESTAURANTE), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
 
         if id_whatsapp is None:
@@ -976,11 +985,12 @@ def obtener_pedido_pendiente_reciente(sender: str) -> dict:
               AND es_temporal = FALSE
               AND estado = 'Pendiente'
               AND fecha >= NOW() - INTERVAL '1 hour'
+              AND id_restaurante = %s
             ORDER BY fecha DESC
             LIMIT 1;
         """
 
-        res = execute_query(query, (id_whatsapp,), fetchone=True)
+        res = execute_query(query, (id_whatsapp, ID_RESTAURANTE), fetchone=True)
 
         if not res:
             return {
@@ -1013,8 +1023,8 @@ def actualizar_costos_y_tiempos_pedido(
     """
     try:
         # 1. Obtener id_whatsapp
-        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
-        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s AND id_restaurante = %s LIMIT 1;"
+        res_idw = execute_query(q_idw, (sender, ID_RESTAURANTE), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
 
         if id_whatsapp is None:
@@ -1078,7 +1088,9 @@ def obtener_promociones_activas() -> list:
             WHERE fecha_inicio <= NOW()
               AND fecha_fin > NOW()
               AND estado = 'true';
+              AND id_restaurante = %s
             """,
+            (ID_RESTAURANTE,),
             fetchone=False,
             return_columns=True
         )
@@ -1377,8 +1389,8 @@ def extraer_ultimo_mensaje(mensaje: str) -> str:
 
 def actualizar_medio_entrega(sender: str, codigo_unico: str, metodo_entrega: str) -> dict:
     try:
-        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
-        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s AND id_restaurante = %s LIMIT 1;"
+        res_idw = execute_query(q_idw, (sender, ID_RESTAURANTE), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
 
         if id_whatsapp is None:
@@ -1586,10 +1598,11 @@ def obtener_nombre_sede(sender: str) -> str | None:
             FROM public.clientes_whatsapp cw
             LEFT JOIN public.sedes s 
                 ON cw.id_sede = s.id_sede
-            WHERE cw.telefono = %s;
+            WHERE cw.telefono = %s
+            AND cw.id_restaurante = %s;
         """
 
-        resultado = execute_query(query, (sender,), fetchone=True)
+        resultado = execute_query(query, (sender, ID_RESTAURANTE), fetchone=True)
 
         if resultado:
             return resultado[0]  
@@ -1629,3 +1642,31 @@ def contiene_preferencias(texto: str) -> bool:
             return True
 
     return False
+
+def calcular_costo_openai(response, model):
+    usage = response.usage
+    if usage is None:
+        return None
+
+    prompt_tokens = usage.prompt_tokens
+    completion_tokens = usage.completion_tokens
+
+    precios = {
+        "gpt-4o": {"input": 2.5, "output": 10},
+        "gpt-5.1": {"input": 1.25, "output": 10},
+        "gpt-4.1-mini": {"input": 0.4, "output": 1.6},
+        "gpt-4o-mini": {"input": 0.15, "output": 0.6},
+    }
+
+    if model not in precios:
+        return None
+
+    precio_input = precios[model]["input"]
+    precio_output = precios[model]["output"]
+
+    costo_input = (prompt_tokens / 1_000_000) * precio_input
+    costo_output = (completion_tokens / 1_000_000) * precio_output
+
+    total = costo_input + costo_output
+
+    return total

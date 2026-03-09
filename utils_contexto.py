@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo   
 import json
 
-ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "9")
 
 _sender_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("sender", default=None)
 _id_cliente_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("id_cliente", default=None)
@@ -82,7 +82,7 @@ def obtener_contexto_conversacion(telefono: str) -> list:
             jsonb_array_elements(conversacion->'mensajes') 
             WITH ORDINALITY AS m(mensaje, idx)
         WHERE telefono = %s
-        AND id_restaurante = %s
+        AND id_cliente = %s
         ORDER BY idx DESC
         LIMIT 5
     )
@@ -90,7 +90,7 @@ def obtener_contexto_conversacion(telefono: str) -> list:
         (SELECT fecha_mensaje 
         FROM conversaciones 
         WHERE telefono = %s
-        AND id_restaurante = %s
+        AND id_cliente = %s
         ORDER BY id_conversaciones DESC
         LIMIT 1),
         mensaje
@@ -113,19 +113,21 @@ def obtener_contexto_conversacion(telefono: str) -> list:
         update_query = """
         UPDATE conversaciones 
         SET fecha_mensaje = NOW()
-        WHERE telefono = %s;
+        WHERE telefono = %s
+        AND id_restaurante = %s;
 
         UPDATE historico_conversaciones 
         SET ultimo_mensaje = NOW(), cantidad_mensajes = 1
         WHERE ultimo_mensaje IS NULL 
-        AND telefono = %s;
+        AND telefono = %s
+        AND id_restaurante = %s;
 
         INSERT INTO historico_conversaciones 
         (telefono, primer_mensaje, id_cliente) 
-        VALUES (%s, NOW(), 3);
+        VALUES (%s, NOW(), %s);
         """
 
-        execute_query(update_query, (telefono, telefono, telefono))
+        execute_query(update_query, (telefono, ID_RESTAURANTE, telefono, ID_RESTAURANTE, telefono, ID_RESTAURANTE))
         query = """
         UPDATE clientes_whatsapp
         SET resumen = %s::jsonb

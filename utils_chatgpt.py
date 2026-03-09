@@ -7,13 +7,13 @@ import logging
 from typing import Any,  Optional, Tuple, Dict
 import os
 import json
-from utils import send_text_response, limpiar_respuesta_json, log_message, to_json_safe,corregir_total_price_en_result
+from utils import calcular_costo_openai, send_text_response, limpiar_respuesta_json, log_message, to_json_safe,corregir_total_price_en_result
 from utils_database import execute_query
 from datetime import datetime, date
 from utils_registration import validate_personal_data
 from psycopg2.extras import Json
 
-ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "9")
 
 def get_openai_key() -> str:
     try:
@@ -198,6 +198,8 @@ Responde solo JSON válido."""
             temperature=0
         )
         tokens_used = _extract_total_tokens(respuesta)
+        costo=calcular_costo_openai(respuesta,"gpt-4.1-mini")
+        log_message(f"[OpenAI] get_classifier costo={costo:.6f}","DEBUG")
         if tokens_used is not None:
             log_message(f"[OpenAI] get_classifier tokens_used={tokens_used}", "DEBUG")
         raw_response: str = respuesta.choices[0].message.content.strip()
@@ -285,6 +287,8 @@ def clasificar_pregunta_menu_chatgpt(pregunta_usuario: str, items, model: str = 
             text_output = _clean_model_output(text_output)
         except Exception:
             pass
+        costo=calcular_costo_openai(response,"gpt-4o")
+        log_message(f"[OpenAI] clasificar pregunta menu chatgpt costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] clasificar_pregunta_menu_chatgpt tokens_used={tokens_used}", "DEBUG")
@@ -401,6 +405,8 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
         if result_direccion and len(result_direccion) > 0:
             direccion = result_direccion[0][0]
     # Prompt unificado
+    msj_mismo_dia = obtener_respuestas_mismo_dia(sender)
+    extraer_resumen_corto(msj_mismo_dia, sender, ID_RESTAURANTE)
     resumen=obtener_resumen(sender)
     if resumen is None:
         resumen = {}
@@ -508,6 +514,8 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
             model=model,
             input=prompt
         )
+        costo=calcular_costo_openai(response,"gpt-4o")
+        log_message(f"[OpenAI] responder_pregunta_menu_chatgpt costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] responder_pregunta_menu_chatgpt tokens_used={tokens_used}", "DEBUG")
@@ -809,6 +817,8 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list,sender:
         )
         
         text_output = response.output[0].content[0].text.strip()
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] mapear_pedido_Al_menu costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] mapear_pedido tokens_used={tokens_used}", "DEBUG")
@@ -897,6 +907,8 @@ def saludo_dynamic(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict
         )
 
         raw = response.choices[0].message.content.strip()
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] saludo dynamic costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] saludo_dynamic tokens_used={tokens_used}", "DEBUG")
@@ -984,7 +996,7 @@ def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) ->
             nombre=nombre
         )
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1-mini",
             messages=[
                 {
                     "role": "system",
@@ -999,6 +1011,8 @@ def respuesta_quejas_ia(mensaje_usuario: str, nombre: str, nombre_local: str) ->
             temperature=0.6
         )
         raw = response.choices[0].message.content.strip()
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] respuesta quejas ia costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] respuesta_quejas tokens_used={tokens_used}", "DEBUG")
@@ -1068,7 +1082,7 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
             nombre=nombre
         )
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": "Eres un generador de respuestas para quejas graves de clientes."},
                 {"role": "user", "content": prompt}
@@ -1077,6 +1091,8 @@ def respuesta_quejas_graves_ia(mensaje_usuario: str, nombre: str, nombre_local: 
             temperature=0.6
         )
         raw = response.choices[0].message.content.strip()
+        costo=calcular_costo_openai(response,"gpt-4.1-mini")
+        log_message(f"[OpenAI] respuesta_quejas_graves_ia costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] respuesta_quejas_graves_ia tokens_used={tokens_used}", "DEBUG")
@@ -1157,6 +1173,9 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             temperature=0.2
         )
         raw = response.choices[0].message.content
+
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] solicitar medio pago costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] pedido_incompleto_dynamic tokens_used={tokens_used}", "DEBUG")
@@ -1182,7 +1201,7 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
 
 def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str,sender: str) -> dict:
     try:
-        if not validate_personal_data(sender,os.environ.get("ID_RESTAURANTE", "5")):
+        if not validate_personal_data(sender,os.environ.get("ID_RESTAURANTE", "9")):
             PROMPT_MEDIOS_PAGO = f"""
 El cliente {nombre} ha confirmado que quiere pedir pero aun no confirma su pedido.
 
@@ -1253,6 +1272,8 @@ Estructura final:
     
         raw_text = response.choices[0].message.content
         log_message(f"Respuesta cruda:{raw_text}","INFO")
+        costo=calcular_costo_openai(response,"gpt-4o-mini")
+        log_message(f"[OpenAI] solicitarmedio pago costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] solicitar_medio_pago tokens_used={tokens_used}", "DEBUG")
@@ -1363,6 +1384,8 @@ def enviar_menu_digital(nombre: str, nombre_local: str, menu, promociones_list: 
             temperature=0.95
         )
         raw = response.choices[0].message.content.strip()
+        costo=calcular_costo_openai(response,"gpt-4.1-mini")
+        log_message(f"[OpenAI] enviar_menu_digital costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] enviar_menu_digital tokens_used={tokens_used}", "DEBUG")
@@ -1501,6 +1524,8 @@ def responder_sobre_promociones(nombre: str, nombre_local: str, promociones_info
         )
 
         raw = response.choices[0].message.content.strip()
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] responder sobre promociones_ia costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] responder_sobre_promociones tokens_used={tokens_used}", "DEBUG")
@@ -1571,6 +1596,8 @@ def interpretar_eleccion_promocion(pregunta_usuario: str, info_promociones_str: 
     )
     try:
         raw = response.output_text   
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] interpretar_eleccion_promocion costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] interpretar_eleccion_promocion tokens_used={tokens_used}", "DEBUG")
@@ -1691,6 +1718,8 @@ def pedido_incompleto_dynamic_promocion(mensaje_usuario: str, promociones_lst: s
             temperature=0.8
         )
         raw = response.choices[0].message.content.strip()
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] pedido incompleto dynamic costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] pedido_incompleto_dynamic_promocion tokens_used={tokens_used}", "DEBUG")
@@ -1745,12 +1774,14 @@ def mapear_modo_pago(respuesta_usuario: str) -> str:
 
         prompt = PROMPT_MAPEO_PAGO 
         response = client.responses.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1-mini",
             input=prompt,
             max_output_tokens=60,
             temperature=0
         )
         raw = response.output_text
+        costo=calcular_costo_openai(response,"gpt-4.1-mini")
+        log_message(f"[OpenAI] mapear_modo_pago costo={costo:.6f}","DEBUG")
         log_message(f'Raw response de <mapear_modo_pago>: {raw}', 'DEBUG')
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
@@ -1849,6 +1880,8 @@ FORMATO ESTRICTO:
         )
 
         raw = response.choices[0].message.content
+        costo=calcular_costo_openai(response,"gpt-4o-mini")
+        log_message(f"[OpenAI] solicitar_metodo_recogida costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] solicitar_metodo_recogida tokens_used={tokens_used}", "DEBUG")
@@ -2000,6 +2033,8 @@ REGLAS:
         log_message(f'prompt: {prompt}', 'DEBUG')
         raw = response.output[0].content[0].text.strip()
         tokens_used = _extract_total_tokens(response)
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] generar_mensaje_confirmacion_modificacion_pedido costo={costo:.6f}","DEBUG")
         if tokens_used is not None:
             log_message(f"[OpenAI] generar_mensaje_confirmacion_modificacion_pedido tokens_used={tokens_used}", "DEBUG")
         clean = raw
@@ -2076,6 +2111,8 @@ def solicitar_confirmacion_direccion(cliente_nombre: str, sede_info: dict) -> di
         )
         print
         raw = response.choices[0].message.content.strip()
+        costo=calcular_costo_openai(response,"gpt-4o-mini")
+        log_message(f"[OpenAI] respuesta_quejas_graves_ia costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] solicitar_confirmacion_direccion tokens_used={tokens_used}", "DEBUG")
@@ -2152,6 +2189,8 @@ Instrucciones del mensaje:
             max_tokens=200,
             temperature=0.5
         )
+        costo=calcular_costo_openai(response,"gpt-4o-mini")
+        log_message(f"[OpenAI] respuesta_quejas_graves_ia costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] generar_mensaje_invitar_pago tokens_used={tokens_used}", "DEBUG")
@@ -2216,10 +2255,12 @@ Instrucciones:
                 {"role": "system", "content": "Eres un asistente experto redactando mensajes conversacionales."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=200,
+            #max_tokens=200,
             temperature=0.7
         )
         print(prompt)
+        costo=calcular_costo_openai(response,"gpt-4o-mini")
+        log_message(f"[OpenAI] respuesta_quejas_graves_ia costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] generar_mensaje_seleccion_sede tokens_used={tokens_used}", "DEBUG")
@@ -2285,6 +2326,8 @@ Sedes disponibles (datos reales):
     )
 
     nombre_predicho = completion.choices[0].message.content
+    costo=calcular_costo_openai(completion,"gpt-5.1")
+    log_message(f"[OpenAI] mapear_sede_cliente costo={costo:.6f}","DEBUG")
     tokens_used = _extract_total_tokens(nombre_predicho)
     if tokens_used is not None:
         log_message(f"[OpenAI] mapear_sede_cliente tokens_used={tokens_used}", "DEBUG")
@@ -2354,6 +2397,8 @@ Finaliza: Preguntando al cliente en cuanto tiempo pasara por su pedido
             temperature=0.4
         )
         # Registrar consumo de tokens
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] generar_mensaje_recogida_invitar_pago costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] generar_mensaje_recogida_invitar_pago tokens_used={tokens_used}", "DEBUG")
@@ -2397,7 +2442,7 @@ Si no encuentras un campo coloca exactamente "No proporcionado" como valor para 
 """
         client = OpenAI(api_key=get_openai_key())
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": "Eres PAKO, asistente experto en extracción de datos."},
                 {"role": "user", "content": prompt}
@@ -2406,6 +2451,8 @@ Si no encuentras un campo coloca exactamente "No proporcionado" como valor para 
             temperature=0
         )
         raw = response.choices[0].message.content.strip()
+        costo=calcular_costo_openai(response,"gpt-4.1-mini")
+        log_message(f"[OpenAI] extraer_info_personal costo={costo:.6f}","DEBUG")
         # Registrar consumo de tokens
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
@@ -2497,7 +2544,9 @@ Instrucciones del mensaje:
             {"role": "user", "content": prompt}
         ],
         temperature=0.4
-    )
+    )   
+        costo=calcular_costo_openai(response,"gpt-4o-mini")
+        log_message(f"[OpenAI] direccion_bd costo={costo:.6f}","DEBUG")
         # Registrar consumo de tokens
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
@@ -2596,7 +2645,7 @@ Salida:
 }}
 """
         response = client.chat.completions.create(
-        model="gpt-5.1",
+        model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": "Eres un extractor preciso de direcciones."},
                 {"role": "user", "content": prompt}
@@ -2604,6 +2653,8 @@ Salida:
  #           max_tokens=80,
             temperature=0
         )
+        costo=calcular_costo_openai(response,"gpt-4.1-mini")
+        log_message(f"[OpenAI] get_direction costo={costo:.6f}","DEBUG")
         raw = response.choices[0].message.content
         # Registrar consumo de tokens
         tokens_used = _extract_total_tokens(response)
@@ -2662,13 +2713,15 @@ def corregir_direccion(direccion_almacedada: str, mensaje_cliente: str) -> str:
 Esta es la Direccion almacenada: {direccion_almacedada} y este es el mensaje del cliente {mensaje_cliente}"""
 
         response = client.chat.completions.create(
-            model="gpt-5.1",
+            model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": "Eres un asistente experto en corrección de direcciones."},
                 {"role": "user", "content": prompt}
             ],
             temperature=0
         )
+        costo=calcular_costo_openai(response,"gpt-4.1-mini")
+        log_message(f"[OpenAI] corregir_direccion costo={costo:.6f}","DEBUG")
         raw = response.choices[0].message.content
                 # Registrar consumo de tokens
         tokens_used = _extract_total_tokens(response)
@@ -2730,6 +2783,8 @@ BAJO NINGUNA CIRCUSTANCIA PUEDES USAR ALGO DIFERENTE A ESTAS DOS RESPUESTAS Y NO
 
         raw = response.choices[0].message.content.strip()
         # Registrar consumo de tokens
+        costo=calcular_costo_openai(response,"gpt-4.1-mini")
+        log_message(f"[OpenAI] respuesta_quejas_graves_ia costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] clasificador_consulta_menu tokens_used={tokens_used}", "DEBUG")
@@ -2753,7 +2808,7 @@ Extrae SÓLO el nombre del siguiente texto y si no encuentras nombre responde co
 Texto: "{text}"
 RESPONDE únicamente con el nombre, nada más."""
         response = client.chat.completions.create(
-        model="gpt-5.1",
+        model="gpt-4.1-mini",
             messages=[
                 {"role": "system", "content": "Eres un extractor preciso de nombres."},
                 {"role": "user", "content": prompt}
@@ -2763,6 +2818,8 @@ RESPONDE únicamente con el nombre, nada más."""
         )
         raw = response.choices[0].message.content
         # Registrar consumo de tokens
+        costo=calcular_costo_openai(response,"gpt-4.1-mini")
+        log_message(f"[OpenAI] respuesta_quejas_graves_ia costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] get_direction tokens_used={tokens_used}", "DEBUG")
@@ -2838,6 +2895,8 @@ def clasificar_confirmación_general(pregunta_usuario: str, items, model: str = 
             text_output = _clean_model_output(text_output)
         except Exception:
             pass
+        costo=calcular_costo_openai(response,"gpt-4o")
+        log_message(f"[OpenAI] respuesta_quejas_graves_ia costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] clasificar_confirmacion_general_chatgpt tokens_used={tokens_used}", "DEBUG")
@@ -2908,6 +2967,8 @@ Instrucciones del mensaje:
             max_tokens=200,
             temperature=0.5
         )
+        costo=calcular_costo_openai(response,"gpt-4.1-mini")
+        log_message(f"[OpenAI] respuesta_quejas_graves_ia costo={costo:.6f}","DEBUG")
         log_message(f'prompt: {prompt}', 'DEBUG')
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
@@ -2955,6 +3016,8 @@ a las 8 y media -> 8:30
  #           max_tokens=80,
             temperature=0
         )
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] respuesta_quejas_graves_ia costo={costo:.6f}","DEBUG")
         raw = response.choices[0].message.content
         # Registrar consumo de tokens
         tokens_used = _extract_total_tokens(response)
@@ -3025,6 +3088,8 @@ def clasificar_negacion_general(pregunta_usuario: str, items, model: str = "gpt-
             text_output = _clean_model_output(text_output)
         except Exception:
             pass
+        costo=calcular_costo_openai(response,"gpt-4o")
+        log_message(f"[OpenAI] respuesta_quejas_graves_ia costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] clasificar_confirmacion_general_chatgpt tokens_used={tokens_used}", "DEBUG")
@@ -3105,7 +3170,7 @@ def respuesta_transferencia(mensaje_usuario: str, nombre: str, nombre_local: str
             nombre=nombre
         )
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4.1 mini",
             messages=[
                 {"role": "system", "content": "Eres un generador de respuestas para quejas graves de clientes."},
                 {"role": "user", "content": prompt}
@@ -3114,6 +3179,8 @@ def respuesta_transferencia(mensaje_usuario: str, nombre: str, nombre_local: str
             temperature=0.6
         )
         raw = response.choices[0].message.content.strip()
+        costo=calcular_costo_openai(response,"gpt-4.1-mini")
+        log_message(f"[OpenAI] respuesta_quejas_graves_ia costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] respuesta_quejas_graves_ia tokens_used={tokens_used}", "DEBUG")
@@ -3175,6 +3242,8 @@ def extraer_resumen(mensajes , resumen ) -> dict:
         )
         log_message(f'prompt: {prompt}', 'DEBUG')
         raw = response.choices[0].message.content.strip()
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] extraer resumen costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] extraer_resumen tokens_used={tokens_used}", "DEBUG")
@@ -3268,9 +3337,6 @@ def resumen_conversacion(telefono: str) -> str:
     except Exception as e:
         log_message(f"Error en resumen_conversacion para {telefono}: {e}", "ERROR")
         return None 
-
-import json
-from openai import OpenAI
 
 def extraer_resumen_corto(mensajes, telefono, id_restaurante):
     try:
@@ -3379,6 +3445,8 @@ Devuelve únicamente JSON válido.
 
         raw = response.choices[0].message.content.strip()
         raw = raw.replace("```json", "").replace("```", "").strip()
+        costo=calcular_costo_openai(response,"gpt-5.1")
+        log_message(f"[OpenAI] extraer_resumen costo={costo:.6f}","DEBUG")
         tokens_used = _extract_total_tokens(response)
         if tokens_used is not None:
             log_message(f"[OpenAI] extraer_resumen tokens_used={tokens_used}", "DEBUG")
