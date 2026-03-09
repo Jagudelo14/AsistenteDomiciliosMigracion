@@ -1648,8 +1648,15 @@ def calcular_costo_openai(response, model):
     if usage is None:
         return None
 
-    prompt_tokens = usage.prompt_tokens
-    completion_tokens = usage.completion_tokens
+    # Compatibilidad SDK viejo / nuevo
+    prompt_tokens = getattr(usage, "prompt_tokens", None)
+    completion_tokens = getattr(usage, "completion_tokens", None)
+
+    if prompt_tokens is None:
+        prompt_tokens = getattr(usage, "input_tokens", 0)
+
+    if completion_tokens is None:
+        completion_tokens = getattr(usage, "output_tokens", 0)
 
     precios = {
         "gpt-4o": {"input": 2.5, "output": 10},
