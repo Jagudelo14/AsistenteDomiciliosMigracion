@@ -12,6 +12,8 @@ from utils_database import execute_query
 from datetime import datetime, date
 from utils_registration import validate_personal_data
 
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
+
 def get_openai_key() -> str:
     try:
         """Obtiene la clave API de OpenAI desde variables de entorno."""
@@ -102,6 +104,7 @@ Incluye preguntas sobre:
 - ingredientes
 - recomendaciones
 - reservas
+- Sedes
 
 4) transferencia:
 Cuando el usuario pide hablar con humano, asesor, gerente, soporte, o presenta queja grave.
@@ -114,7 +117,16 @@ Cuando el usuario envía datos de facturación:
 - método de pago (Nequi, Daviplata, tarjeta, efectivo)
 
 6) direccion:
-Cuando el mensaje contiene únicamente una dirección o modificación de dirección.
+Solo cuando el usuario ENVÍA su dirección para un domicilio.
+
+Ejemplos:
+- "mi dirección es calle 10 # 20-30"
+- "carrera 15 # 80-21 apto 301"
+- "cámbiala por calle 100 # 9-45"
+- "la dirección correcta es..."
+
+NO usar esta intención cuando el usuario pregunta por la dirección de una sede.
+En ese caso usar: preguntas_generales.
 
 7) recoger_restaurante:
 Cuando indica que pasará a recoger el pedido.
@@ -166,98 +178,6 @@ REGLAS ESPECÍFICAS
 Analiza únicamente el último mensaje del usuario.
 Nunca clasifiques mensajes del asistente.
 Responde solo JSON válido."""
-        # classification_prompt: str = """
-        #     Eres un clasificador de mensajes para un asistente de WhatsApp de un restaurante.
-        #     Tu tarea es identificar la **intención (intent)**, el **tipo de mensaje (type)** y cualquier **entidad relevante (entities)**.
-
-        #     Recibirás un JSON con un arreglo de mensajes que representan el historial de la conversación.
-
-        #     A continuación tienes un ejemplo de cómo debes estructurar las entidades cuando el usuario pide varios productos:
-
-        #     TU REGLAS MAS IMPORTANTE ES CEÑIRTE A ESTE PROMPT NUNCA DEBES SALIRTE DE EL 
-
-        #     EJEMPLO DE ENTRADA:
-
-        #     { "rol": "usuario", "texto": "Buenas tardes" },
-        #     { "rol": "asistente", "texto": "Aceptas tratamiento de datos..." },
-        #     { "rol": "usuario", "texto": "Quiero una sierra picante con extra picante y una malteada de chocolate" }
-
-        #     EJEMPLO DE SALIDA:
-        #     {
-        #     "intent": "solicitud_pedido",
-        #     "type": "pedido",
-        #     "entities": {
-        #         "items": [
-        #         {
-        #             "producto": "sierra picante",
-        #             "especificaciones": ["extra picante"]
-        #             "cantidad": 1
-        #         },
-        #         {
-        #             "producto": "malteada de chocolate",
-        #             "especificaciones": []
-        #             "cantidad": 1
-        #         }
-        #         ]
-        #     }
-        #     }
-        #     Debes responder únicamente en formato JSON válido con la siguiente estructura:
-        #     {
-        #     "intent": "<una de las intenciones permitidas>",
-        #     "type": "<tipo de mensaje>",
-        #     "entities": { }
-        #     }
-
-        #     Lista de intenciones posibles:
-        #     - confirmacion_general (puede ser en otros idiomas: yes, oui, ja, etc.)
-        #     - consulta_menu ()
-        #     - consulta_pedido
-        #     - consulta_promociones
-        #     - direccion (Cuando unicamente contiene una direccion o sobre modificaciones en direccion de envio)
-        #     - negacion_general (Analiza bien el contexto cuando la persona niegue algo y clasificalo como negacion general)
-        #     - preguntas_generales (estas categorias forman parte:preguntas sobre formas de pago (Nequi, Daviplata, efectivo, tarjetas, etc.),si hacen domicilios o envíos, horarios de atención, dirección o ubicación del local,contacto, pedidos o reservas promociones o descuentos, preguntas sobre reservas-> son preguntas generales, preguntas sobre ingredientes de los productos, preguntas sobre productos, tipo de proteina)
-        #     - quejas (quejas de menor nivel)
-        #     - sin_intencion (Si la pregunta es sobre temas generales, ajenos al restaurante (por ejemplo: Bogotá, clima, películas, tecnología, etc.) → "sin_intencion".)
-        #     - solicitud_pedido (pedidos de comida o bebida) (por ejemplo no, ya se lo que quiero, una sierra picante y una limonada) o (quiero una malteada de frutos rojos y una sierra clasica) o (me gustaria una sierra clasica) (modificaciones a pedidos) (cambios a pedidos)(cuando cosas similares a estos pedidos clasificalas como solicitud pedido) (tambien cuando aclare un pedido como: no, son tantos productos o no, son 3 productos o no, es una malteada y una sierra queso)(cuando el cliente aclare cantidades o productos ya mencionados)
-        #     Ejemplo: "quiero agregar una malteada de vainilla", "quiero que la hamburguesa no traiga lechuga", "cambia mi pedido por favor por...", "quitar la malteada", "también quiero una gaseosa coca cola original", "dame también una malteada de chocolate", etc.
-        #     - transferencia (quejas de mayor nivel) (cancelacion de pedido) (cuando el cliente pide cancelar su pedido)
-        #     - validacion_pago (breb, nequi, daviplata, tarjeta, efectivo) (cuando el usuario envie sus datos de facturacion correo, documento y tipo de documento)
-        #     * el numero de identificacion en colombia no tiene letras y tiene 6 a 10 digitos numericos
-        #     * Tipos de documento, RC — Registro Civil, TI — Tarjeta de Identidad, CC — Cédula de Ciudadanía, CE — Cédula de Extranjería, PA — Pasaporte, PA — Pasaporte.
-        #     - recoger_restaurante   (NUEVA intención: cuando el usuario dice que pasará a recoger, irá al restaurante o lo recoge en tienda o en una de nuestras sedes: Caobos)
-        #     - domicilio             (NUEVA intención: cuando el usuario pide entrega a domicilio, "tráelo", "envíamelo", "a mi casa", etc.)
-        #     - saludo (hola, buenos dias, buenas tardes, buenas noches, saludos, etc.)
-        #     - despedida (adios, hasta luego, nos vemos, gracias, etc.) (cuando notes que se da la informacion final al usuario y agradece o se despide)
-        #     - Tiempo_de_recogida (Cuando el usuario menciona en cuanto tiempo pasará por su pedido)
-        #     - esperando_confirmacion_pago (Cuando el usuario confirma que ya realizó el pago)
-
-        #     Instrucciones importantes:
-        #     - No incluyas texto fuera del JSON.
-        #     - No uses comentarios, explicaciones o saltos de línea innecesarios.
-        #     - Si no puedes determinar la intención, usa "sin_intencion".
-        #     - TE ACLARO QUE UN PRODUCTO EN COMBO SE TRATA DIFERENTE A UN PRODUCTO SOLO POR EJEMPLO UNA SIERRA QUESO ES DIFERENTE DE UNA SIERRA QUESO EN COMBO
-        #     - SI TE DICEN UN PRODUCTO EN COMBO TRATALO COMO UN PRODUCTO DIFERENTE A SU HOMONIMO SOLO
-        #     - Si el usuario menciona detalles adicionales que modifican un producto ya mencionado (por ejemplo “que la bebida sea…”, “sin tomate”, “pero la salsa aparte”), debes agregar esas especificaciones al MISMO item.
-        #     - No debes crear un nuevo item cuando la frase solo aclara o modifica el producto anterior.
-        #     - SI EL CLIENTE TE PIDE UN PRODUCTO EN COMBO NUNCA DEBES AÑADIR SU VERSIÓN SOLO COMO PARTE DEL PEDIDO A MENOS QUE LO EXIJA EXPLICITAMENTE EL MENSAJE (POR EJEMPLO: "UNA SIERRA QUESO Y UNA SIERRA QUESO EN COMBO" SI DEBES AÑADIR AMBOS PRODUCTOS AL PEDIDO EJEMPLO 2: "UNA SIERRA QUESO EN COMBO" NO DEBES AÑADIR SIERRA QUESO SOLO)
-        #     - Si el usuario indica una cantidad explícita (ej. "2", "4", "dos", "cuatro"), debes representarla usando el campo "cantidad" y no duplicar items iguales.
-        #     - Las reservas las clasificas como preguntas generales y todo lo relacionado con reservas va en esa categoría.
-        #     - Si te preguntan que me recomiendas se refiere a preguntas generales, en general las recomendaciones relacionalas con el menu y preguntas generales.
-        #     - Si el usuario solo dice "sí" o "no" sin contexto, clasifícalo como confirmación_general o negación_general respectivamente.
-        #     - Si el usuario pide hablar con un asesor, persona, humano, gerente, administrador, supervisor, encargado, responsable, operador, agente, representante o similar, clasifícalo como transferencia.
-        #     - Si el usuario pide ayuda o soporte, clasifícalo como transferencia.
-        #     - Si hay información personal antes de clasificarlo revisa el contexto de los mensajes anteriores si es el correo el documento y el numero del documento es si o si validación_pago
-        #     - Si dentro del contexto ya existe un pedido y te estan pidiendo mas productos es una modificacion pedido y no una solicitud de pedido
-        #     - Si la bebida es agua  se refiere a una Agua normal 600 ml
-        #     - Si la bebida es agua con gas se refiere a una Agua con gas 600 ml
-        #     - Las adiciones debes clasificarlas en el producto que se indica y tambien como un producto aparte a la vez
-        #     - LAS ADICIONES SIEMPRE DEBES CLASIFICARLAS COMO UN PRODUCTO UNICO CON SU PRECIO Y SU CANTIDAD
-        #     - Si el cliente esta contestando a una pregunta de eleccion de sede debes clasifificarlo como eleccion_sede
-        #     Reglas IMPORTANTES:
-        #     - DEBES analizar y clasificar el ÚLTIMO mensaje enviado por el USUARIO.
-        #     - Debes analizar principalmente el último mensaje. Si el mensaje es ambiguo (por ejemplo 'sí', 'no', 'efectivo', 'tarjeta'), puedes usar el contexto inmediato para determinar la intención.
-        #     - Nunca clasifiques mensajes del asistente pero si es contexto importante para la decisión final.
-        #     """
 
         messages = [
             {"role": "system", "content": classification_prompt},
@@ -464,6 +384,40 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
     telefono = sender  # Asumiendo que 'sender' es el teléfono
     query_id_sede = f"SELECT id_sede FROM clientes_whatsapp WHERE telefono = '{telefono}'"
     result_id_sede = execute_query(query_id_sede)
+    sedes = execute_query("""
+        SELECT nombre, direccion, horarios
+        FROM sedes
+        WHERE estado = TRUE
+        AND id_restaurante = %s
+        AND latitud IS NOT NULL
+        AND longitud IS NOT NULL;
+    """, (ID_RESTAURANTE,))
+
+    if not sedes:
+        return None
+
+    sedes_contexto = []
+
+    for s in sedes:
+        nombre = s[0]
+        direccion = s[1]
+        horarios = s[2]
+
+        # convertir horarios a json si viene como string
+        if isinstance(horarios, str):
+            horarios = json.loads(horarios)
+
+        sede_dict = {
+            "nombre": nombre,
+            "direccion": direccion,
+            "horarios": horarios
+        }
+
+        sedes_contexto.append(sede_dict)
+
+    # convertir a json para pasarlo al LLM
+    sedes_json = json.dumps(sedes_contexto, ensure_ascii=False, indent=2)
+
     id_sede = None
     if result_id_sede and len(result_id_sede) > 0:
         id_sede = result_id_sede[0][0]
@@ -480,12 +434,9 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
         siempre con el tono oficial de la marca: amable, natural y con un toque sabroso, sin exagerar.
 
         Información del restaurante:
-        🕐 Horario: Todos los días de 12:00 p.m. a 7:00 p.m.
-        📍 Sedes:
-        - Caobos Cl 147 #17- 95 local 55, Usaquén, Bogotá, Cundinamarca el numero de caobos es 3134827171
-        - Centro Internacional Ac. 32 # 18-7, Teusaquillo, Bogotá, D.C. el numero de centro internacional es 3160107705
-        - Chicó 2.0 Ac 100 #9A-45, Bogotá, Colombia el numero de chico es 3134827229
-        - Centro Mayor  Cl. 38A Sur #34, Bogotá, Colombia el numero de centro mayor es 3228144839
+        Sedes y horarios:
+        {sedes_json}
+        el numero de caobos es 3134827171
         💳 Medios de pago: solo contraentrega efectivo y datafono.
         - Tenemos domicilios siempre y cuando esten en el area de cobertura si no esta no podria entregar a domicilio.
         - Si el cliente menciona que no le gusta un ingrediente dile que puede quitarlo del producto
@@ -516,6 +467,11 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
         - Mantén la respuesta en máximo 2 frases si es posible.
         - En este momento no manejamos reservas
         - Si la pregunta es sobre costo de domicilio recuerdale que actualmente dentro del area de cobertura es gratis
+        - Los unicos metodos de pago disponibles son efectivo y datafono contraentrega, no manejamos transferencias ni pagos digitales ni pago con tarjeta 
+        - Siempre que indiques una sede menciona su direccion
+        - Si no tienes contexto suficiente para responder a un cambio de ingrediente por ejemplo un tipo de queso por otro tipo de queso di que no lo puedes hacer pero que el cliente puede quitar el ingrediente que no le gusta del producto sin problema
+        REGLA ESTRICTA
+        NUNCA LE DIGAS AL CLIENTE QUE EL PEDIDO HA SIDO CONFIRMADO
         FORMATO OBLIGATORIO DE SALIDA:
         Devuelve SOLO un JSON válido con esta estructura EXACTA:
 
@@ -534,6 +490,7 @@ def responder_pregunta_menu_chatgpt(pregunta_usuario: str, items,sender: str, mo
         }}
         """
     try:
+        log_message(f"Prompt para ChatGPT preguntas generales: {prompt}", "DEBUG")
         client = OpenAI()
         response = client.responses.create(
             model=model,
@@ -652,7 +609,6 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
             -Para el producto que ingresa al pedido, establece el valor exacto: "Producto de reemplazo".
             -Para el producto que sale del pedido, establece el valor exacto: "Producto a reemplazar".
             -Esta regla es estricta y debe cumplirse siempre que la intención sea REPLACE_ITEM, sin excepciones.
-        - Nunca clasificar como REPLACE_ITEM si no existen dos productos claramente identificables en el mensaje en cambio clasificalo como ACLARACION.
         - Cuando el cliente pide "platanitos" "platanos" o "plátanos" se refiere a los platanitos maduros el ACOMPAÑAMIENTO DE 7900 a menos que explicitamente mencione sea la adicion en ese caso son los platanos maduros de 2900 el adicional
         - Si colocas order_complete en true debes colocar la coincidencia mas aproximada en el campo matched de los candidatos
         - En las hamburguesas que se puedan elegir proteina si el cliente no elige proteina pon de res SOLO CUANDO EL CLIENTE NO ELIJA
@@ -740,8 +696,146 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
         - "modifiers_applied" es únicamente descriptivo.
         - Si un modificador tiene costo, debe agregarse obligatoriamente como un item independiente dentro del array "items".
         - El precio SOLO puede existir dentro del objeto "matched" de los items principales o adicionales independientes.
-        - Está estrictamente prohibido incluir precio dentro de "modifiers_applied".
+        - Cuando el producto principal sea un COMBO del menú, los componentes incluidos en su descripción (bebida y acompañamiento) NO deben crearse como items independientes.
+        - La bebida y el acompañamiento incluidos estructuralmente en un combo NO son adiciones.
+        - Solo deben crearse como items independientes si el usuario los pide adicionalmente fuera del combo.
+        - La regla de "adiciones pagas como item independiente" NO aplica a componentes estructurales de combos.
+        - Los productos cuyo nombre empiece por "Combo" son unidades cerradas indivisibles y su precio ya incluye bebida y acompañamiento.
+        - La proteina predeterminada de las hamburguesas es la de res, si el cliente no elige proteina y el producto tiene opción de elegir proteina, asigna res por defecto.
+        - En el caso del combo la bebida predeterminada es la Coca Cola Original y el acompañamiento si o si papas francesas.
+        Las adiciones pagas SOLO deben agregarse si el cliente
+        explícitamente solicita agregar ese ingrediente.
+
+        Ejemplos válidos:
+        "agrégale queso"
+        "con chicharrón adicional"
+        "ponle queso costeño"
+
+        Ejemplos inválidos:
+        "¿puedo cambiar cheddar por costeño?"
+        Los ingredientes mencionados dentro de la descripción de un producto
+        son parte fija de la receta.
+
+        Estos ingredientes solo pueden:
+        - eliminarse (sin cebolla, sin tomate)
+        - mantenerse
+
+        NO pueden sustituirse por otros ingredientes
+        a menos que exista explícitamente esa opción en el menú.
+        REGLA CRÍTICA DE COMBOS:
+
+        Cuando el cliente mencione una bebida inmediatamente después de que el agente haya
+        preguntado por la bebida de un combo, esa bebida se interpreta como una elección
+        de bebida del combo.
+
+        NO debe crearse un item independiente para esa bebida.
+
+        La bebida debe agregarse únicamente como modificador del combo dentro de
+        "modifiers_applied".
+
+        Ejemplo:
+
+        Cliente:
+        "Con quatro"
+
+        Resultado:
+
+        Combo con Platanito Maduro
+        modifiers_applied:
+        ["bebida: Quatro 400 ml"]
+
+        NO crear item independiente de bebida.
+        REGLA DE CONTEXTO DEL PEDIDO:
+
+        El campo "PEDIDO ACTUAL EN PROCESO" representa el producto activo
+        sobre el cual el cliente está hablando.
+
+        Si el cliente utiliza frases como:
+
+        - "mejor"
+        - "cámbialo"
+        - "ponlo"
+        - "hazlo"
+        - "en combo"
+        - "solo"
+        - "sin"
+
+        y no menciona el producto explícitamente,
+        debes asumir que se refiere al producto activo del
+        PEDIDO ACTUAL EN PROCESO.
+        REGLA DE CONVERSIÓN A COMBO:
+
+        Si el usuario dice expresiones como:
+        "mejor en combo"
+        "hazlo combo"
+        "ponlo en combo"
+        "que sea combo"
+        "vuélvelo combo"
+
+        y el pedido actual contiene una hamburguesa que tiene versión en combo
+        en el menú, debes convertir automáticamente ese producto a su
+        versión de combo equivalente.
+
+        Ejemplo:
+
+        "Con Platanito Maduro y Queso Costeño"
+        → "Combo con Platanito Maduro"
+
+        "Con Queso"
+        → "Combo Con Queso"
+
+        "Con Chicharrón"
+        → "Combo con Chicharrón"
+
+        "Con Doble Tocineta"
+        → "Combo Doble Tocineta"
+
+        Esta conversión debe clasificarse como:
+        intent: REPLACE_ITEM
         ======================================================
+        REGLA CRÍTICA DE SUSTITUCIÓN DE INGREDIENTES NO SOPORTADA:
+
+        Si el cliente solicita reemplazar un ingrediente estructural del producto
+        por otro ingrediente del menú y ese reemplazo NO existe explícitamente
+        como modificador permitido del producto:
+
+        NO debes agregar el ingrediente como adicional.
+        NO debes aplicar el cambio.
+
+        Debes:
+
+        1) Mantener el producto original en el array "items".
+        2) NO agregar el ingrediente solicitado dentro de "modifiers_applied".
+        3) Establecer order_complete = false.
+        4) Escribir en el campo "note" del item un mensaje corto indicando que el cambio requiere confirmación.
+
+        Ejemplo de note:
+        "Solicitud de cambio de ingrediente no soportada: confirmar con el cliente."
+        REGLA CRÍTICA DE RESPUESTAS CORTAS A PREGUNTAS DEL AGENTE:
+
+        Si el agente acaba de ofrecer opciones específicas del menú
+        (por ejemplo bebidas, acompañamientos o tamaños)
+        y el usuario responde únicamente con una palabra o frase corta
+        que coincide con una de esas opciones:
+
+        Debes interpretar la respuesta como la SELECCIÓN de ese producto del menú.
+
+        En ese caso:
+
+        - Debes crear un nuevo item en el array "items" con ese producto.
+        - NO debe agregarse como modificador ni especificación de otro producto.
+        - Debe tratarse como ADD_ITEM.
+
+        Ejemplo:
+
+        Agente:
+        "¿Agua con gas o agua normal?"
+
+        Usuario:
+        "normal"
+
+        Resultado:
+        → item independiente "Agua normal 600 ml"
         Tono de la conversacion:
         -Directo,formal,cercano y amable
         MENÚ COMPLETO:
@@ -807,79 +901,31 @@ def mapear_pedido_al_menu(contenido_clasificador: dict, menu_items: list, model:
 
 def saludo_dynamic(mensaje_usuario: str, nombre: str, nombre_local: str) -> dict:
     try:
-        PROMPT_SALUDO_DYNAMIC = """
-Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
-Tu tarea es generar un saludo personalizado según el tono que use el cliente.
+        PROMPT_SALUDO_DYNAMIC =         PROMPT_SALUDO_DYNAMIC = """
+        Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
 
-El cliente escribió: "{mensaje_usuario}"
+        Genera un saludo breve para el cliente.
 
-PAUTAS DE TONO:
-1. Si el cliente usa expresiones informales como:
-"q hubo", "quiubo", "k hubo", "que más", "que mas", "q mas",
-"hey", "holi", "epa", "epaaa", "hoola", "hola parce",
-entonces:
-    - Usa un tono cercano, relajado y natural, sin jerga excesiva.
-    - Puedes usar 1 emoji suave si fluye bien.
-    - Mantén calidez y sensación de bienvenida al estilo Sierra Nevada.
+        El cliente escribió: "{mensaje_usuario}"
 
-2. Si el cliente usa expresiones formales como:
-"buenas tardes", "buenos días", "buen dia",
-"cordial saludo", "mucho gusto", "estimados",
-entonces:
-    - Usa un tono respetuoso, profesional y sereno.
-    - No uses emojis.
-    - Mantén claridad, amabilidad y un toque cálido sin exagerar.
+        REGLAS:
+        - Máximo 1 frase corta (máximo 20 palabras).
+        - Incluye el nombre del cliente: {nombre}
+        - Incluye el nombre del local: {nombre_local}
+        - Usa un tono natural según cómo escriba el cliente.
+        - Solo puedes usar 1 emoji si el tono es informal.
+        - Incluye un recordatorio breve usando "recuerda" para no enviar varios mensajes seguidos.
+        - No hagas preguntas.
+        - No agregues explicaciones.
+        - No inventes información.
 
-3. En cualquier otro caso:
-    - Usa un tono cordial estándar: amable, natural y con sabor.
-    - Puedes usar un emoji suave si queda orgánico.
-
-= MENSAJE INICIAL PREVENTIVO =
-
-- La recomendación debe ser un RECORDATORIO de comportamiento.
-- Usa verbos como: "recuerda", "ten en cuenta", "procura", "trata de".
-- NO lo formules como una pregunta.
-- El objetivo es que el cliente cuando conteste lo haga en un unico mensaje
-IMPORTANTE:
-- La recomendación debe ser ATEMPORAL, no ligada al siguiente mensaje.
-- NO hagas referencia a "ahora", "en este mensaje", "al responder".
-- Debe entenderse como una regla general para toda la conversación.
-- Evita frases como:
-  "para ayudarte más rápido",
-  "cuando me respondas",
-  "en tu siguiente mensaje".
-
-REGLAS DE ESTILO SIERRA NEVADA:
-- Habla como un buen anfitrión: cálido, claro y con energía positiva.
-- Evita expresiones barriales, sarcasmo o exageraciones.
-- Mantén un lenguaje cotidiano y respetuoso.
-- No inventes productos ni detalles.
-- Incluye siempre el nombre del cliente: {nombre}
-- Incluye siempre el nombre del local: {nombre_local}
-- Responde en máximo 1 o 2 frases.
-- Escoge UNA intención entre:
-    - "consulta_menu"
-    - "consulta_promociones"
-
-TIPS PARA UNA MEJOR EXPERIENCIA (OBLIGATORIO INCLUIRLOS EN EL JSON):
-Incluye SIEMPRE un campo "tips" con una lista de 3 a 5 tips breves.
-Los tips deben sonar amables, útiles y positivos.
-Ejemplos:
-- Sé claro y específico con lo que necesitas.
-- Envía un mensaje a la vez.
-- Sigue los pasos que te indique el bot.
-- Espera mi respuesta antes de enviar otro mensaje.
-- Esto ayuda a procesar tu pedido sin errores.
-
-FORMATO:
-Debes responder en un JSON válido:
-{{
-    "mensaje": "texto aquí",
-    "intencion": "consulta_menu",
-    "tips": ["tip1", "tip2", "tip3"]
-}}
-No incluyas texto adicional fuera del JSON.
-"""
+        FORMATO OBLIGATORIO (JSON válido):
+        {
+            "mensaje": "texto aquí",
+            "intencion": "consulta_menu"
+        }
+        No incluyas texto fuera del JSON.
+        """
 
         client = OpenAI()
         prompt = PROMPT_SALUDO_DYNAMIC.format(
@@ -1138,7 +1184,25 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
             - Nunca menciones que no esta en el menu di amablemente que no lo tenemos disponible en este momento.
             Aquí está el menú disponible:
             {menu_str}
-            
+            --------------------------------------------------
+
+            4. SOLICITUD DE CAMBIO DE INGREDIENTE
+
+            Si el cliente intenta reemplazar un ingrediente de un producto
+            por otro ingrediente diferente (ej: "cambiar X por Y"):
+
+            CASO A — El ingrediente solicitado EXISTE en el menú como adicional:
+            - Explica que no manejamos ese cambio dentro del producto.
+            - Ofrece agregar ese ingrediente como adicional si el cliente lo desea.
+            - Sugiere ese adicional en "recomendaciones".
+
+            CASO B — El ingrediente solicitado NO existe en el menú:
+            - Indica amablemente que no lo tenemos disponible en este momento.
+            - No sugieras ese ingrediente.
+            - Pide al cliente que confirme cómo desea su pedido.
+
+            No modifiques el producto automáticamente.
+            No inventes ingredientes.
         TEN EN CUENTA PUEDES USAR COINCIDENCIAS PARCIALES SOLO SI ES UNA VARIANTE CLARA PERO NO INVENTAR NI REEMPLAZAR SABORES.    
             """
         
@@ -1184,7 +1248,7 @@ def pedido_incompleto_dynamic(mensaje_usuario: str, menu: list, json_pedido: str
 
 def solicitar_medio_pago(nombre: str, codigo_unico: str, nombre_local: str, pedido_str: str,sender: str) -> dict:
     try:
-        if not validate_personal_data(sender,os.environ.get("ID_RESTAURANTE", "5")):
+        if not validate_personal_data(sender,ID_RESTAURANTE):
             PROMPT_MEDIOS_PAGO = f"""
 El cliente {nombre} ha confirmado que quiere pedir pero aun no confirma su pedido.
 
@@ -1830,7 +1894,7 @@ def solicitar_metodo_recogida(nombre: str, codigo_unico: str, nombre_local: str,
 Eres la voz oficial de Sierra Nevada, La Cima del Sabor.
 Te llamas PAKO.
 
-El cliente {nombre} ya confirmó su pedido
+El cliente {nombre} ya confirmó que quiere pedir
 Este es el pedido que hizo:
 "{pedido_str}"
 
@@ -1910,61 +1974,87 @@ def generar_mensaje_confirmacion_modificacion_pedido(
         client = OpenAI()
         if not promocion:
             prompt = f"""
-Eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada, La Cima del Sabor.
+            Eres PAKO, asistente de WhatsApp del restaurante Sierra Nevada, La Cima del Sabor.
 
-RECIBES un JSON de pedido validado:
-{json.dumps(pedido_json, ensure_ascii=False)}
+            RECIBES un JSON de pedido validado:
+            {json.dumps(pedido_json, ensure_ascii=False)}
 
-Y una lista de productos del menú:
-{json.dumps(items_menu, ensure_ascii=False)}
+            Y una lista de productos del menú:
+            {json.dumps(items_menu, ensure_ascii=False)}
 
-TU MISIÓN:
-1. Presentar el pedido al cliente:
-   - Lista cada producto.
-   - Incluye sus modificadores (si existen).
-   - Muestra precios individuales.
-   - Muestra el total.
-   - No inventes productos ni precios.
+            TU MISIÓN:
+            Presentar el pedido al cliente de forma clara y breve.
 
-TONO:
-- Cercano, muy amigable y natural.
-- Profesional y claro, sin sonar robótico.
+            Debes:
+            - Listar cada producto.
+            - Incluir modificadores si existen.
+            - Mostrar precios individuales.
+            - Mostrar el total.
+            - No inventar productos ni precios.
 
-RECOMENDACIONES (SI APLICA):
-1. SI EL PEDIDO TIENE MENOS DE 2 PRODUCTOS:
-   - Ofrece 1 producto adicional del menú.
-2. OFRECER 1 acompañamiento, bebida o adición:
-   - NO menciones el nombre exacto del producto del menú.
-   - Usa descripciones genéricas y apetitosas.
-     Ejemplos:
-       - “unas papitas bien crocantes”
-       - “una bebida bien fría”
-   - SÍ incluye el precio real del producto.
-   - No inventes precios ni categorías.
-   - Si ya hay bebidas no recomiendes más bebidas.
-   - Si ya hay acompañamientos no recomiendes más acompañamientos.
-   - Si ya hay adiciones no recomiendes más adiciones.
-3. Si la proteina del producto (res,cerdo y pollo) no ha sido definida preguntale al cliente que proteina quiere
+            TONO:
+            - Cercano, natural y amable.
+            - Profesional.
+            - Mensaje corto.
 
-CIERRE:
-- Si das recomendaciones, finaliza exactamente con:
-  "o ¿tu pedido está bien así?"
-- Si NO das recomendaciones, finaliza con:
-  "¿Confirmas tu pedido?"
+            --------------------------------------------------
 
-FORMATO OBLIGATORIO (JSON LISO):
-{{
-  "mensaje": "mensaje breve en lenguaje natural presentando el pedido y cerrando con la pregunta obligatoria",
-  "intencion_siguiente": "preguntar_modificacion"
-}}
+            INVITACIÓN A COMBO
 
-REGLAS:
-- No incluyas texto fuera del JSON.
-- No uses emojis.
-- No inventes productos, precios ni condiciones.
-- No incluyas las descripciones de los productos del menú.
-- Si el cliente pide papitas se refiere a una porcion de papas francesas.
-"""
+            Si el pedido tiene SOLO 1 producto
+            y ese producto es una hamburguesa que tiene versión combo en el menú:
+
+            Invita al cliente a convertirla en combo.
+
+            Reglas:
+            - Menciona que el combo incluye papas y bebida.
+            - Usa el precio real del combo del menú.
+            - No inventes combos.
+            - No menciones el nombre exacto del producto del menú.
+
+
+            Si el pedido tiene más de un producto o ya incluye bebida o acompañamiento,
+            NO hagas ninguna recomendación.
+            CÁLCULO DE MEJORA A COMBO
+
+            Si invitas al cliente a convertir el producto en combo debes calcular:
+
+            precio_extra = precio_combo - precio_producto_actual
+
+            Debes mencionarlo de forma natural en el mensaje.
+
+            Ejemplo de estilo:
+            "También puedes convertirla en combo con papas y bebida por $XXXX, son solo $YYY más."
+
+            Reglas:
+            - Usa los precios reales del menú.
+            - No inventes precios.
+            - El valor "$YYY más" debe ser la diferencia entre el combo y el producto actual.
+
+            --------------------------------------------------
+
+            CIERRE
+
+            El mensaje debe terminar invitando al cliente a confirmar fácilmente.
+
+            Ejemplo de estilo:
+            "Si todo está bien puedes responder 'sí' o 'confirmar' para enviarlo a cocina."
+
+            --------------------------------------------------
+
+            FORMATO OBLIGATORIO (JSON)
+
+            {{
+            "mensaje": "mensaje breve presentando el pedido y cerrando con la invitación a confirmar",
+            "intencion_siguiente": "preguntar_modificacion"
+            }}
+
+            REGLAS:
+            - No incluyas texto fuera del JSON.
+            - No uses emojis.
+            - No inventes productos ni precios.
+            - No incluyas descripciones del menú.
+            """
 
         else:
             if promociones_info is None or pedido_completo_promocion is None:

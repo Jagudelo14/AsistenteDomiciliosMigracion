@@ -8,6 +8,7 @@ import os
 from datetime import datetime, timedelta    
 from zoneinfo import ZoneInfo   
 
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
 _sender_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("sender", default=None)
 _id_cliente_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar("id_cliente", default=None)
 
@@ -42,8 +43,8 @@ def crear_conversacion(mensaje) -> str:
             }
         ]
     })
-    execute_query("""INSERT INTO conversaciones (telefono,conversacion,fecha_mensaje,id_cliente) VALUES (%s, %s, NOW(), %s)""", (get_sender(), json_mensaje, os.environ.get("ID_RESTAURANTE", "5")))
-    execute_query("""INSERT INTO historico_conversaciones (telefono,primer_mensaje,id_cliente) VALUES (%s, NOW(),%s)""", (get_sender(), os.environ.get("ID_RESTAURANTE", "5")))
+    execute_query("""INSERT INTO conversaciones (telefono,conversacion,fecha_mensaje,id_cliente) VALUES (%s, %s, NOW(), %s)""", (get_sender(), json_mensaje, ID_RESTAURANTE))
+    execute_query("""INSERT INTO historico_conversaciones (telefono,primer_mensaje,id_cliente) VALUES (%s, NOW(),%s)""", (get_sender(), ID_RESTAURANTE))
     return str(json_mensaje)
 
 def actualizar_conversacion(mensaje, telefono,rol) -> str:

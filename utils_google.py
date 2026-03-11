@@ -9,10 +9,11 @@ from utils_chatgpt import solicitar_confirmacion_direccion
 from utils_database import execute_query
 import os
 
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
 CANTIDAD_TIEMPO_PEDIDO: int = 5 # Cantidad de tiempo por pedido en cola en minutos
 TIEMPO_TOLERANCIA: int = 15 # Cantidad de minutos de tolerancia para tiempo total de domicilio
 UMBRAL_TIEMPO: int = 150 # Cantidad de minutos de umbral máximo para un domicilio (2 horas y 30 minutos)
-API_KEY_GOOGLE_MAPS: str = os.environ.get("API_KEY_GOOGLE_MAPS", "")
+API_KEY_GOOGLE_MAPS: str = os.getenv("API_KEY_GOOGLE_MAPS", "")
 
 def obtener_cliente_google_maps() -> googlemaps:
     try:
@@ -482,7 +483,7 @@ def geocode_and_assign(numero_cliente: str, direccion: str, id_restaurante: str)
 def buscar_sede_mas_cercana(
     latitud_cliente: float,
     longitud_cliente: float,
-    id_restaurante: str = os.environ.get("ID_RESTAURANTE", "5")
+    id_restaurante: str = ID_RESTAURANTE
 ):
     try:
         log_message(

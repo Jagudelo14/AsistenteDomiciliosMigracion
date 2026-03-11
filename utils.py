@@ -18,6 +18,7 @@ import requests
 import difflib
 from utils_contexto import get_sender,actualizar_conversacion,get_id_sede
 
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
 
 def register_log(mensaje: str, tipo: str, ambiente: str = "Whatsapp", idusuario: int = 1, archivoPy: str = "", function_name: str = "",line_number: int = 0) -> None:
     try:
@@ -66,7 +67,7 @@ def send_text_response(to: str, message: str) -> str:
         """Envía un mensaje de texto por WhatsApp Business API."""
         logging.info('Enviando respuesta a WhatsApp')
         token: str = api_whatsapp()
-        PHONE_ID: str = os.environ["PHONE_NUMBER_ID"]
+        PHONE_ID: str = os.getenv("PHONE_NUMBER_ID")
         whatsapp: WhatsApp = WhatsApp(token, PHONE_ID)
         whatsapp.send_message(message, to)
         log_message(f'Respuesta enviada a {to}: {message}', 'INFO')
@@ -166,13 +167,12 @@ def handle_create_client(sender: str, datos: str, id_restaurante: str, es_tempor
         log_message(f'Nombre del cliente: {nombre}', 'INFO')
         log_message(f'Teléfono (sender): {sender}', 'INFO')
         execute_query("""
-            INSERT INTO clientes_whatsapp (nombre, telefono, id_restaurante, es_temporal,id_sede)
+            INSERT INTO clientes_whatsapp (nombre, telefono, id_restaurante, es_temporal, id_sede)
             VALUES (%s, %s, %s, %s, %s)
-            ON CONFLICT (telefono)
+            ON CONFLICT (telefono, id_restaurante)
             DO UPDATE SET 
                 nombre = EXCLUDED.nombre,
                 es_temporal = EXCLUDED.es_temporal,
-                id_restaurante = EXCLUDED.id_restaurante,
                 id_sede = EXCLUDED.id_sede;
         """, (nombre, sender, id_restaurante, es_temporal,id_sede))
 
@@ -313,7 +313,7 @@ def guardar_intencion_futura(telefono: str, intencion_futura: str, observaciones
                 observaciones,
                 mensaje_chatbot,
                 mensaje_usuario,
-                json.dumps(datos_promocion, ensure_ascii=False)
+                None
             )
         )
         log_message(f"Intención futura guardada/actualizada para {telefono}: {intencion_futura}", "INFO")
@@ -406,8 +406,8 @@ def guardar_pedido_completo(sender: str, pedido_dict: dict, es_temporal: bool = 
     try:
         """ Guarda un pedido completo en la BD y retorna: { "idpedido": X, "codigo_unico": "P-00015" } """
         # ------------------------------- # 1. Obtener id_whatsapp # -------------------------------
-        q_idw = "SELECT * FROM clientes_whatsapp WHERE telefono = %s"
-        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        q_idw = "SELECT * FROM clientes_whatsapp WHERE telefono = %s AND id_restaurante = %s"
+        res_idw = execute_query(q_idw, (sender,ID_RESTAURANTE,), fetchone=True)
         log_message(f"[GuardarPedidoCompleto] Resultado consulta id_whatsapp: {res_idw}", "INFO")
         id_whatsapp = res_idw[0] if res_idw else None
         idsede = res_idw[11] if res_idw else 17
@@ -616,11 +616,11 @@ def marcar_estemporal_true_en_pedidos(sender,codigo_unico) -> dict:
                 "idpedido": res[0],
                 "cliente_nombre": sender,  # aquí puedes reemplazar por el nombre real si lo tienes
                 "idsede": get_id_sede(),
-                "idcliente": os.environ.get("ID_RESTAURANTE", "5")
+                "idcliente": ID_RESTAURANTE
             }
             try:
                 requests.post(
-                    "https://back-pagina-g0f6axc4cjfjg4e2.eastus2-01.azurewebsites.net/api/webhook_nuevo_pedido",
+                    "https://domiciliosback-bsabb6ckhxcffjft.canadacentral-01.azurewebsites.net/api/webhook_nuevo_pedido",
                     json=payload,
                     timeout=5
                 )
@@ -735,8 +735,8 @@ def send_pdf_response(sender: str):
     ]
     results = []
     try:
-        ACCESS_TOKEN = os.environ["WABA_TOKEN"]
-        PHONE_ID = os.environ["PHONE_NUMBER_ID"]
+        ACCESS_TOKEN = os.getenv("WABA_TOKEN")
+        PHONE_ID = os.getenv("PHONE_NUMBER_ID")
         url = f"https://graph.facebook.com/v20.0/{PHONE_ID}/messages"
         headers = {
             "Content-Type": "application/json",
@@ -956,8 +956,8 @@ def obtener_pedido_pendiente_reciente(sender: str) -> dict:
     """
     try:
         # 1. Obtener id_whatsapp
-        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s"
-        res_idw = execute_query(q_idw, (sender,), fetchone=True)
+        q_idw = "SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s and id_restaurante = %s"
+        res_idw = execute_query(q_idw, (sender,ID_RESTAURANTE), fetchone=True)
         id_whatsapp = res_idw[0] if res_idw else None
 
         if id_whatsapp is None:
@@ -1054,7 +1054,7 @@ def actualizar_costos_y_tiempos_pedido(
         return {
             "actualizado": True,
             "idpedido": res[0],
-            "total_final": float(res[1])
+            "total_final": float(res[1] or 0) 
         }
 
     except Exception as e:
@@ -1495,7 +1495,7 @@ def send_template_response(to: str, template_name: str,variables: list , languag
         )
 
         token: str = api_whatsapp()
-        PHONE_ID: str = os.environ["PHONE_NUMBER_ID"]
+        PHONE_ID: str = os.getenv("PHONE_NUMBER_ID")
         whatsapp: WhatsApp = WhatsApp(token, PHONE_ID)
 
         # Construir components para variables
@@ -1544,7 +1544,7 @@ def send_template_response_util(
     try:
 
         token = api_whatsapp()
-        phone_id = os.environ["PHONE_NUMBER_ID"]
+        phone_id = os.getenv("PHONE_NUMBER_ID")
 
         whatsapp = WhatsApp(token, phone_id)
 

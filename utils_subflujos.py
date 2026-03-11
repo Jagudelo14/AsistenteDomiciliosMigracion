@@ -47,6 +47,9 @@ from utils_google import calcular_distancia_entre_sede_y_cliente, calcular_tiemp
 from utils_pagos import generar_link_pago, guardar_id_pago_en_db, validar_pago
 from utils_registration import validate_personal_data,save_personal_data_partial,check_and_mark_datos_personales
 # --- BANCOS DE MENSAJES PREDETERMINADOS --- #
+
+ID_RESTAURANTE: str = os.getenv("ID_RESTAURANTE", "5")
+
 respuestas_no_relacionadas = [
     {
         "mensaje": "Lo siento {nombre} 😅, no tengo información sobre eso. Pero si quieres, puedo mostrarte nuestro menú para que veas todas las opciones disponibles.",
@@ -90,9 +93,10 @@ respuestas_no_relacionadas = [
 def subflujo_saludo_bienvenida(nombre: str, nombre_local: str, sender: str, mensaje_usuario: str) -> str:
     """Genera un mensaje de bienvenida personalizado."""
     try:
-        respuesta_gpt: dict = saludo_dynamic(mensaje_usuario, nombre, nombre_local)
-        mensaje = respuesta_gpt.get("mensaje")
-        intencion = respuesta_gpt.get("intencion", "consulta_menu")
+        #respuesta_gpt: dict = saludo_dynamic(mensaje_usuario, nombre, nombre_local)
+        mensaje = f"Hola {nombre}, te damos la bienvenida a {nombre_local}; recuerda enviar un solo mensaje 😊"
+        #mensaje = respuesta_gpt.get("mensaje")
+        intencion = "saludo"
         guardar_intencion_futura(sender, intencion)
         return mensaje
     except Exception as e:
@@ -454,12 +458,12 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         mensaje=extraer_ultimo_mensaje(respuesta_usuario)
         codigo_unico: str = obtener_intencion_futura_observaciones(sender)
         medio_pago_real: str = mapear_modo_pago(mensaje)
-        if medio_pago_real != "desconocido" or "":
+        if medio_pago_real and medio_pago_real != "desconocido":
             query="""UPDATE pedidos
                         SET metodo_pago = %s
                         WHERE codigo_unico = %s;"""
             result= execute_query(query,(medio_pago_real,codigo_unico))
-        if not validate_personal_data(sender,os.environ.get("ID_RESTAURANTE", "5")):
+        if not validate_personal_data(sender,ID_RESTAURANTE):
             datos = extraer_info_personal(mensaje)
             # datos es dict con keys: tipo_documento, numero_documento, email
             tipo_doc = datos.get("tipo_documento")
@@ -467,14 +471,14 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
             email = datos.get("email")
             # Guardar solo los campos que traigan información útil
             try:
-                save_personal_data_partial(sender, os.environ.get("ID_RESTAURANTE", "5"), tipo_doc, n_doc, email)
+                save_personal_data_partial(sender, ID_RESTAURANTE, tipo_doc, n_doc, email)
             except Exception as e:
                 logging.error(f"Error guardando datos parciales: {e}")
                 log_message(f"Error guardando datos parciales: {e}", "ERROR")
                 send_text_response(sender, ", ocurrió un error al guardar tus datos. Enviamelos de nuevo escritos de otra manera por favor")
                 return 
             # Verificar si ahora la fila tiene los 4 campos completos
-            missing = check_and_mark_datos_personales(sender, os.environ.get("ID_RESTAURANTE", "5"))
+            missing = check_and_mark_datos_personales(sender, ID_RESTAURANTE)
             if missing:
                 # mapear nombres amigables
                 friendly = {"Tipo_Doc": "tipo de documento", "N_Doc": "número de documento", "email": "correo electrónico"}
@@ -496,13 +500,19 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         total_final = dict_registro_temp.get("total_final", "N/A")
         #total_domicilios = dict_registro_temp.get("total_domicilio", "N/A")
         if medio_pago_real =="efectivo":
-            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_final} el cual se divide en {total_domicilios} del domicilio y {total_productos} de los productos y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            if total_domicilios == 0:
+                mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). El costo total de tus productos es de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            else:
+                mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_final} el cual se divide en {total_domicilios} del domicilio y {total_productos} de los productos y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
             return
         elif medio_pago_real == "datafono":
-            mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar en efectivo al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_final} el cual se divide en {total_domicilios} del domicilio y {total_productos} de los productos y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            if total_domicilios == 0:
+                mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar con datafono al momento de la entrega o recogida de tu pedido ({codigo_unico}). El costo total de tus productos es de {total_productos} y tardara {tiempo}. ¡Gracias por tu preferencia!"
+            else:
+                mensaje_pago: str = f"¡Perfecto {nombre_cliente}! Has seleccionado pagar con datafono al momento de la entrega o recogida de tu pedido ({codigo_unico}). Por favor, el costo de tu domicilio es de {total_final} el cual se divide en {total_domicilios} del domicilio y {total_productos} de los productos y tardara {tiempo}. ¡Gracias por tu preferencia!"
             send_text_response(sender, mensaje_pago)
             borrar_intencion_futura(sender)
             marcar_estemporal_true_en_pedidos(sender,codigo_unico)
@@ -537,6 +547,9 @@ def subflujo_medio_pago(sender: str, nombre_cliente: str, respuesta_usuario: str
         if medio_pago_real == "desconocido" or "":
             log_message(f"Medio de pago no reconocido '{respuesta_usuario}' seleccionado por {nombre_cliente} ({sender}) para el pedido {codigo_unico}.", "WARN")
             send_text_response(sender, f"Lo siento {nombre_cliente}, no reconocí el medio de pago que mencionaste. Por favor repitemelo, recuerda que solo aceptamos efectivo o datafono ambos contraentrega")
+        elif medio_pago_real == "Pendiente":
+            log_message(f"Medio de pago pendiente de clasificación para {nombre_cliente} ({sender}) con respuesta '{respuesta_usuario}' para el pedido {codigo_unico}.", "INFO")
+            send_text_response(sender, f"{nombre_cliente}, no estoy seguro de qué medio de pago prefieres. Por favor indícame si pagarás en efectivo o con datafono al momento de la entrega o recogida.")
     except Exception as e:
         log_message(f'Error en <SubflujoMedioPago>: {e}.', 'ERROR')
         raise e
@@ -745,7 +758,7 @@ def subflujo_modificacion_pedido(sender: str, nombre_cliente: str, pregunta_usua
 def subflujo_confirmar_direccion(sender: str, nombre_cliente: str) -> None:
     try:
         """Maneja la recepción de la dirección para el domicilio."""
-        id_restaurante = os.environ.get("ID_RESTAURANTE", "5")
+        id_restaurante = ID_RESTAURANTE
         datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, id_restaurante)
         latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
         longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
@@ -838,11 +851,12 @@ def generar_pago_domicilio(sender: str, nombre_cliente: str, codigo_unico: str, 
 def subflujo_recoger_restaurante(sender: str, nombre_cliente: str):
     try:
         log_message("Empieza subflujo recoger restaurante", "INFO")
-        mensaje_sede: str = generar_mensaje_seleccion_sede(nombre_cliente,sender)
-        send_text_response(sender, mensaje_sede)
+        #mensaje_sede: str = generar_mensaje_seleccion_sede(nombre_cliente,sender)
+        #send_text_response(sender, mensaje_sede)
         codigo_unico = obtener_intencion_futura_observaciones(sender)
         actualizar_medio_entrega(sender, codigo_unico, "recoger")
         guardar_intencion_futura(sender, "eleccion_sede", codigo_unico)
+        subflujo_eleccion_sede(sender, nombre_cliente, "Caobos")
     except Exception as e:
         log_message(f"Error en subflujo recoger restaurante {e}", "ERROR") 
         raise e
@@ -875,7 +889,7 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
             send_text_response(sender, "Disculpa, la sede que escribiste no existe, ¿puedes volver a escribir con mayor claridad?")
             return
         id_sede = datos_mapeo_sede.get("id_sede")
-        #id_restaurante = os.environ.get("ID_RESTAURANTE", "5")
+        #id_restaurante = ID_RESTAURANTE
         #latitud_cliente = datos_mapeo_sede.get("latitud_sede")
         #longitud_cliente = datos_mapeo_sede.get("longitud_sede")
         direccion_cliente = datos_mapeo_sede.get("direccion_sede")
@@ -884,7 +898,7 @@ def subflujo_eleccion_sede(sender: str, nombre_cliente: str, texto_cliente):
         tiempo_pedido: str = formatear_tiempo_entrega(duracion)
         datos_actualizados: dict = actualizar_costos_y_tiempos_pedido(sender, codigo_unico, 0, tiempo_pedido, 0)
         if not datos_actualizados.get("actualizado"):
-            send_text_response(sender, "Lo siento, no pude confirmar tu pedido")
+            subflujo_preguntas_generales(sender,texto_cliente,nombre_cliente)
             return
         valor_ultimo = datos_actualizados.get("total_final")
         mensaje = generar_mensaje_recogida_invitar_pago(
@@ -953,14 +967,12 @@ def subflujo_tiempo_recogida(sender: str, respuesta_usuario: str) -> None:
         query: str = """
         UPDATE pedidos
         SET tiempo_estimado = %s
-        WHERE id_whatsapp = (SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s)
+        WHERE id_whatsapp = (SELECT id_whatsapp FROM clientes_whatsapp WHERE telefono = %s and id_restaurante = %s)
         AND estado = 'pendiente'
         """
-        params: tuple = (tiempo_estimado, sender) 
+        params: tuple = (tiempo_estimado, sender, ID_RESTAURANTE) 
 
         execute_query(query, params)
-
-
 
     except Exception as e:
         log_message(f'Error en <SubflujoTiempoRecogida>: {e}.', 'ERROR')
@@ -980,8 +992,8 @@ def orquestador_subflujos(
     """Activa el subflujo correspondiente según la intención detectada."""
     try:
         set_id_sede(sender)
-        if not verify_hour_atettion(sender,id_sede=get_id_sede()):
-            return None
+        #if not verify_hour_atettion(sender,id_sede=get_id_sede()):
+        #    return None
         #if not verify_hour_atettion_v2(sender):
         #    return None
         log_message(f"Empieza <OrquestadorSubflujos> con sender {sender} y tipo {clasificacion_mensaje}", "INFO")
@@ -1059,7 +1071,7 @@ def orquestador_subflujos(
         elif clasificacion_mensaje == "confirmacion_modificacion_pedido":
             send_text_response(sender, "Escribe lo que quieras modificar de tu pedido de manera clara y específica.")
         elif clasificacion_mensaje == "domicilio":
-            id_restaurante = os.environ.get("ID_RESTAURANTE", "5")
+            id_restaurante = ID_RESTAURANTE
             # Si ya tiene dirección registrada, recuperarla y mostrarla
             if validate_direction_first_time(sender, id_restaurante=id_restaurante):
                 direccion = obtener_direccion(sender, id_restaurante)
@@ -1131,25 +1143,25 @@ def orquestador_subflujos(
                     send_text_response(sender, "Comparteme la dirección a actualizar por favor")
                     return
                 if direccion != "No presente":
-                    geocode_and_assign(sender, direccion, os.environ.get("ID_RESTAURANTE", "5"))
-                    datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, os.environ.get("ID_RESTAURANTE", "5"))
+                    geocode_and_assign(sender, direccion, ID_RESTAURANTE)
+                    datos_cliente_temp: dict = obtener_datos_cliente_por_telefono(sender, ID_RESTAURANTE)
                     latitud_cliente: float = datos_cliente_temp.get("latitud", 0.0)
                     longitud_cliente: float = datos_cliente_temp.get("longitud", 0.0)
-                    resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,os.environ.get("ID_RESTAURANTE", "5"), nombre_cliente)
+                    resultado=calcular_distancia_entre_sede_y_cliente(sender,latitud_cliente, longitud_cliente,ID_RESTAURANTE, nombre_cliente)
                     if not resultado:
                         send_text_response(sender, f"Lo siento {nombre_cliente}, pero tu dirección está fuera de nuestra área de cobertura. puedes recogerla en el restaurante o enviarnos otra dirección no olvides incluir tu barrio y cualquier referencia.")
                         execute_query("""
                                                 UPDATE clientes_whatsapp
                                                 SET direccion_google = %s
                                                 WHERE telefono = %s AND id_restaurante = %s;
-                                                """, (None, sender, os.environ.get("ID_RESTAURANTE", "5")))
+                                                """, (None, sender, ID_RESTAURANTE))
                         return
                 if observaciones != "":
                     execute_query("""
                                     UPDATE clientes_whatsapp
                                     SET observaciones_dir = %s
                                     WHERE telefono = %s AND id_restaurante = %s;
-                                    """, (observaciones, sender, os.environ.get("ID_RESTAURANTE", "5")))
+                                    """, (observaciones, sender, ID_RESTAURANTE))
                     log_message(f'observacones creadas en la base .{observaciones}', 'INFO')
                 mensaje = direccion_bd(nombre_cliente, direccion,sender)
                 send_text_response(sender, mensaje)
